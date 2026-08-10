@@ -155,12 +155,14 @@ impl App {
                 return true;
             }
         }
-        if let Some(active) = self.config.providers.active() {
-            let base = active.base.trim();
-            if !base.is_empty()
-                && !self
-                    .remote_catalog
-                    .is_fresh(active.api_style, base, active.token.trim())
+        for remote in &self.config.providers.items {
+            let base = remote.base.trim();
+            if base.is_empty() {
+                continue;
+            }
+            if !self
+                .remote_catalog
+                .is_fresh(remote.api_style, base, remote.token.trim())
             {
                 return true;
             }
@@ -168,7 +170,7 @@ impl App {
         false
     }
 
-    pub fn provider_warm_targets(&self) -> (Vec<WarmTarget>, Option<WarmTarget>) {
+    pub fn provider_warm_targets(&self) -> (Vec<WarmTarget>, Vec<WarmTarget>) {
         let health_targets = self
             .config
             .providers
@@ -189,37 +191,68 @@ impl App {
                 )
             })
             .collect();
-        let catalog_target = self.config.providers.active().and_then(|active| {
-            let base = active.base.trim();
-            if base.is_empty()
-                || self
-                    .remote_catalog
-                    .is_fresh(active.api_style, base, active.token.trim())
-            {
-                None
-            } else {
-                Some((
-                    active.api_style,
-                    base.to_string(),
-                    active.token.trim().to_string(),
-                ))
-            }
-        });
-        (health_targets, catalog_target)
+        let catalog_targets = self
+            .config
+            .providers
+            .items
+            .iter()
+            .filter(|remote| {
+                let base = remote.base.trim();
+                !base.is_empty()
+                    && !self
+                        .remote_catalog
+                        .is_fresh(remote.api_style, base, remote.token.trim())
+            })
+            .map(|remote| {
+                (
+                    remote.api_style,
+                    remote.base.trim().to_string(),
+                    remote.token.trim().to_string(),
+                )
+            })
+            .collect();
+        (health_targets, catalog_targets)
     }
 
     pub fn remote_model_catalog_cached(&self) -> Vec<RemoteModelOption> {
         self.remote_model_catalog_peek().unwrap_or_default()
     }
 
+    /// Merged model catalogs from every saved provider, stamped with provider badges.
+    /// `None` means no provider has been probed yet.
     pub fn remote_model_catalog_peek(&self) -> Option<Vec<RemoteModelOption>> {
-        let remote = self.config.providers.active()?;
-        let base = remote.base.trim();
-        if base.is_empty() {
+        let mut merged = Vec::new();
+        let mut any_known = false;
+        for provider in &self.config.providers.items {
+            let base = provider.base.trim();
+            if base.is_empty() {
+                continue;
+            }
+            let Some(catalog) =
+                self.remote_catalog
+                    .peek(provider.api_style, base, provider.token.trim())
+            else {
+                continue;
+            };
+            any_known = true;
+            for mut opt in catalog {
+                opt.provider_id = provider.id.clone();
+                opt.provider_name = provider.name.clone();
+                // Include provider id so the same model on two providers stays distinct.
+                opt.id = format!("remote|{}|{}|{}", provider.id, opt.base, opt.model);
+                merged.push(opt);
+            }
+        }
+        if !any_known {
             return None;
         }
-        self.remote_catalog
-            .peek(remote.api_style, base, remote.token.trim())
+        merged.sort_by(|a, b| {
+            a.provider_name
+                .cmp(&b.provider_name)
+                .then(a.model.cmp(&b.model))
+                .then(a.base.cmp(&b.base))
+        });
+        Some(merged)
     }
 
     pub fn public_providers(&self) -> Vec<ProviderPublic> {
@@ -584,12 +617,12 @@ impl App {
     }
 
     pub fn warm_provider_caches(&self) {
-        let (health_targets, catalog_target) = self.provider_warm_targets();
+        let (health_targets, catalog_targets) = self.provider_warm_targets();
         for (style, base, token) in health_targets {
             let health = probe_provider_health(&base, &token, style);
             self.store_remote_health(style, &base, &token, health);
         }
-        if let Some((style, base, token)) = catalog_target {
+        for (style, base, token) in catalog_targets {
             let catalog = probe_provider_catalog(&base, &token, style, &[]);
             self.store_remote_catalog(style, &base, &token, catalog);
         }

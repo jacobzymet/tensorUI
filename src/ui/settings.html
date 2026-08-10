@@ -798,7 +798,7 @@
             <div class="section-head">
               <div>
                 <h2>Providers</h2>
-                <p class="section-lede">Linked LLM APIs (OpenAI-compatible or Anthropic Messages). Chat uses the active provider for completions and model lists.</p>
+                <p class="section-lede">Linked LLM APIs (OpenAI-compatible or Anthropic Messages). Chat lists models from every saved provider; Activate marks the default when a request has no model selected.</p>
               </div>
             </div>
             <div class="panel">
@@ -1374,7 +1374,7 @@
         if (!providerFormHint.dataset.sticky) {
           setFormHint(
             providers.length
-              ? 'Saved providers appear above. Activate one for Chat to use it.'
+              ? 'Saved providers appear above. Models from all of them show in Chat; Activate sets the default fallback.'
               : 'Base URL should end in /v1. API style is auto-detected on save.'
           );
         }

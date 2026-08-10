@@ -22,8 +22,8 @@ use crate::{
     chat,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
-        normalize_openai_base, probe_provider_catalog, probe_provider_health, probe_provider_style,
-        provider_base_same_host,
+        find_provider_for_base, normalize_openai_base, probe_provider_catalog,
+        probe_provider_health, probe_provider_style,
     },
     store::{self, StorageMode},
     system,
@@ -63,7 +63,7 @@ fn schedule_provider_cache_warm(app: SharedApp) {
         let _clear = ClearInFlight;
 
         // Snapshot stale targets under a short lock; probe without holding App.
-        let (health_targets, catalog_target) = match app.lock() {
+        let (health_targets, catalog_targets) = match app.lock() {
             Ok(guard) => guard.provider_warm_targets(),
             Err(_) => return,
         };
@@ -75,16 +75,19 @@ fn schedule_provider_cache_warm(app: SharedApp) {
                 (style, base, token, health)
             })
             .collect();
-        let catalog_result = catalog_target.map(|(style, base, token)| {
-            let catalog = probe_provider_catalog(&base, &token, style, &[]);
-            (style, base, token, catalog)
-        });
+        let catalog_results: Vec<_> = catalog_targets
+            .into_iter()
+            .map(|(style, base, token)| {
+                let catalog = probe_provider_catalog(&base, &token, style, &[]);
+                (style, base, token, catalog)
+            })
+            .collect();
 
         if let Ok(guard) = app.lock() {
             for (style, base, token, health) in health_results {
                 guard.store_remote_health(style, &base, &token, health);
             }
-            if let Some((style, base, token, catalog)) = catalog_result {
+            for (style, base, token, catalog) in catalog_results {
                 guard.store_remote_catalog(style, &base, &token, catalog);
             }
         }
@@ -318,21 +321,11 @@ async fn chat_title(
         let app = app.lock().map_err(|_| ApiError::lock())?;
         let providers = &app.config.providers;
         if let Some(requested) = body.remote_base.as_deref() {
-            let Some(linked) = providers
-                .items
-                .iter()
-                .find(|p| provider_base_same_host(&p.base, requested))
-                .or_else(|| providers.active())
-            else {
+            let Some(linked) = find_provider_for_base(&providers.items, requested) else {
                 return Err(ApiError::bad_request(
                     "No provider is configured for that model.",
                 ));
             };
-            if !provider_base_same_host(&linked.base, requested) {
-                return Err(ApiError::bad_request(
-                    "Model must be on a configured provider.",
-                ));
-            }
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
             (api_base, linked.token.clone(), linked.api_style)
@@ -372,21 +365,11 @@ async fn chat_completions(
         let user_skills = app.enabled_user_skills();
         let providers = &app.config.providers;
         let remote = if let Some(requested) = remote_base_override.as_deref() {
-            let Some(linked) = providers
-                .items
-                .iter()
-                .find(|p| provider_base_same_host(&p.base, requested))
-                .or_else(|| providers.active())
-            else {
+            let Some(linked) = find_provider_for_base(&providers.items, requested) else {
                 return Err(ApiError::bad_request(
                     "No provider is configured for that model.",
                 ));
             };
-            if !provider_base_same_host(&linked.base, requested) {
-                return Err(ApiError::bad_request(
-                    "Model must be on a configured provider.",
-                ));
-            }
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
             Some((api_base, linked.token.clone(), linked.api_style))
@@ -979,7 +962,7 @@ impl NetworkSummary {
         let remotes = app.public_providers();
         let remote_saved = !providers.items.is_empty();
         let active = providers.active();
-        let via_remote = active.is_some();
+        let via_remote = remote_saved;
         let remote_label = active
             .map(|remote| {
                 remote
@@ -1004,10 +987,7 @@ impl NetworkSummary {
             Vec::new()
         };
         // Never-probed ≠ unreachable. Only show failure after a real probe result.
-        let remote_checking = remote_saved
-            && active.is_some_and(|remote| !remote.base.trim().is_empty())
-            && health.is_none()
-            && !catalog_known;
+        let remote_checking = remote_saved && health.is_none() && !catalog_known;
         let remote_ok = health.as_ref().is_some_and(|h| h.ok) || !remote_models.is_empty();
         let remote_model = remote_models
             .first()

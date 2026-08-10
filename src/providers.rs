@@ -360,6 +360,10 @@ pub struct RemoteModelOption {
     pub ready: bool,
     pub label: String,
     pub thinking_supported: bool,
+    #[serde(default)]
+    pub provider_id: String,
+    #[serde(default)]
+    pub provider_name: String,
 }
 
 #[derive(Debug, Default)]
@@ -1125,6 +1129,8 @@ pub fn probe_provider_catalog(
                 ready: true,
                 label: model,
                 thinking_supported,
+                provider_id: String::new(),
+                provider_name: String::new(),
             });
         }
     }
@@ -1171,6 +1177,27 @@ pub fn provider_base_same_host(linked: &str, candidate: &str) -> bool {
         return false;
     };
     host_a.eq_ignore_ascii_case(&host_b)
+}
+
+/// Prefer an exact normalized base match, then same-host, for multi-provider catalogs.
+pub fn find_provider_for_base<'a>(
+    providers: &'a [Provider],
+    requested: &str,
+) -> Option<&'a Provider> {
+    providers
+        .iter()
+        .find(|p| {
+            normalize_openai_base(requested).is_some_and(|norm| {
+                normalize_openai_base(&p.base)
+                    .as_ref()
+                    .is_some_and(|base| base.eq_ignore_ascii_case(&norm))
+            })
+        })
+        .or_else(|| {
+            providers
+                .iter()
+                .find(|p| provider_base_same_host(&p.base, requested))
+        })
 }
 
 pub fn thinking_support_from_props(body: &str) -> bool {

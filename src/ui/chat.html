@@ -748,8 +748,8 @@
     .chat-model-menu {
       position: fixed;
       z-index: 200;
-      min-width: 14rem;
-      max-width: min(22rem, 90vw);
+      min-width: 16rem;
+      max-width: min(28rem, 92vw);
       max-height: min(16rem, 50vh);
       overflow: auto;
       padding: 0.3rem;
@@ -763,7 +763,10 @@
     .chat-model-menu.is-hidden { display: none !important; }
     .chat-model-option {
       width: 100%;
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.55rem;
       text-align: left;
       border: 0;
       background: transparent;
@@ -774,16 +777,26 @@
       font: inherit;
       font-size: var(--text-xs);
       font-weight: 600;
+      pointer-events: auto;
+    }
+    .chat-model-option-name {
+      flex: 1 1 auto;
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      pointer-events: auto;
+    }
+    .chat-model-option .chat-model-origin-pill {
+      max-width: 6.5rem;
     }
     .chat-model-option:hover,
     .chat-model-option.is-active {
       background: color-mix(in oklch, var(--color-accent) 14%, var(--color-paper));
     }
     .chat-model-option.is-selected {
+      color: var(--color-accent);
+    }
+    .chat-model-option.is-selected .chat-model-option-name {
       color: var(--color-accent);
     }
     .visually-hidden {
@@ -6171,7 +6184,10 @@
         localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
         const selected = modelMenuOptions.find((o) => o.value === selectedChatModel);
         chatModelSelect.textContent = selected ? selected.label : 'Model';
-        chatModelSelect.title = selected ? selected.label : '';
+        chatModelSelect.title = selected
+          ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
+          : '';
+        syncModelOriginPill(true, selected && selected.provider);
         chatModelMenu.querySelectorAll('.chat-model-option').forEach((btn) => {
           const isSelected = btn.getAttribute('data-value') === selectedChatModel;
           btn.classList.toggle('is-selected', isSelected);
@@ -6186,10 +6202,22 @@
       if (typeof repaintStarfield === 'function') repaintStarfield();
     }
 
+    function escapeModelAttr(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+    }
+
+    function escapeModelText(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;');
+    }
+
     function syncModelSelector(data) {
       const network = data.network || {};
       const remoteModels = network.remote_models || [];
-      const providerName = network.remote_name || network.remote_label || 'provider';
       const wasHidden = chatModelSelectWrap.classList.contains('is-hidden');
       const menuOpen = modelMenuIsOpen();
 
@@ -6207,6 +6235,8 @@
       const remoteOptions = remoteModels.map((m) => ({
         value: m.id,
         label: m.model || m.label,
+        provider: (m.provider_name || '').trim(),
+        providerId: (m.provider_id || '').trim(),
         ready: !!m.ready,
         thinking: !!m.thinking_supported,
       }));
@@ -6214,8 +6244,16 @@
 
       const allValues = remoteOptions.map((o) => o.value);
       if (!allValues.includes(selectedChatModel)) {
-        if (selectedRemoteModelId && allValues.includes(selectedRemoteModelId)) {
-          selectedChatModel = selectedRemoteModelId;
+        // Migrate older localStorage ids (remote|base|model) by matching model+base suffix.
+        const legacy = selectedRemoteModelId || selectedChatModel;
+        const migrated = remoteOptions.find((o) => {
+          if (!legacy) return false;
+          if (o.value === legacy) return true;
+          return o.value.endsWith('|' + legacy.replace(/^remote\|/, ''))
+            || legacy.endsWith('|' + (o.label || ''));
+        });
+        if (migrated) {
+          selectedChatModel = migrated.value;
         } else if (!menuOpen) {
           selectedChatModel = remoteOptions[0].value;
         }
@@ -6223,30 +6261,37 @@
       }
 
       const signature = [
-        providerName,
         selectedChatModel,
-        ...remoteOptions.map((o) => o.value + '|' + o.label),
+        ...remoteOptions.map((o) => o.value + '|' + o.label + '|' + o.provider),
       ].join(';');
       // Avoid nuking option nodes under the cursor while the menu is open
       // (state poll runs every 2s and was cancelling clicks).
       if (!menuOpen && chatModelMenu.dataset.signature !== signature) {
         chatModelMenu.dataset.signature = signature;
-        chatModelMenu.innerHTML = remoteOptions.map((o) =>
-          '<button type="button" class="chat-model-option'
-          + (o.value === selectedChatModel ? ' is-selected' : '')
-          + '" role="option" data-value="' + String(o.value).replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"'
-          + ' aria-selected="' + (o.value === selectedChatModel ? 'true' : 'false') + '">'
-          + String(o.label).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</button>'
-        ).join('');
+        chatModelMenu.innerHTML = remoteOptions.map((o) => {
+          const badge = o.provider
+            ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(o.provider) + '">'
+              + escapeModelText(o.provider) + '</span>'
+            : '';
+          return '<button type="button" class="chat-model-option'
+            + (o.value === selectedChatModel ? ' is-selected' : '')
+            + '" role="option" data-value="' + escapeModelAttr(o.value) + '"'
+            + ' aria-selected="' + (o.value === selectedChatModel ? 'true' : 'false') + '">'
+            + '<span class="chat-model-option-name">' + escapeModelText(o.label) + '</span>'
+            + badge
+            + '</button>';
+        }).join('');
       }
       const selected = remoteOptions.find((o) => o.value === selectedChatModel);
       if (!menuOpen) {
         chatModelSelect.textContent = selected ? selected.label : 'Model';
-        chatModelSelect.title = selected ? selected.label : '';
+        chatModelSelect.title = selected
+          ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
+          : '';
       }
       selectedRemoteModelId = selectedChatModel;
       localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
-      syncModelOriginPill(true, providerName);
+      syncModelOriginPill(true, selected && selected.provider);
       if (menuOpen) positionModelMenu();
     }
 
@@ -6268,7 +6313,10 @@
         || (!!network.remote_saved && !remoteOk && !network.remote_kind && !(network.remote_models || []).length);
       const remoteSelected = selectedRemoteModel(data);
       const modelName = remoteSelected?.model || network.remote_model || 'remote model';
-      const providerLabel = network.remote_name || network.remote_label || 'provider';
+      const providerLabel = remoteSelected?.provider_name
+        || network.remote_name
+        || network.remote_label
+        || 'provider';
       const connected = !!(remoteSelected?.ready || remoteOk);
       serverReady = connected;
 
