@@ -218,7 +218,12 @@
     .status-downloading, .status-starting, .status-checking { color: var(--color-accent); border-color: color-mix(in oklch, var(--color-accent) 40%, var(--color-rule)); }
     .status-stopped { color: var(--color-muted); }
 
-    .chat-shell { display: flex; height: 100vh; overflow: hidden; }
+    .chat-shell {
+      --chat-topbar-h: 2.75rem;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
 
     .chat-sidebar {
       flex: 0 0 var(--sidebar-w);
@@ -274,25 +279,27 @@
       height: 1.05rem;
     }
     .sidebar-expand-fab {
+      --sidebar-fab-size: 2rem;
       display: none;
       position: fixed;
-      top: 0.65rem;
+      /* Vertically center in the topbar so the control doesn't sit on the divider. */
+      top: calc((var(--chat-topbar-h) - var(--sidebar-fab-size)) / 2);
       left: 0.65rem;
       z-index: 45;
-      width: 2.25rem;
-      height: 2.25rem;
+      width: var(--sidebar-fab-size);
+      height: var(--sidebar-fab-size);
       padding: 0;
       border-radius: 10px;
-      box-shadow: 0 8px 24px oklch(0% 0 0 / 0.28);
+      box-shadow: 0 4px 14px oklch(0% 0 0 / 0.18);
     }
     .sidebar-expand-fab svg {
-      width: 1.1rem;
-      height: 1.1rem;
+      width: 1.05rem;
+      height: 1.05rem;
     }
     .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: inline-flex; }
     /* Clear the fixed expand control so the session title isn't underneath it. */
     .chat-shell.sidebar-collapsed .chat-topbar {
-      padding-left: 3.5rem;
+      padding-left: 3.35rem;
     }
 
     .sidebar-actions {
@@ -610,8 +617,9 @@
       grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
       align-items: center;
       gap: 0.5rem;
-      min-height: 2.75rem;
-      padding: 0.4rem var(--space-md);
+      min-height: var(--chat-topbar-h);
+      height: var(--chat-topbar-h);
+      padding: 0 var(--space-md);
       border-bottom: 1px solid transparent;
       transition: border-color var(--dur-short) var(--ease-out);
       overflow: visible;
@@ -1926,6 +1934,104 @@
     .composer-hint.is-warn { color: var(--color-warn); }
     .composer-hint a { color: inherit; text-decoration: underline; }
     .composer-buttons { display: flex; gap: 0.35rem; flex: 0 0 auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .composer-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .composer-attachments.is-hidden { display: none; }
+    .composer-attach-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      max-width: 100%;
+      padding: 0.28rem 0.4rem 0.28rem 0.35rem;
+      border: 1px solid var(--color-rule-2);
+      border-radius: 10px;
+      background: color-mix(in oklch, var(--color-paper) 70%, var(--color-paper-2));
+      font-size: var(--text-xs);
+      color: var(--color-ink-2);
+    }
+    .composer-attach-chip img {
+      width: 1.55rem;
+      height: 1.55rem;
+      object-fit: cover;
+      border-radius: 6px;
+      background: var(--color-paper);
+    }
+    .composer-attach-chip .attach-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 12rem;
+    }
+    .composer-attach-chip .attach-remove {
+      border: none;
+      background: transparent;
+      color: var(--color-muted);
+      cursor: pointer;
+      font-size: 0.95rem;
+      line-height: 1;
+      padding: 0.1rem 0.2rem;
+      border-radius: 6px;
+    }
+    .composer-attach-chip .attach-remove:hover {
+      color: var(--color-danger);
+      background: color-mix(in oklch, var(--color-danger) 12%, transparent);
+    }
+    .btn-attach {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.1rem;
+      height: 2.1rem;
+      border: 1px solid var(--color-rule-2);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--color-ink-2);
+      cursor: pointer;
+      flex: 0 0 auto;
+      transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
+    }
+    .btn-attach svg { width: 1.05rem; height: 1.05rem; }
+    .btn-attach:hover:not(.is-disabled) {
+      color: var(--color-ink);
+      border-color: color-mix(in oklch, var(--color-accent) 40%, var(--color-rule-2));
+    }
+    .btn-attach.is-disabled {
+      opacity: 0.42;
+      cursor: pointer;
+      color: var(--color-muted);
+    }
+    .composer-card.is-dragover {
+      border-color: color-mix(in oklch, var(--color-accent) 60%, var(--color-rule-2));
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent);
+    }
+    .msg-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0 0 0.55rem;
+    }
+    .msg-attach-thumb {
+      display: block;
+      max-width: min(14rem, 100%);
+      max-height: 10rem;
+      border-radius: 10px;
+      border: 1px solid var(--color-rule);
+      object-fit: cover;
+    }
+    .msg-attach-file {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--color-rule);
+      background: color-mix(in oklch, var(--color-paper) 55%, transparent);
+      font-size: var(--text-xs);
+      color: var(--color-ink-2);
+    }
     .composer-think-wrap {
       position: relative;
       flex: 0 0 auto;
@@ -2611,8 +2717,8 @@
             <span>Chat</span>
           </a>
           <a href="/settings">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Settings</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+            <span>Server</span>
           </a>
         </div>
       </div>
@@ -2678,6 +2784,7 @@
   <div class="composer-card" id="composerCard">
     <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
     <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
+    <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
     <textarea
       id="composerInput"
       class="composer-textarea"
@@ -2688,6 +2795,10 @@
     <div class="composer-actions">
       <span class="composer-hint" id="composerHint">Shift+Enter for a new line · @ to use a tool once</span>
       <div class="composer-buttons">
+        <button type="button" class="btn-attach is-disabled" id="btnAttach" aria-label="Attach files" aria-disabled="true" title="Go to Preferences → Attachments to configure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        </button>
+        <input type="file" id="attachFileInput" multiple accept="image/*,.pdf,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.yml,.yaml,.toml,.ini,.log,.sql,.sh,.bat,.ps1,text/*" hidden>
         <div class="composer-think-wrap" id="composerThinkWrap">
           <button type="button" class="btn-think" id="btnThink" aria-haspopup="menu" aria-expanded="false" title="Thinking intensity — how hard reasoning models should think">
             <span id="btnThinkLabel">Think</span>
@@ -2746,6 +2857,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
           <span>Composer</span>
         </button>
+        <button type="button" class="settings-nav-btn" data-settings-pane="attachments">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          <span>Attachments</span>
+        </button>
         <button type="button" class="settings-nav-btn" data-settings-pane="data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
           <span>Local Data</span>
@@ -2779,7 +2894,7 @@
 
           <section class="settings-pane" data-settings-pane="appearance">
             <h2 class="settings-pane-title">Appearance</h2>
-            <p class="settings-pane-lede">Shared with Settings. Dark theme and the built-in type stack are the defaults.</p>
+            <p class="settings-pane-lede">Dark theme and the built-in type stack are the defaults.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Theme</h3>
               <div class="segmented" id="themeToggle" role="tablist" aria-label="Theme">
@@ -2840,7 +2955,7 @@
             <div class="settings-section">
               <h3 class="settings-section-title">Reset</h3>
               <button type="button" class="btn btn-ghost" id="btnAppearanceReset">Reset to defaults</button>
-              <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size for Chat and Settings.</p>
+              <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size for Chat and Server.</p>
             </div>
           </section>
 
@@ -2960,8 +3075,8 @@
 
           <section class="settings-pane" data-settings-pane="connectors">
             <h2 class="settings-pane-title">Connectors</h2>
-            <p class="settings-pane-lede">Manage OpenAI-compatible providers (base URL and API token) in Settings.</p>
-            <p style="margin:0"><a class="btn btn-primary" href="/settings">Open Settings</a></p>
+            <p class="settings-pane-lede">Manage OpenAI-compatible providers (base URL and API token) on the Server page.</p>
+            <p style="margin:0"><a class="btn btn-primary" href="/settings">Open Server</a></p>
           </section>
 
           <section class="settings-pane" data-settings-pane="composer">
@@ -2972,6 +3087,40 @@
                 <input type="checkbox" id="settingEnterSends" checked>
                 <span>Enter sends message <span style="color:var(--color-muted)">(Shift+Enter for a new line)</span></span>
               </label>
+            </div>
+          </section>
+
+          <section class="settings-pane" data-settings-pane="attachments">
+            <h2 class="settings-pane-title">Attachments</h2>
+            <p class="settings-pane-lede">File uploads in chat. By default the paperclip follows whether the selected model reports vision / multimodal support.</p>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Availability</h3>
+              <div class="settings-row">
+                <label class="field-label" for="settingAttachmentsMode">Attachments</label>
+                <select class="field-input" id="settingAttachmentsMode">
+                  <option value="auto">Auto — enable when the model supports files</option>
+                  <option value="on">Always enable paperclip</option>
+                  <option value="off">Disable attachments</option>
+                </select>
+              </div>
+              <p class="field-hint">Auto grays out the paperclip when the model has no vision metadata. Open this pane to force-enable or turn on text extraction.</p>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Text extraction fallback</h3>
+              <p class="field-hint" style="margin:0 0 0.65rem">Off by default. When on, PDFs and text files are parsed into markdown-ish text and sent in an <code>Attachment:</code> block. Useful for models without native file support, when the context window is large enough.</p>
+              <label class="field-check">
+                <input type="checkbox" id="settingAttachmentTextFallback">
+                <span>Extract PDFs / text files into the prompt</span>
+              </label>
+              <label class="field-check" style="margin-top:0.55rem">
+                <input type="checkbox" id="settingAttachmentOcr">
+                <span>OCR images when the model lacks vision <span style="color:var(--color-muted)">(loads Tesseract.js on demand)</span></span>
+              </label>
+              <div class="settings-row" style="margin-top:0.75rem">
+                <label class="field-label" for="settingAttachmentMaxChars">Max extracted characters</label>
+                <input class="field-input" id="settingAttachmentMaxChars" type="number" min="2000" max="500000" step="1000" value="48000">
+              </div>
+              <p class="field-hint">Text fallback stays off unless the model’s reported context is at least 16k tokens (or unknown). Oversized extracts are truncated.</p>
             </div>
           </section>
 
@@ -3141,6 +3290,10 @@
       max: 65536,
     };
     const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
+    const ATTACHMENTS_MODES = ['auto', 'on', 'off'];
+    const ATTACHMENT_MIN_CONTEXT = 16384;
+    const ATTACHMENT_MAX_FILES = 6;
+    const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
     const DEFAULT_SETTINGS = {
       name: '',
       about: '',
@@ -3152,6 +3305,10 @@
       webSearchDepth: 'auto', // auto | off | light | standard | deep
       skillFetchUrl: true,
       agentMode: false,
+      attachmentsMode: 'auto', // auto | on | off
+      attachmentTextFallback: false,
+      attachmentOcr: false,
+      attachmentMaxChars: 48000,
     };
 
     const chatShell = document.getElementById('chatShell');
@@ -3182,6 +3339,9 @@
     const btnSend = document.getElementById('btnSend');
     const btnStop = document.getElementById('btnStop');
     const btnAgent = document.getElementById('btnAgent');
+    const btnAttach = document.getElementById('btnAttach');
+    const attachFileInput = document.getElementById('attachFileInput');
+    const composerAttachmentsEl = document.getElementById('composerAttachments');
 
     let currentTheme = 'dark';
     let currentFonts = {
@@ -3681,6 +3841,7 @@
 
     function normalizeSettings(parsed) {
       if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
+      const maxChars = Number(parsed.attachmentMaxChars);
       return {
         name: typeof parsed.name === 'string' ? parsed.name : '',
         about: typeof parsed.about === 'string' ? parsed.about : '',
@@ -3698,6 +3859,14 @@
           : DEFAULT_SETTINGS.webSearchDepth,
         skillFetchUrl: parsed.skillFetchUrl !== false,
         agentMode: parsed.agentMode === true,
+        attachmentsMode: ATTACHMENTS_MODES.includes(parsed.attachmentsMode)
+          ? parsed.attachmentsMode
+          : DEFAULT_SETTINGS.attachmentsMode,
+        attachmentTextFallback: parsed.attachmentTextFallback === true,
+        attachmentOcr: parsed.attachmentOcr === true,
+        attachmentMaxChars: Number.isFinite(maxChars)
+          ? Math.min(500000, Math.max(2000, Math.round(maxChars)))
+          : DEFAULT_SETTINGS.attachmentMaxChars,
       };
     }
 
@@ -3724,6 +3893,7 @@
       updateGreeting();
       updateComposerHint();
       syncAgentButton();
+      syncAttachButton();
       if (!storageReady || diskEncryptionLocked()) return;
       if (browserStorage) {
         saveSettingsToLocal();
@@ -3757,7 +3927,11 @@
         && value.skillWebSearch === DEFAULT_SETTINGS.skillWebSearch
         && value.webSearchDepth === DEFAULT_SETTINGS.webSearchDepth
         && value.skillFetchUrl === DEFAULT_SETTINGS.skillFetchUrl
-        && value.agentMode === DEFAULT_SETTINGS.agentMode;
+        && value.agentMode === DEFAULT_SETTINGS.agentMode
+        && value.attachmentsMode === DEFAULT_SETTINGS.attachmentsMode
+        && value.attachmentTextFallback === DEFAULT_SETTINGS.attachmentTextFallback
+        && value.attachmentOcr === DEFAULT_SETTINGS.attachmentOcr
+        && value.attachmentMaxChars === DEFAULT_SETTINGS.attachmentMaxChars;
     }
 
     function refreshLocalDataPane() {
@@ -4194,6 +4368,366 @@
         );
     }
 
+    function formatUserMessageHtml(message) {
+      let text = typeof message === 'string' ? message : (message?.content || '');
+      const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+      if (attachments.length && text === '(attachment)') text = '';
+      const textHtml = formatUserHtml(text);
+      if (!attachments.length) return textHtml;
+      const chips = attachments.map((att) => {
+        if (att.kind === 'image' && att.previewUrl) {
+          return '<img class="msg-attach-thumb" src="' + escapeHtml(att.previewUrl)
+            + '" alt="' + escapeHtml(att.name || 'image') + '">';
+        }
+        return '<span class="msg-attach-file">' + escapeHtml(att.name || 'attachment') + '</span>';
+      }).join('');
+      const media = '<div class="msg-attachments">' + chips + '</div>';
+      return textHtml ? media + textHtml : media;
+    }
+
+    /** @type {Array<{id:string,name:string,mime:string,kind:'image'|'file',size:number,dataUrl:string,previewUrl:string}>} */
+    let pendingAttachments = [];
+    let attachmentsSupported = false;
+    let modelContextLength = null;
+    let tesseractLoading = null;
+
+    function selectedModelMeta() {
+      const remote = selectedRemoteModel(latestState);
+      return {
+        attachmentsSupported: !!(remote && remote.attachments_supported),
+        contextLength: remote && Number(remote.context_length) > 0
+          ? Number(remote.context_length)
+          : null,
+      };
+    }
+
+    function textFallbackContextOk() {
+      if (!settings.attachmentTextFallback) return false;
+      if (modelContextLength == null) return true;
+      return modelContextLength >= ATTACHMENT_MIN_CONTEXT;
+    }
+
+    function attachmentsUiEnabled() {
+      const mode = ATTACHMENTS_MODES.includes(settings.attachmentsMode)
+        ? settings.attachmentsMode
+        : 'auto';
+      if (mode === 'off') return false;
+      if (mode === 'on') return true;
+      return attachmentsSupported || textFallbackContextOk();
+    }
+
+    function attachDisabledReason() {
+      const mode = ATTACHMENTS_MODES.includes(settings.attachmentsMode)
+        ? settings.attachmentsMode
+        : 'auto';
+      if (mode === 'off') {
+        return 'Attachments disabled in Preferences → Attachments';
+      }
+      if (mode === 'auto' && !attachmentsSupported && !settings.attachmentTextFallback) {
+        return 'This model does not report attachment support. Go to Preferences → Attachments to configure.';
+      }
+      if (mode === 'auto' && !attachmentsSupported && settings.attachmentTextFallback && !textFallbackContextOk()) {
+        return 'Context window looks too small for text extraction. Go to Preferences → Attachments to configure.';
+      }
+      return '';
+    }
+
+    function syncAttachButton() {
+      const meta = selectedModelMeta();
+      attachmentsSupported = meta.attachmentsSupported;
+      modelContextLength = meta.contextLength;
+      const enabled = attachmentsUiEnabled() && serverReady && !diskEncryptionLocked();
+      const reason = attachDisabledReason();
+      if (!btnAttach) return;
+      btnAttach.classList.toggle('is-disabled', !enabled);
+      btnAttach.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      btnAttach.title = enabled
+        ? 'Attach files'
+        : (reason || 'Go to Preferences → Attachments to configure');
+      renderPendingAttachments();
+      updateSendEnabled();
+    }
+
+    function renderPendingAttachments() {
+      if (!composerAttachmentsEl) return;
+      if (!pendingAttachments.length) {
+        composerAttachmentsEl.innerHTML = '';
+        composerAttachmentsEl.classList.add('is-hidden');
+        return;
+      }
+      composerAttachmentsEl.classList.remove('is-hidden');
+      composerAttachmentsEl.innerHTML = pendingAttachments.map((att) => {
+        const thumb = att.kind === 'image' && att.previewUrl
+          ? '<img src="' + escapeHtml(att.previewUrl) + '" alt="">'
+          : '';
+        return '<div class="composer-attach-chip" data-attach-id="' + escapeHtml(att.id) + '">'
+          + thumb
+          + '<span class="attach-name" title="' + escapeHtml(att.name) + '">' + escapeHtml(att.name) + '</span>'
+          + '<button type="button" class="attach-remove" data-attach-remove="' + escapeHtml(att.id) + '" aria-label="Remove attachment">×</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    function clearPendingAttachments() {
+      pendingAttachments = [];
+      renderPendingAttachments();
+      updateSendEnabled();
+    }
+
+    function removePendingAttachment(id) {
+      pendingAttachments = pendingAttachments.filter((att) => att.id !== id);
+      renderPendingAttachments();
+      updateSendEnabled();
+    }
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read ' + (file.name || 'file')));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function isImageFile(file) {
+      return !!(file && file.type && file.type.startsWith('image/'));
+    }
+
+    function isExtractableFile(file) {
+      if (!file) return false;
+      if (isImageFile(file)) return false;
+      const name = String(file.name || '').toLowerCase();
+      const mime = String(file.type || '').toLowerCase();
+      if (mime.includes('pdf') || name.endsWith('.pdf')) return true;
+      if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') return true;
+      return /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|html?|css|js|tsx?|jsx|py|rs|go|java|c|cpp|h|hpp|ya?ml|toml|ini|log|sql|sh|bat|ps1)$/i.test(name);
+    }
+
+    async function addFilesToPending(fileList) {
+      if (!attachmentsUiEnabled()) {
+        composerHint.textContent = attachDisabledReason() || 'Attachments are disabled.';
+        composerHint.classList.add('is-warn');
+        return;
+      }
+      const files = [...(fileList || [])].filter(Boolean);
+      for (const file of files) {
+        if (pendingAttachments.length >= ATTACHMENT_MAX_FILES) {
+          composerHint.textContent = 'Attachment limit is ' + ATTACHMENT_MAX_FILES + ' files.';
+          composerHint.classList.add('is-warn');
+          break;
+        }
+        if (file.size > ATTACHMENT_MAX_BYTES) {
+          composerHint.textContent = (file.name || 'File') + ' is larger than 8 MB.';
+          composerHint.classList.add('is-warn');
+          continue;
+        }
+        if (!isImageFile(file) && !isExtractableFile(file)) {
+          composerHint.textContent = 'Unsupported file type: ' + (file.name || 'file');
+          composerHint.classList.add('is-warn');
+          continue;
+        }
+        if (!isImageFile(file) && !attachmentsSupported && !textFallbackContextOk()) {
+          composerHint.textContent = 'Enable text extraction in Preferences → Attachments for non-image files.';
+          composerHint.classList.add('is-warn');
+          continue;
+        }
+        if (isImageFile(file) && !attachmentsSupported && !(settings.attachmentTextFallback && settings.attachmentOcr && textFallbackContextOk())) {
+          composerHint.textContent = 'This model lacks vision. Enable OCR fallback in Preferences → Attachments, or pick a vision model.';
+          composerHint.classList.add('is-warn');
+          continue;
+        }
+        try {
+          const dataUrl = await fileToDataUrl(file);
+          pendingAttachments.push({
+            id: newId('a'),
+            name: file.name || (isImageFile(file) ? 'image' : 'attachment'),
+            mime: file.type || (isImageFile(file) ? 'image/png' : 'application/octet-stream'),
+            kind: isImageFile(file) ? 'image' : 'file',
+            size: file.size || 0,
+            dataUrl,
+            previewUrl: isImageFile(file) ? dataUrl : '',
+          });
+        } catch (error) {
+          composerHint.textContent = error?.message || 'Failed to read file';
+          composerHint.classList.add('is-warn');
+        }
+      }
+      renderPendingAttachments();
+      updateSendEnabled();
+      if (pendingAttachments.length && serverReady) {
+        updateComposerHint();
+      }
+    }
+
+    function truncateAttachmentText(text, maxChars) {
+      const value = String(text || '').trim();
+      if (!value) return '';
+      if (value.length <= maxChars) return value;
+      return value.slice(0, Math.max(0, maxChars - 80))
+        + '\n\n…[truncated ' + (value.length - maxChars + 80) + ' characters]';
+    }
+
+    async function extractAttachmentText(att) {
+      const response = await fetch('/api/attachments/extract', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          filename: att.name,
+          mime: att.mime,
+          content_base64: att.dataUrl,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error((payload && payload.error) || ('Extract failed (' + response.status + ')'));
+      }
+      return String(payload?.text || '').trim();
+    }
+
+    async function ensureTesseract() {
+      if (window.Tesseract) return window.Tesseract;
+      if (tesseractLoading) return tesseractLoading;
+      tesseractLoading = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+        script.async = true;
+        script.onload = () => {
+          if (window.Tesseract) resolve(window.Tesseract);
+          else reject(new Error('Tesseract.js failed to load'));
+        };
+        script.onerror = () => reject(new Error('Could not load OCR engine (network required the first time)'));
+        document.head.appendChild(script);
+      }).finally(() => {
+        // keep resolved module on window; allow retry on hard failure
+      });
+      try {
+        return await tesseractLoading;
+      } catch (error) {
+        tesseractLoading = null;
+        throw error;
+      }
+    }
+
+    async function ocrAttachmentImage(att) {
+      const Tesseract = await ensureTesseract();
+      const result = await Tesseract.recognize(att.dataUrl || att.previewUrl, 'eng', {
+        logger: () => {},
+      });
+      return String(result?.data?.text || '').trim();
+    }
+
+    async function prepareAttachmentsForSend(attachments) {
+      const list = Array.isArray(attachments) ? attachments : [];
+      const prepared = [];
+      const maxChars = settings.attachmentMaxChars || DEFAULT_SETTINGS.attachmentMaxChars;
+      for (const att of list) {
+        if (att.kind === 'image' && attachmentsSupported) {
+          prepared.push({
+            ...att,
+            sendMode: 'native',
+            apiPart: {
+              type: 'image_url',
+              image_url: { url: att.dataUrl },
+            },
+          });
+          continue;
+        }
+        if (att.kind === 'image') {
+          if (!(settings.attachmentTextFallback && settings.attachmentOcr && textFallbackContextOk())) {
+            throw new Error('Image attachments need a vision model, or OCR enabled in Preferences → Attachments.');
+          }
+          const text = truncateAttachmentText(await ocrAttachmentImage(att), maxChars);
+          if (!text) throw new Error('OCR found no text in ' + (att.name || 'image'));
+          prepared.push({
+            ...att,
+            sendMode: 'text',
+            extractedText: text,
+            apiText: 'Attachment: ' + (att.name || 'image') + '\n\n' + text,
+          });
+          continue;
+        }
+        // Non-image files: extract to text (native PDF document APIs are provider-specific).
+        if (!settings.attachmentTextFallback || !textFallbackContextOk()) {
+          if (attachmentsSupported) {
+            throw new Error('Non-image files need text extraction. Enable it in Preferences → Attachments.');
+          }
+          throw new Error('This model cannot take that file. Enable text extraction in Preferences → Attachments.');
+        }
+        const text = truncateAttachmentText(await extractAttachmentText(att), maxChars);
+        if (!text) throw new Error('No extractable text in ' + (att.name || 'file'));
+        prepared.push({
+          ...att,
+          sendMode: 'text',
+          extractedText: text,
+          apiText: 'Attachment: ' + (att.name || 'file') + '\n\n' + text,
+        });
+      }
+      return prepared;
+    }
+
+    function storedAttachmentsFromPrepared(prepared) {
+      return prepared.map((att) => ({
+        id: att.id,
+        name: att.name,
+        mime: att.mime,
+        kind: att.kind,
+        size: att.size,
+        previewUrl: att.kind === 'image' ? (att.previewUrl || att.dataUrl) : '',
+        dataUrl: att.dataUrl,
+        extractedText: att.extractedText || '',
+        sendMode: att.sendMode || 'native',
+      }));
+    }
+
+    function buildUserApiContent(text, attachments) {
+      const prepared = Array.isArray(attachments) ? attachments : [];
+      const textBits = [];
+      if (text && String(text).trim()) textBits.push(String(text).trim());
+      for (const att of prepared) {
+        if (att.sendMode === 'text' && att.apiText) textBits.push(att.apiText);
+      }
+      const imageParts = prepared
+        .filter((att) => att.sendMode === 'native' && att.apiPart)
+        .map((att) => att.apiPart);
+      const combinedText = textBits.join('\n\n');
+      if (!imageParts.length) return combinedText;
+      const parts = [];
+      if (combinedText) parts.push({ type: 'text', text: combinedText });
+      parts.push(...imageParts);
+      return parts;
+    }
+
+    function userMessageApiContent(message) {
+      const raw = typeof message.content === 'string'
+        ? parseCapabilityMentions(message.content).text
+        : '';
+      const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+      if (!attachments.length) return raw;
+      const textBits = [];
+      if (raw && raw !== '(attachment)') textBits.push(raw);
+      const parts = [];
+      for (const att of attachments) {
+        const nativeImage = att.kind === 'image'
+          && att.dataUrl
+          && !att.extractedText
+          && (att.sendMode === 'native' || !att.sendMode);
+        if (nativeImage) {
+          parts.push({
+            type: 'image_url',
+            image_url: { url: att.dataUrl },
+          });
+        } else if (att.extractedText) {
+          textBits.push('Attachment: ' + (att.name || 'file') + '\n\n' + att.extractedText);
+        }
+      }
+      const combinedText = textBits.join('\n\n');
+      if (!parts.length) return combinedText;
+      const content = [];
+      if (combinedText) content.push({ type: 'text', text: combinedText });
+      content.push(...parts);
+      return content;
+    }
+
     function displayTextWithMentions(text, mentionIds) {
       const prefix = [...mentionIds]
         .filter((id) => MENTION_IDS.includes(id))
@@ -4467,7 +5001,12 @@
       document.getElementById('settingSkillWebSearch').checked = settings.skillWebSearch;
       document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'auto';
       document.getElementById('settingSkillFetchUrl').checked = settings.skillFetchUrl;
+      document.getElementById('settingAttachmentsMode').value = settings.attachmentsMode || 'auto';
+      document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
+      document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
+      document.getElementById('settingAttachmentMaxChars').value = String(settings.attachmentMaxChars || 48000);
       syncWebSearchDepthControls();
+      syncAttachmentFallbackControls();
     }
 
     function openSettings() {
@@ -4485,6 +5024,20 @@
       const row = document.getElementById('webSearchDepthRow');
       if (depth) depth.disabled = !enabled;
       if (row) row.style.opacity = enabled ? '' : '0.55';
+    }
+
+    function syncAttachmentFallbackControls() {
+      const fallback = document.getElementById('settingAttachmentTextFallback');
+      const ocr = document.getElementById('settingAttachmentOcr');
+      const maxChars = document.getElementById('settingAttachmentMaxChars');
+      const enabled = !!(fallback && fallback.checked);
+      if (ocr) ocr.disabled = !enabled;
+      if (maxChars) maxChars.disabled = !enabled;
+      if (ocr) ocr.closest('.field-check').style.opacity = enabled ? '' : '0.55';
+      if (maxChars) {
+        const row = maxChars.closest('.settings-row');
+        if (row) row.style.opacity = enabled ? '' : '0.55';
+      }
     }
 
     function closeSettings() {
@@ -4723,6 +5276,7 @@
 
     function commitSettings() {
       if (!requireUnlockedData()) return;
+      const maxCharsRaw = Number(document.getElementById('settingAttachmentMaxChars').value);
       saveSettings({
         name: document.getElementById('settingName').value.trim(),
         about: document.getElementById('settingAbout').value,
@@ -4736,8 +5290,17 @@
           : 'auto',
         skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
         agentMode: settings.agentMode,
+        attachmentsMode: ATTACHMENTS_MODES.includes(document.getElementById('settingAttachmentsMode').value)
+          ? document.getElementById('settingAttachmentsMode').value
+          : 'auto',
+        attachmentTextFallback: document.getElementById('settingAttachmentTextFallback').checked,
+        attachmentOcr: document.getElementById('settingAttachmentOcr').checked,
+        attachmentMaxChars: Number.isFinite(maxCharsRaw)
+          ? Math.min(500000, Math.max(2000, Math.round(maxCharsRaw)))
+          : DEFAULT_SETTINGS.attachmentMaxChars,
       });
       syncThinkingEffortControls(settings.thinkingEffort);
+      syncAttachButton();
       closeSettings();
       // Re-render open thread so thinking mode changes apply immediately.
       const convo = conversations.find((item) => item.id === activeId);
@@ -5779,8 +6342,13 @@
       row.classList.remove('is-editing');
 
       // Drop this turn's reply and everything after, then rewrite the user message.
+      const priorAttachments = Array.isArray(convo.messages[index].attachments)
+        ? convo.messages[index].attachments
+        : [];
       convo.messages = convo.messages.slice(0, index + 1);
-      convo.messages[index] = { role: 'user', content: displayText };
+      const editedMessage = { role: 'user', content: displayText };
+      if (priorAttachments.length) editedMessage.attachments = priorAttachments;
+      convo.messages[index] = editedMessage;
       if (index === 0) {
         // Provisional slug for the sidebar; real title is generated after the
         // first assistant reply so local servers aren't hit with two requests at once.
@@ -5790,7 +6358,19 @@
       saveConversations();
       renderSidebar();
       renderThread(convo);
-      await runAssistantTurn(convo, { useAgent: turn.useAgent, text, skills: turn.skills });
+      const apiText = priorAttachments.length
+        ? buildUserApiContent(text, priorAttachments.map((att) => ({
+          ...att,
+          sendMode: att.sendMode || (att.kind === 'image' && att.dataUrl && !att.extractedText ? 'native' : 'text'),
+          apiPart: att.kind === 'image' && att.dataUrl && !att.extractedText
+            ? { type: 'image_url', image_url: { url: att.dataUrl } }
+            : null,
+          apiText: att.extractedText
+            ? ('Attachment: ' + (att.name || 'file') + '\n\n' + att.extractedText)
+            : '',
+        })))
+        : text;
+      await runAssistantTurn(convo, { useAgent: turn.useAgent, text: apiText, skills: turn.skills });
     }
 
     function attachMessageActions(row) {
@@ -5844,13 +6424,13 @@
       const bubble = document.createElement('div');
       bubble.className = 'msg-bubble';
       row.appendChild(bubble);
-      row.dataset.raw = content;
+      row.dataset.raw = typeof content === 'string' ? content : String(message?.content || '');
       if (role === 'assistant') {
         bubble.innerHTML = renderAssistantMessage(message || { content }, { streaming: false });
         enhanceCodeBlocks(bubble);
         bubble.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
       } else {
-        bubble.innerHTML = formatUserHtml(content);
+        bubble.innerHTML = formatUserMessageHtml(message || { content });
       }
       attachMessageActions(row);
       return row;
@@ -6101,10 +6681,12 @@
     }
 
     function updateSendEnabled() {
+      const hasText = composerInput.value.trim() !== '';
+      const hasFiles = pendingAttachments.length > 0;
       btnSend.disabled = !serverReady
         || diskEncryptionLocked()
         || isConvoBusy(activeId)
-        || composerInput.value.trim() === '';
+        || (!hasText && !hasFiles);
     }
 
     function syncModelOriginPill(visible, providerName) {
@@ -6333,7 +6915,7 @@
         composerHint.classList.remove('is-warn');
       } else if (!serverReady) {
         modelHintEl.textContent = 'Remote model is unreachable.';
-        composerHint.textContent = 'Fix the provider in Settings, or pick another model in the selector.';
+        composerHint.textContent = 'Fix the provider in Server, or pick another model in the selector.';
         composerHint.classList.add('is-warn');
       } else if (project && !activeId) {
         modelHintEl.textContent = 'Shared instructions & memory apply · ' + modelName + viaSuffix;
@@ -6346,6 +6928,7 @@
       }
       const thinking = !!(remoteSelected?.thinking_supported || data.thinking_supported);
       syncComposerThinkVisibility(thinking);
+      syncAttachButton();
       updateSendEnabled();
     }
 
@@ -6361,10 +6944,26 @@
 
     async function sendMessage() {
       const typed = composerInput.value.trim();
-      if (!typed || !serverReady || isConvoBusy(activeId)) return;
+      const queued = pendingAttachments.slice();
+      if ((!typed && !queued.length) || !serverReady || isConvoBusy(activeId)) return;
       if (!requireUnlockedData()) return;
       cancelMessageEdit();
       showChatView();
+
+      let prepared;
+      try {
+        if (queued.length) {
+          composerHint.textContent = 'Preparing attachments…';
+          composerHint.classList.remove('is-warn');
+          prepared = await prepareAttachmentsForSend(queued);
+        } else {
+          prepared = [];
+        }
+      } catch (error) {
+        composerHint.textContent = error?.message || 'Attachment prep failed';
+        composerHint.classList.add('is-warn');
+        return;
+      }
 
       const mentioned = parseCapabilityMentions(typed);
       const text = mentioned.text;
@@ -6377,6 +6976,8 @@
       const turn = resolveTurnSkills(mentionIds);
       // Keep @capability tokens in stored/displayed content so bubbles stay styled.
       const displayText = displayTextWithMentions(text, mentionIds);
+      const storedAttachments = storedAttachmentsFromPrepared(prepared);
+      const apiText = buildUserApiContent(text, prepared);
 
       let convo = conversations.find((item) => item.id === activeId);
       if (!convo) {
@@ -6393,19 +6994,25 @@
         activeId = id;
       }
 
-      convo.messages.push({ role: 'user', content: displayText });
+      const userMessage = {
+        role: 'user',
+        content: displayText || (storedAttachments.length ? '(attachment)' : ''),
+      };
+      if (storedAttachments.length) userMessage.attachments = storedAttachments;
+      convo.messages.push(userMessage);
       if (convo.messages.length === 1) {
         // Provisional slug for the sidebar; real title is generated after the
         // first assistant reply so local servers aren't hit with two requests at once.
-        convo.title = provisionalTitle(text || displayText);
+        convo.title = provisionalTitle(text || displayText || (storedAttachments[0]?.name || 'Attachment'));
       }
       convo.updatedAt = Date.now();
       saveConversations();
       renderSidebar();
 
       showThread(convo);
-      chatThread.appendChild(buildBubble('user', displayText, convo.messages.length - 1));
+      chatThread.appendChild(buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage));
       composerInput.value = '';
+      clearPendingAttachments();
       composerMentionIds.clear();
       autoResize(composerInput);
       renderComposerMentions();
@@ -6413,7 +7020,11 @@
       scrollToBottom({ force: true });
 
       // Fire-and-forget so switching chats does not await this turn.
-      void runAssistantTurn(convo, { useAgent: turn.useAgent, text, skills: turn.skills });
+      void runAssistantTurn(convo, {
+        useAgent: turn.useAgent,
+        text: apiText,
+        skills: turn.skills,
+      });
     }
 
     function ensureStreamDom(convo, stream) {
@@ -6675,7 +7286,7 @@
         }
         return {
           role: 'user',
-          content: parseCapabilityMentions(message.content).text,
+          content: userMessageApiContent(message),
         };
       });
       if (apiMessages.length > 0) {
@@ -6881,6 +7492,56 @@
     btnStop.addEventListener('click', () => {
       if (activeId) abortStream(activeId);
     });
+    btnAttach.addEventListener('click', () => {
+      if (btnAttach.getAttribute('aria-disabled') === 'true') {
+        openSettings();
+        showSettingsPane('attachments');
+        return;
+      }
+      attachFileInput.click();
+    });
+    attachFileInput.addEventListener('change', async (event) => {
+      const files = event.target.files;
+      event.target.value = '';
+      if (files && files.length) await addFilesToPending(files);
+    });
+    composerAttachmentsEl.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-attach-remove]');
+      if (!btn) return;
+      removePendingAttachment(btn.getAttribute('data-attach-remove'));
+    });
+    ;['dragenter', 'dragover'].forEach((type) => {
+      composerCard.addEventListener(type, (event) => {
+        if (!attachmentsUiEnabled()) return;
+        event.preventDefault();
+        composerCard.classList.add('is-dragover');
+      });
+    });
+    ;['dragleave', 'drop'].forEach((type) => {
+      composerCard.addEventListener(type, (event) => {
+        event.preventDefault();
+        if (type === 'dragleave' && composerCard.contains(event.relatedTarget)) return;
+        composerCard.classList.remove('is-dragover');
+        if (type === 'drop' && event.dataTransfer?.files?.length) {
+          void addFilesToPending(event.dataTransfer.files);
+        }
+      });
+    });
+    composerInput.addEventListener('paste', (event) => {
+      const items = event.clipboardData?.items;
+      if (!items || !attachmentsUiEnabled()) return;
+      const files = [];
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (!files.length) return;
+      event.preventDefault();
+      void addFilesToPending(files);
+    });
+    document.getElementById('settingAttachmentTextFallback').addEventListener('change', syncAttachmentFallbackControls);
     btnAgent.addEventListener('click', () => {
       if (!requireUnlockedData()) return;
       settings.agentMode = !settings.agentMode;
@@ -6907,6 +7568,8 @@
     });
     syncThinkingEffortControls(settings.thinkingEffort);
     syncComposerThinkVisibility(false);
+    syncAttachButton();
+    syncAttachmentFallbackControls();
     document.getElementById('btnNewChat').addEventListener('click', () => {
       // New chat stays in the current project context when one is active.
       startDraft();

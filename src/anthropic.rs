@@ -48,9 +48,8 @@ pub fn openai_to_anthropic_messages(payload: &Value) -> Result<Value, String> {
                 }
             }
             "user" => {
-                let content = message_content_to_text(&msg);
-                if !content.trim().is_empty() {
-                    push_anthropic_message(&mut messages, "user", &content);
+                if let Some(content) = openai_user_content_to_anthropic(&msg) {
+                    push_anthropic_user_content(&mut messages, content);
                 }
             }
             "assistant" => push_anthropic_assistant(&mut messages, &msg),
@@ -161,7 +160,106 @@ fn message_content_to_text(msg: &Value) -> String {
     }
 }
 
+fn openai_user_content_to_anthropic(msg: &Value) -> Option<Value> {
+    match msg.get("content") {
+        Some(Value::String(s)) => {
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(Value::String(s.clone()))
+            }
+        }
+        Some(Value::Array(parts)) => {
+            let mut blocks = Vec::new();
+            for part in parts {
+                let ty = part
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                match ty.as_str() {
+                    "text" => {
+                        if let Some(text) = part.get("text").and_then(|v| v.as_str())
+                            && !text.is_empty()
+                        {
+                            blocks.push(json!({ "type": "text", "text": text }));
+                        }
+                    }
+                    "image_url" | "input_image" => {
+                        if let Some(block) = openai_image_part_to_anthropic(part) {
+                            blocks.push(block);
+                        }
+                    }
+                    "" => {
+                        if let Some(text) = part.get("text").and_then(|v| v.as_str())
+                            && !text.is_empty()
+                        {
+                            blocks.push(json!({ "type": "text", "text": text }));
+                        } else if let Some(block) = openai_image_part_to_anthropic(part) {
+                            blocks.push(block);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if blocks.is_empty() {
+                None
+            } else if blocks.len() == 1
+                && blocks[0].get("type").and_then(|v| v.as_str()) == Some("text")
+            {
+                blocks[0].get("text").cloned()
+            } else {
+                Some(Value::Array(blocks))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn openai_image_part_to_anthropic(part: &Value) -> Option<Value> {
+    let url = part
+        .pointer("/image_url/url")
+        .or_else(|| part.get("image_url"))
+        .or_else(|| part.get("url"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+
+    if let Some(rest) = url.strip_prefix("data:") {
+        let (meta, data) = rest.split_once(',')?;
+        let media_type = meta
+            .split(';')
+            .next()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("image/png");
+        let data = data.trim();
+        if data.is_empty() {
+            return None;
+        }
+        return Some(json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": data
+            }
+        }));
+    }
+
+    Some(json!({
+        "type": "image",
+        "source": {
+            "type": "url",
+            "url": url
+        }
+    }))
+}
+
 fn push_anthropic_message(messages: &mut Vec<Value>, role: &str, content: &str) {
+    if content.trim().is_empty() {
+        return;
+    }
     if let Some(last) = messages.last_mut()
         && last.get("role").and_then(|v| v.as_str()) == Some(role)
         && let Some(existing) = last.get("content").and_then(|v| v.as_str())
@@ -171,14 +269,84 @@ fn push_anthropic_message(messages: &mut Vec<Value>, role: &str, content: &str) 
         } else {
             format!("{existing}\n\n{content}")
         };
-        last.as_object_mut()
-            .map(|obj| obj.insert("content".into(), Value::String(merged)));
+        if let Some(obj) = last.as_object_mut() {
+            obj.insert("content".into(), Value::String(merged));
+        }
         return;
     }
     messages.push(json!({
         "role": role,
         "content": content,
     }));
+}
+
+fn push_anthropic_user_content(messages: &mut Vec<Value>, content: Value) {
+    if content_is_empty(&content) {
+        return;
+    }
+    if let Value::String(text) = &content {
+        push_anthropic_message(messages, "user", text);
+        return;
+    }
+    if let Some(last) = messages.last_mut()
+        && last.get("role").and_then(|v| v.as_str()) == Some("user")
+    {
+        merge_message_content(last, content);
+        return;
+    }
+    messages.push(json!({
+        "role": "user",
+        "content": content,
+    }));
+}
+
+fn content_is_empty(content: &Value) -> bool {
+    match content {
+        Value::String(s) => s.trim().is_empty(),
+        Value::Array(parts) => parts.is_empty(),
+        Value::Null => true,
+        _ => false,
+    }
+}
+
+fn merge_message_content(message: &mut Value, incoming: Value) {
+    let Some(existing) = message.get("content").cloned() else {
+        if let Some(obj) = message.as_object_mut() {
+            obj.insert("content".into(), incoming);
+        }
+        return;
+    };
+    let merged = match (existing, incoming) {
+        (Value::String(a), Value::String(b)) => {
+            if a.is_empty() {
+                Value::String(b)
+            } else if b.is_empty() {
+                Value::String(a)
+            } else {
+                Value::String(format!("{a}\n\n{b}"))
+            }
+        }
+        (Value::Array(mut a), Value::Array(b)) => {
+            a.extend(b);
+            Value::Array(a)
+        }
+        (Value::String(a), Value::Array(mut b)) => {
+            if !a.trim().is_empty() {
+                b.insert(0, json!({ "type": "text", "text": a }));
+            }
+            Value::Array(b)
+        }
+        (Value::Array(mut a), Value::String(b)) => {
+            if !b.trim().is_empty() {
+                a.push(json!({ "type": "text", "text": b }));
+            }
+            Value::Array(a)
+        }
+        (_, other) => other,
+    };
+    if let Some(obj) = message.as_object_mut() {
+        obj.insert("content".into(), merged);
+    }
 }
 
 fn push_anthropic_assistant(messages: &mut Vec<Value>, msg: &Value) {
@@ -482,6 +650,30 @@ mod tests {
         assert_eq!(out["system"], "Be brief.");
         assert_eq!(out["messages"].as_array().unwrap().len(), 3);
         assert_eq!(out["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn converts_image_url_parts_to_anthropic_blocks() {
+        let body = json!({
+            "model": "claude-test",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "Describe" },
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": "data:image/png;base64,abc123" }
+                    }
+                ]
+            }]
+        });
+        let out = openai_to_anthropic_messages(&body).unwrap();
+        let content = out["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "abc123");
     }
 
     #[test]

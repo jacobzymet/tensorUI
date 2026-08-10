@@ -25,7 +25,7 @@ Default URL: `http://127.0.0.1:3930`
 | Path | Surface |
 | --- | --- |
 | `/` | **Chat** — conversations, projects, agent mode |
-| `/settings` | **Settings** — providers, appearance |
+| `/settings` | **Server** — API providers (base URL, tokens, API style) |
 
 ## Data & config
 
@@ -80,17 +80,17 @@ active_provider_id = "…"
 id = "…"
 name = "ollama"
 base = "http://127.0.0.1:11434/v1"
-api_style = "openai"   # or "anthropic"; Settings auto-detects on add/save
+api_style = "openai"   # or "anthropic"; auto-detected in the Server UI on add/save
 token = ""   # optional; leave empty for local servers that need no key
 ```
 
-When you add a provider in Settings, tensorUI probes the endpoint and picks OpenAI-compatible vs Anthropic Messages (host/`sk-ant-` hints, `/models` auth, and whether `/chat/completions` or `/messages` exists). Existing configs without `api_style` still default to `openai`. Anthropic-style providers talk to `{base}/messages` and translate streams so Chat stays on one SSE shape.
+On the **Server** page, adding a provider probes the endpoint and picks OpenAI-compatible vs Anthropic Messages (host/`sk-ant-` hints, `/models` auth, and whether `/chat/completions` or `/messages` exists). Existing configs without `api_style` still default to `openai`. Anthropic-style providers talk to `{base}/messages` and translate streams so Chat stays on one SSE shape.
 
 Env override for bind: `TENSORUI_BIND=127.0.0.1:3930`. Non-loopback binds (`0.0.0.0`, LAN IPs, etc.) print a warning and **refuse to start** — the UI has no authentication.
 
 ## Build
 
-The release binary embeds Chat/Settings HTML, `orb.js`, highlight.js, marked, DOMPurify, and icons:
+The release binary embeds Chat and Server HTML, `orb.js`, highlight.js, marked, DOMPurify, and icons:
 
 ```powershell
 cargo build --release

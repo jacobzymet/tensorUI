@@ -6,8 +6,9 @@ use std::{net::IpAddr, sync::OnceLock, time::Duration};
 use reqwest::{Client, Url};
 
 const APP_UA: &str = concat!("tensorui/", env!("CARGO_PKG_VERSION"));
+/// Browser-like UA for public page fetches. Some CDNs return 403/406 to library UAs.
 const SEARCH_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-     (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 static PUBLIC_CLIENT: OnceLock<Client> = OnceLock::new();
 
@@ -70,7 +71,17 @@ pub fn llm_blocking_client(api_base: &str, timeout: Duration) -> reqwest::blocki
 /// Async client for public HTTPS (search / page fetch). Always verifies TLS.
 pub fn public_client() -> Client {
     PUBLIC_CLIENT
-        .get_or_init(|| build_client(Duration::from_secs(60), false, SEARCH_UA))
+        .get_or_init(|| {
+            Client::builder()
+                .timeout(Duration::from_secs(60))
+                .user_agent(SEARCH_UA)
+                // Cookie jar helps sites that set a device/geo cookie before serving HTML.
+                .cookie_store(true)
+                // Prefer HTTP/1.1 — some news CDNs fingerprint HTTP/2 stacks and answer 406.
+                .http1_only()
+                .build()
+                .expect("reqwest public client")
+        })
         .clone()
 }
 

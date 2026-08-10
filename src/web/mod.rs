@@ -19,6 +19,7 @@ use tokio::net::TcpListener;
 use crate::{
     agent::{self, AgentRequest},
     app::App,
+    attachments::{self, ExtractRequest},
     chat,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
@@ -129,7 +130,8 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route(
             "/api/skills/{id}",
             axum::routing::patch(update_skill).delete(delete_skill),
-        );
+        )
+        .route("/api/attachments/extract", post(extract_attachment));
 
     let router = Router::new()
         .route("/", get(chat_page))
@@ -332,7 +334,7 @@ async fn chat_title(
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
-                    "No provider configured. Add one in Settings.",
+                    "No provider configured. Add one in Server.",
                 ));
             };
             let api_base = normalize_openai_base(&active.base)
@@ -376,7 +378,7 @@ async fn chat_completions(
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
-                    "No provider configured. Add one in Settings.",
+                    "No provider configured. Add one in Server.",
                 ));
             };
             let api_base = normalize_openai_base(&active.base)
@@ -388,7 +390,7 @@ async fn chat_completions(
 
     let Some((api_base, token, api_style)) = remote else {
         return Err(ApiError::bad_request(
-            "No provider configured. Add one in Settings.",
+            "No provider configured. Add one in Server.",
         ));
     };
 
@@ -863,6 +865,17 @@ async fn import_skill(
         .import_user_skill(body.filename.as_deref(), &body.content)
         .map_err(ApiError::bad_request)?;
     Ok(Json(skill.to_public()))
+}
+
+async fn extract_attachment(
+    Json(body): Json<ExtractRequest>,
+) -> Result<Json<attachments::ExtractResponse>, ApiError> {
+    let extracted =
+        tokio::task::spawn_blocking(move || attachments::extract_attachment(body))
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .map_err(ApiError::bad_request)?;
+    Ok(Json(extracted))
 }
 
 async fn update_skill(

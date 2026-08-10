@@ -360,6 +360,12 @@ pub struct RemoteModelOption {
     pub ready: bool,
     pub label: String,
     pub thinking_supported: bool,
+    /// Native multimodal / vision attachments (images) when known from host metadata.
+    #[serde(default)]
+    pub attachments_supported: bool,
+    /// Reported context window in tokens, when the host exposes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
     #[serde(default)]
     pub provider_id: String,
     #[serde(default)]
@@ -906,6 +912,20 @@ fn fetch_ollama_thinking_capability(
     model: &str,
     timeout: Duration,
 ) -> Option<bool> {
+    let body = fetch_ollama_show_body(root, token, model, timeout)?;
+    let caps = body.get("capabilities")?.as_array()?;
+    Some(caps.iter().any(|c| {
+        c.as_str()
+            .is_some_and(|s| s.eq_ignore_ascii_case("thinking"))
+    }))
+}
+
+fn fetch_ollama_show_body(
+    root: &str,
+    token: &str,
+    model: &str,
+    timeout: Duration,
+) -> Option<serde_json::Value> {
     let root = root.trim_end_matches('/');
     let url = format!("{root}/api/show");
     let client = http::llm_blocking_client(root, timeout);
@@ -918,12 +938,304 @@ fn fetch_ollama_thinking_capability(
     if response.status().as_u16() != 200 {
         return None;
     }
+    response.json::<serde_json::Value>().ok()
+}
+
+/// Resolve whether each model accepts native image / multimodal attachments.
+///
+/// Uses host/API capability metadata only — never model-id allowlists:
+/// 1. Fields on `GET {base}/models` (`capabilities.vision`, modalities, architecture)
+/// 2. Ollama `POST {root}/api/show` → `capabilities` includes `"vision"`
+/// 3. LM Studio `GET {root}/api/v1/models` → `capabilities.vision`
+/// 4. Anthropic Messages style: protocol supports image content blocks
+fn fetch_remote_attachments_support(
+    api_base: &str,
+    token: &str,
+    style: ApiStyle,
+    models: &[String],
+    timeout: Duration,
+) -> HashMap<String, bool> {
+    let mut out: HashMap<String, bool> = HashMap::new();
+    if models.is_empty() {
+        return out;
+    }
+
+    if style == ApiStyle::Anthropic {
+        for model in models {
+            out.insert(model.clone(), true);
+        }
+    }
+
+    if let Some(from_list) = attachments_from_models_endpoint(api_base, token, style, timeout) {
+        for (model, supported) in from_list {
+            out.insert(model, supported);
+        }
+    }
+
+    let Some(root) = props_root_from_openai_base(api_base) else {
+        return out;
+    };
+    let probe_timeout = timeout.min(Duration::from_millis(800));
+
+    if root_has_get_path(&root, token, "/api/tags", probe_timeout) {
+        for model in models {
+            if let Some(supported) =
+                fetch_ollama_vision_capability(&root, token, model, probe_timeout)
+            {
+                out.insert(model.clone(), supported);
+            }
+        }
+    }
+
+    if let Some(from_lms) = fetch_lmstudio_vision_map(&root, token, probe_timeout) {
+        for model in models {
+            if let Some(supported) = from_lms.get(model).copied() {
+                out.insert(model.clone(), supported);
+            } else {
+                let leaf = model.rsplit('/').next().unwrap_or(model);
+                if let Some((_, supported)) = from_lms
+                    .iter()
+                    .find(|(key, _)| key.as_str() == leaf || key.ends_with(&format!("/{leaf}")))
+                {
+                    out.insert(model.clone(), *supported);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn fetch_remote_context_lengths(
+    api_base: &str,
+    token: &str,
+    style: ApiStyle,
+    timeout: Duration,
+) -> HashMap<String, u64> {
+    let mut out = HashMap::new();
+    let Some(base) = normalize_provider_base(api_base, style) else {
+        return out;
+    };
+    let url = format!("{base}/models");
+    let client = http::llm_blocking_client(&base, timeout);
+    let mut request = client.get(&url);
+    for (name, value) in provider_auth_headers(style, token) {
+        request = request.header(&name, &value);
+    }
+    let Ok(response) = request.send() else {
+        return out;
+    };
+    if response.status().as_u16() != 200 {
+        return out;
+    }
+    let Ok(body) = response.json::<serde_json::Value>() else {
+        return out;
+    };
+    let Some(data) = body.get("data").and_then(|v| v.as_array()) else {
+        return out;
+    };
+    for entry in data {
+        let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(len) = context_length_from_model_object(entry) {
+            out.insert(id.to_string(), len);
+        }
+    }
+    out
+}
+
+fn context_length_fuzzy(map: &HashMap<String, u64>, model: &str) -> Option<u64> {
+    if let Some(len) = map.get(model) {
+        return Some(*len);
+    }
+    let leaf = model.rsplit('/').next().unwrap_or(model);
+    map.iter()
+        .find(|(key, _)| key.as_str() == leaf || key.ends_with(&format!("/{leaf}")))
+        .map(|(_, len)| *len)
+}
+
+fn attachments_from_models_endpoint(
+    api_base: &str,
+    token: &str,
+    style: ApiStyle,
+    timeout: Duration,
+) -> Option<HashMap<String, bool>> {
+    let base = normalize_provider_base(api_base, style)?;
+    let url = format!("{base}/models");
+    let client = http::llm_blocking_client(&base, timeout);
+    let mut request = client.get(&url);
+    for (name, value) in provider_auth_headers(style, token) {
+        request = request.header(&name, &value);
+    }
+    let response = request.send().ok()?;
+    if response.status().as_u16() != 200 {
+        return None;
+    }
     let body = response.json::<serde_json::Value>().ok()?;
+    let data = body.get("data")?.as_array()?;
+    let mut out = HashMap::new();
+    for entry in data {
+        let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(supported) = attachments_hint_from_model_object(entry) {
+            out.insert(id.to_string(), supported);
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn attachments_hint_from_model_object(entry: &serde_json::Value) -> Option<bool> {
+    if let Some(caps) = entry.get("capabilities") {
+        if let Some(flag) = caps.get("vision").and_then(|v| v.as_bool()) {
+            return Some(flag);
+        }
+        if let Some(flag) = caps.get("image").and_then(|v| v.as_bool()) {
+            return Some(flag);
+        }
+        if let Some(flag) = caps.get("multimodal").and_then(|v| v.as_bool()) {
+            return Some(flag);
+        }
+        if let Some(arr) = caps.as_array() {
+            let hit = arr.iter().any(|c| {
+                c.as_str().is_some_and(|s| {
+                    matches!(
+                        s.to_ascii_lowercase().as_str(),
+                        "vision" | "image" | "multimodal" | "images"
+                    )
+                })
+            });
+            if hit {
+                return Some(true);
+            }
+        }
+    }
+    if modality_list_has_image(entry.get("input_modalities"))
+        || modality_list_has_image(entry.get("modalities"))
+    {
+        return Some(true);
+    }
+    if let Some(arch) = entry.get("architecture")
+        && (modality_list_has_image(arch.get("input_modalities"))
+            || modality_value_has_image(arch.get("modality"))
+            || modality_value_has_image(arch.get("modalities")))
+    {
+        return Some(true);
+    }
+    if modality_value_has_image(entry.get("modality")) {
+        return Some(true);
+    }
+    None
+}
+
+fn modality_list_has_image(value: Option<&serde_json::Value>) -> bool {
+    let Some(arr) = value.and_then(|v| v.as_array()) else {
+        return false;
+    };
+    arr.iter().any(|item| {
+        item.as_str().is_some_and(|s| {
+            let lower = s.to_ascii_lowercase();
+            lower.contains("image") || lower.contains("vision")
+        })
+    })
+}
+
+fn modality_value_has_image(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::String(s)) => {
+            let lower = s.to_ascii_lowercase();
+            lower.contains("image") || lower.contains("vision")
+        }
+        Some(serde_json::Value::Array(_)) => modality_list_has_image(value),
+        _ => false,
+    }
+}
+
+fn context_length_from_model_object(entry: &serde_json::Value) -> Option<u64> {
+    const KEYS: &[&str] = &[
+        "context_length",
+        "context_window",
+        "max_model_len",
+        "max_context_length",
+        "n_ctx",
+        "n_ctx_train",
+    ];
+    for key in KEYS {
+        if let Some(len) = entry.get(*key).and_then(|v| v.as_u64()).filter(|n| *n > 0) {
+            return Some(len);
+        }
+    }
+    if let Some(meta) = entry.get("meta").or_else(|| entry.get("metadata")) {
+        for key in KEYS {
+            if let Some(len) = meta.get(*key).and_then(|v| v.as_u64()).filter(|n| *n > 0) {
+                return Some(len);
+            }
+        }
+    }
+    if let Some(len) = entry
+        .pointer("/architecture/context_length")
+        .and_then(|v| v.as_u64())
+        .filter(|n| *n > 0)
+    {
+        return Some(len);
+    }
+    None
+}
+
+fn fetch_ollama_vision_capability(
+    root: &str,
+    token: &str,
+    model: &str,
+    timeout: Duration,
+) -> Option<bool> {
+    let body = fetch_ollama_show_body(root, token, model, timeout)?;
     let caps = body.get("capabilities")?.as_array()?;
     Some(caps.iter().any(|c| {
         c.as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case("thinking"))
+            .is_some_and(|s| s.eq_ignore_ascii_case("vision"))
     }))
+}
+
+fn fetch_lmstudio_vision_map(
+    root: &str,
+    token: &str,
+    timeout: Duration,
+) -> Option<HashMap<String, bool>> {
+    let root = root.trim_end_matches('/');
+    let url = format!("{root}/api/v1/models");
+    let client = http::llm_blocking_client(root, timeout);
+    let mut request = client.get(&url);
+    if !token.trim().is_empty() {
+        request = request.header("Authorization", &format!("Bearer {}", token.trim()));
+    }
+    let response = request.send().ok()?;
+    if response.status().as_u16() != 200 {
+        return None;
+    }
+    let body = response.json::<serde_json::Value>().ok()?;
+    let models = body
+        .get("models")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.get("data").and_then(|v| v.as_array()))?;
+    let mut out = HashMap::new();
+    for entry in models {
+        let id = entry
+            .get("key")
+            .or_else(|| entry.get("id"))
+            .or_else(|| entry.get("name"))
+            .and_then(|v| v.as_str())?;
+        let caps = entry.get("capabilities")?;
+        let supported = caps
+            .get("vision")
+            .and_then(|v| v.as_bool())
+            .or_else(|| caps.get("image").and_then(|v| v.as_bool()))
+            .or_else(|| caps.get("multimodal").and_then(|v| v.as_bool()));
+        if let Some(flag) = supported {
+            out.insert(id.to_string(), flag);
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn fetch_lmstudio_thinking_map(
@@ -1115,12 +1427,20 @@ pub fn probe_provider_catalog(
             continue;
         };
         let thinking = fetch_remote_thinking_support(&candidate, token, style, &models, timeout);
+        let attachments =
+            fetch_remote_attachments_support(&candidate, token, style, &models, timeout);
+        let contexts = fetch_remote_context_lengths(&candidate, token, style, timeout);
         for model in models {
             let id = format!("remote|{candidate}|{model}");
             if !seen.insert(id.clone()) {
                 continue;
             }
             let thinking_supported = thinking.get(&model).copied().unwrap_or(false);
+            let attachments_supported = attachments.get(&model).copied().unwrap_or(false);
+            let context_length = contexts
+                .get(&model)
+                .copied()
+                .or_else(|| context_length_fuzzy(&contexts, &model));
             out.push(RemoteModelOption {
                 id,
                 model: model.clone(),
@@ -1129,6 +1449,8 @@ pub fn probe_provider_catalog(
                 ready: true,
                 label: model,
                 thinking_supported,
+                attachments_supported,
+                context_length,
                 provider_id: String::new(),
                 provider_name: String::new(),
             });
@@ -1335,5 +1657,30 @@ mod tests {
         assert_eq!(classify_route_status(405), RouteSignal::Present);
         assert_eq!(classify_route_status(401), RouteSignal::Present);
         assert_eq!(classify_route_status(200), RouteSignal::Present);
+    }
+
+    #[test]
+    fn attachments_hint_from_vision_capabilities() {
+        let vision = serde_json::json!({
+            "id": "llava",
+            "capabilities": { "vision": true }
+        });
+        assert_eq!(attachments_hint_from_model_object(&vision), Some(true));
+        let modality = serde_json::json!({
+            "id": "gpt-4o",
+            "architecture": { "modality": "text+image->text" }
+        });
+        assert_eq!(attachments_hint_from_model_object(&modality), Some(true));
+        let plain = serde_json::json!({ "id": "llama3", "supported_parameters": ["temperature"] });
+        assert_eq!(attachments_hint_from_model_object(&plain), None);
+    }
+
+    #[test]
+    fn context_length_from_common_fields() {
+        let entry = serde_json::json!({
+            "id": "m",
+            "context_length": 128000
+        });
+        assert_eq!(context_length_from_model_object(&entry), Some(128000));
     }
 }

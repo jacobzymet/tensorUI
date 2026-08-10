@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod anthropic;
 pub mod app;
+pub mod attachments;
 pub mod config;
 pub mod crypto;
 pub mod http;

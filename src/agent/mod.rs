@@ -947,23 +947,25 @@ struct SearchHit {
 
 async fn duckduckgo_search(query: &str, depth: WebSearchDepth) -> Result<String, String> {
     let client = http::public_client();
-    let response = match client
-        .post("https://html.duckduckgo.com/html/")
-        .timeout(SEARCH_TIMEOUT)
-        .header("Accept", "text/html")
-        .form(&[("q", query), ("b", "")])
-        .send()
-        .await
+    let response = match apply_browser_page_headers(
+        client
+            .post("https://html.duckduckgo.com/html/")
+            .timeout(SEARCH_TIMEOUT),
+    )
+    .form(&[("q", query), ("b", "")])
+    .send()
+    .await
     {
         Ok(response) => response,
-        Err(_) => client
-            .get("https://html.duckduckgo.com/html/")
-            .timeout(SEARCH_TIMEOUT)
-            .query(&[("q", query)])
-            .header("Accept", "text/html")
-            .send()
-            .await
-            .map_err(|error| format!("DuckDuckGo request failed: {error}"))?,
+        Err(_) => apply_browser_page_headers(
+            client
+                .get("https://html.duckduckgo.com/html/")
+                .timeout(SEARCH_TIMEOUT)
+                .query(&[("q", query)]),
+        )
+        .send()
+        .await
+        .map_err(|error| format!("DuckDuckGo request failed: {error}"))?,
     };
 
     let status = response.status().as_u16();
@@ -1155,22 +1157,46 @@ fn scrapeable_url(url: &str) -> bool {
     !SKIP_EXT.iter().any(|ext| path.ends_with(ext))
 }
 
+/// Chrome-like Accept / navigation headers. Sparse Accept values get 406 from some CDNs.
+const PAGE_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,\
+    image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+const PAGE_ACCEPT_LANG: &str = "en-US,en;q=0.9";
+
+fn apply_browser_page_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    req.header("Accept", PAGE_ACCEPT)
+        .header("Accept-Language", PAGE_ACCEPT_LANG)
+        .header("Upgrade-Insecure-Requests", "1")
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "none")
+        .header("Sec-Fetch-User", "?1")
+        .header("Cache-Control", "max-age=0")
+}
+
 async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
     let client = http::public_client();
-    let response = client
-        .get(url)
-        .timeout(PAGE_TIMEOUT)
-        .header(
-            "Accept",
-            "text/html,application/xhtml+xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
-        )
+    let mut response = apply_browser_page_headers(client.get(url).timeout(PAGE_TIMEOUT))
         .send()
         .await
         .map_err(|error| format!("{error}"))?;
 
-    let status = response.status().as_u16();
+    let mut status = response.status().as_u16();
+    // Negotiate again with a looser Accept — Akamai/news stacks sometimes 406 the first try.
+    if matches!(status, 406 | 403) {
+        response = client
+            .get(url)
+            .timeout(PAGE_TIMEOUT)
+            .header("Accept", "*/*")
+            .header("Accept-Language", PAGE_ACCEPT_LANG)
+            .header("Upgrade-Insecure-Requests", "1")
+            .send()
+            .await
+            .map_err(|error| format!("{error}"))?;
+        status = response.status().as_u16();
+    }
+
     if status != 200 && status != 203 && status != 206 {
-        return Err(format!("HTTP {status}"));
+        return Err(format!("HTTP {status} fetching {url}"));
     }
 
     let content_type = response
@@ -1186,7 +1212,9 @@ async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> 
             || content_type.contains("text/xml")
             || content_type.contains("application/xml"))
     {
-        return Err(format!("unsupported content-type ({content_type})"));
+        return Err(format!(
+            "unsupported content-type ({content_type}) fetching {url}"
+        ));
     }
 
     let bytes = response

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tensorUI | Settings</title>
+  <title>tensorUI | Server</title>
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -753,18 +753,17 @@
     </button>
     <aside class="sidebar">
       <div class="sidebar-head">
-        <a class="wordmark" href="/" aria-label="tensorUI Settings">
+        <a class="wordmark" href="/" aria-label="tensorUI Server">
           <span class="wordmark-brand">tensor<span>UI</span></span>
-          <span class="wordmark-surface">Settings</span>
+          <span class="wordmark-surface">Server</span>
         </a>
         <button type="button" class="btn btn-ghost btn-icon btn-toggle-sidebar" id="btnToggleSidebar" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
         </button>
       </div>
       <div class="sidebar-nav">
-        <p class="sidebar-label">Settings</p>
+        <p class="sidebar-label">Server</p>
         <button type="button" class="nav-jump is-active" data-jump="providers">Providers</button>
-        <button type="button" class="nav-jump" data-jump="appearance">Appearance</button>
       </div>
       <div class="sidebar-footer">
         <div class="sidebar-footer-row">
@@ -777,8 +776,8 @@
             <span>Chat</span>
           </a>
           <a href="/settings" class="is-active" aria-current="page">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Settings</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+            <span>Server</span>
           </a>
         </div>
       </div>
@@ -787,7 +786,7 @@
     <div class="main">
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:0.5rem;min-width:0">
-          <div class="topbar-title">Settings</div>
+          <div class="topbar-title">Server</div>
         </div>
         <div class="topbar-meta" id="topbarMeta">Loading…</div>
       </header>
@@ -842,79 +841,6 @@
                   </div>
                 </div>
                 <p id="providerError" class="text-error is-hidden" role="alert"></p>
-              </div>
-            </div>
-          </section>
-
-          <section class="section" id="appearance">
-            <div class="section-head">
-              <div>
-                <h2>Appearance</h2>
-                <p class="section-lede">Theme and type shared with Chat. Dark Cobalt and the built-in stacks are the defaults.</p>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="settings-section">
-                <h3 class="settings-section-title">Theme</h3>
-                <div class="segmented" id="themeToggle" role="tablist" aria-label="Theme">
-                  <button type="button" data-theme-choice="dark" class="is-active" role="tab" aria-selected="true">Dark</button>
-                  <button type="button" data-theme-choice="light" role="tab" aria-selected="false">Light</button>
-                  <button type="button" data-theme-choice="system" role="tab" aria-selected="false">System</button>
-                </div>
-              </div>
-              <div class="settings-section">
-                <h3 class="settings-section-title">Fonts</h3>
-                <div class="settings-row">
-                  <label class="field-label" for="settingFontBody">UI text</label>
-                  <div>
-                    <select class="field-select" id="settingFontBody">
-                      <option value="inter">Inter</option>
-                      <option value="source-sans-3">Source Sans 3</option>
-                      <option value="ibm-plex-sans">IBM Plex Sans</option>
-                      <option value="atkinson-hyperlegible">Atkinson Hyperlegible</option>
-                      <option value="literata">Literata</option>
-                    </select>
-                    <p class="field-hint">Body copy and most controls.</p>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingFontDisplay">Headings</label>
-                  <div>
-                    <select class="field-select" id="settingFontDisplay">
-                      <option value="space-grotesk">Space Grotesk</option>
-                      <option value="syne">Syne</option>
-                      <option value="dm-sans">DM Sans</option>
-                      <option value="instrument-sans">Instrument Sans</option>
-                      <option value="fraunces">Fraunces</option>
-                    </select>
-                    <p class="field-hint">Titles and section labels. Sidebar wordmark stays Syne.</p>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingFontMono">Monospace</label>
-                  <div>
-                    <select class="field-select" id="settingFontMono">
-                      <option value="jetbrains-mono">JetBrains Mono</option>
-                      <option value="ibm-plex-mono">IBM Plex Mono</option>
-                      <option value="source-code-pro">Source Code Pro</option>
-                      <option value="fira-code">Fira Code</option>
-                    </select>
-                    <p class="field-hint">URLs, chips, and status labels.</p>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label">Text size</label>
-                  <div class="segmented" id="fontScaleToggle" role="tablist" aria-label="Text size">
-                    <button type="button" data-font-scale="compact" role="tab" aria-selected="false">Compact</button>
-                    <button type="button" data-font-scale="default" class="is-active" role="tab" aria-selected="true">Default</button>
-                    <button type="button" data-font-scale="large" role="tab" aria-selected="false">Large</button>
-                  </div>
-                </div>
-              </div>
-              <div class="settings-section">
-                <h3 class="settings-section-title">Reset</h3>
-                <button type="button" class="btn btn-ghost" id="btnAppearanceReset">Reset to defaults</button>
-                <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size for Chat and Settings.</p>
               </div>
             </div>
           </section>
@@ -1020,11 +946,6 @@
         currentTheme = pref;
         document.documentElement.dataset.theme = resolved;
         document.documentElement.dataset.themePref = pref;
-        document.querySelectorAll('[data-theme-choice]').forEach((btn) => {
-          const active = btn.dataset.themeChoice === pref;
-          btn.classList.toggle('is-active', active);
-          btn.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
       }
 
       if (window.matchMedia) {
@@ -1055,17 +976,6 @@
         root.style.setProperty('--font-logo', '"Syne", ' + FONT_DISPLAY_STACKS[display]);
         if (scale === 'default') delete root.dataset.fontScale;
         else root.dataset.fontScale = scale;
-        const bodySelect = document.getElementById('settingFontBody');
-        const displaySelect = document.getElementById('settingFontDisplay');
-        const monoSelect = document.getElementById('settingFontMono');
-        if (bodySelect) bodySelect.value = body;
-        if (displaySelect) displaySelect.value = display;
-        if (monoSelect) monoSelect.value = mono;
-        document.querySelectorAll('[data-font-scale]').forEach((btn) => {
-          const active = btn.dataset.fontScale === scale;
-          btn.classList.toggle('is-active', active);
-          btn.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
       }
 
       function applyAppearance(data) {
@@ -1077,31 +987,6 @@
           font_mono: data.font_mono || currentFonts.font_mono,
           font_scale: data.font_scale || currentFonts.font_scale,
         });
-      }
-
-      async function patchAppearance(patch) {
-        applyAppearance({ ...currentFonts, theme: currentTheme, ...patch });
-        try {
-          const response = await fetch('/api/ui/appearance', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(patch),
-          });
-          if (!response.ok) return;
-          applyAppearance(await response.json());
-        } catch {
-          // keep local appearance; next poll will reconcile
-        }
-      }
-
-      async function resetAppearance() {
-        try {
-          const response = await fetch('/api/ui/appearance/reset', { method: 'POST' });
-          if (!response.ok) return;
-          applyAppearance(await response.json());
-        } catch {
-          // ignore
-        }
       }
 
       function showError(message) {
@@ -1515,29 +1400,6 @@
         },
       };
 
-      document.getElementById('themeToggle').addEventListener('click', (event) => {
-        const btn = event.target.closest('[data-theme-choice]');
-        if (!btn) return;
-        patchAppearance({ theme: btn.dataset.themeChoice });
-      });
-      document.getElementById('fontScaleToggle').addEventListener('click', (event) => {
-        const btn = event.target.closest('[data-font-scale]');
-        if (!btn) return;
-        patchAppearance({ font_scale: btn.dataset.fontScale });
-      });
-      document.getElementById('settingFontBody').addEventListener('change', (event) => {
-        patchAppearance({ font_body: event.target.value });
-      });
-      document.getElementById('settingFontDisplay').addEventListener('change', (event) => {
-        patchAppearance({ font_display: event.target.value });
-      });
-      document.getElementById('settingFontMono').addEventListener('change', (event) => {
-        patchAppearance({ font_mono: event.target.value });
-      });
-      document.getElementById('btnAppearanceReset').addEventListener('click', () => {
-        resetAppearance();
-      });
-
       document.querySelectorAll('[data-jump]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-jump');
@@ -1775,7 +1637,7 @@
 
       const content = document.getElementById('content');
       content.addEventListener('scroll', () => {
-        const sections = ['providers', 'appearance'];
+        const sections = ['providers'];
         let current = sections[0];
         for (const id of sections) {
           const el = document.getElementById(id);
