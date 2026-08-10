@@ -144,7 +144,15 @@
       color: var(--color-muted);
       text-decoration: none;
       background: transparent;
-      transition: color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
+      transition:
+        color var(--dur-short) var(--ease-settle),
+        background var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-release);
+    }
+    .mode-switch a:active {
+      transform: scale(0.97);
+      transition-duration: var(--dur-press);
+      transition-timing-function: var(--ease-press);
     }
     .mode-switch a svg {
       width: 0.95rem;
@@ -183,12 +191,21 @@
       font-size: var(--text-sm);
       font-weight: 500;
       cursor: pointer;
-      transition: background var(--dur-short) var(--ease-out),
-                  border-color var(--dur-short) var(--ease-out),
-                  opacity var(--dur-short) var(--ease-out);
+      transform: translateZ(0);
+      transition:
+        background var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle),
+        color var(--dur-short) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-release),
+        box-shadow var(--dur-short) var(--ease-settle);
     }
     .btn:hover { border-color: var(--color-accent); }
-    .btn:active { opacity: 0.88; }
+    .btn:active:not(:disabled) {
+      transform: scale(0.96);
+      transition-duration: var(--dur-press);
+      transition-timing-function: var(--ease-press);
+    }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn:disabled:hover { border-color: var(--color-rule-2); }
     .btn-primary {
@@ -200,7 +217,6 @@
     .btn-primary:disabled { background: var(--color-paper-2); border-color: var(--color-rule-2); color: var(--color-muted); }
     .btn-ghost { background: transparent; }
     .btn-icon { padding: 0.35rem 0.45rem; line-height: 1; }
-    .btn-send { padding: 0.4rem 0.9rem; }
 
     .status-chip {
       font-family: var(--font-mono);
@@ -212,6 +228,11 @@
       border-radius: 999px;
       color: var(--color-muted);
       white-space: nowrap;
+      transition:
+        color var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle),
+        background var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-release);
     }
     .status-ready { color: var(--color-ok); border-color: color-mix(in oklch, var(--color-ok) 40%, var(--color-rule)); }
     .status-failed, .status-stopping { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 40%, var(--color-rule)); }
@@ -237,11 +258,11 @@
       gap: var(--space-sm);
       overflow: hidden;
       transition:
-        flex-basis var(--dur-short) var(--ease-out),
-        width var(--dur-short) var(--ease-out),
-        padding var(--dur-short) var(--ease-out),
-        opacity var(--dur-short) var(--ease-out),
-        border-color var(--dur-short) var(--ease-out);
+        flex-basis var(--dur-enter) var(--ease-settle),
+        width var(--dur-enter) var(--ease-settle),
+        padding var(--dur-enter) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle);
     }
     .chat-shell.sidebar-collapsed .chat-sidebar {
       flex-basis: 0;
@@ -442,13 +463,12 @@
       gap: 0.25rem;
       border-radius: var(--radius-input);
       padding: 0.4rem 0.3rem 0.4rem 0.5rem;
-      cursor: grab;
+      cursor: pointer;
       color: var(--color-ink-2);
       font-size: var(--text-sm);
       transition: background var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out);
       position: relative;
     }
-    .convo-item:active { cursor: grabbing; }
     .convo-item:hover { background: var(--color-paper-2); }
     .convo-item.is-active {
       background: color-mix(in oklch, var(--color-accent) 14%, var(--color-paper-2));
@@ -767,6 +787,16 @@
       color: var(--color-ink);
       box-shadow: 0 12px 32px oklch(0% 0 0 / 0.35);
       pointer-events: auto;
+      transform-origin: top center;
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+      transition:
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-short) var(--ease-settle);
+    }
+    .chat-model-menu.is-open {
+      opacity: 1;
+      transform: none;
     }
     .chat-model-menu.is-hidden { display: none !important; }
     .chat-model-option {
@@ -892,7 +922,16 @@
       flex-direction: column;
       gap: var(--space-md);
     }
-    .msg { display: flex; flex-direction: column; gap: 0.2rem; width: 100%; }
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      width: 100%;
+    }
+    .msg.motion-enter,
+    .agent-step.motion-enter {
+      will-change: transform, opacity;
+    }
     .msg-role-user { align-items: flex-end; }
     .msg-role-assistant { align-items: flex-start; }
     .msg-bubble {
@@ -1325,6 +1364,32 @@
       background: oklch(8% 0.02 260 / 0.55);
       display: grid; place-items: center;
       padding: 1.25rem; z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-theme) var(--ease-settle);
+    }
+    .dialog-backdrop.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .dialog-backdrop > .dialog,
+    .dialog-backdrop > .settings-dialog,
+    .dialog-backdrop > .search-dialog,
+    .dialog-backdrop > .unlock-dialog,
+    .dialog-backdrop > .project-dialog {
+      opacity: 0;
+      transform: translateY(12px) scale(0.985);
+      transition:
+        opacity var(--dur-enter) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-settle);
+    }
+    .dialog-backdrop.is-open > .dialog,
+    .dialog-backdrop.is-open > .settings-dialog,
+    .dialog-backdrop.is-open > .search-dialog,
+    .dialog-backdrop.is-open > .unlock-dialog,
+    .dialog-backdrop.is-open > .project-dialog {
+      opacity: 1;
+      transform: none;
     }
     .dialog.settings-dialog {
       position: relative;
@@ -1933,7 +1998,33 @@
     .composer-hint { font-size: var(--text-xs); color: var(--color-muted); }
     .composer-hint.is-warn { color: var(--color-warn); }
     .composer-hint a { color: inherit; text-decoration: underline; }
-    .composer-buttons { display: flex; gap: 0.35rem; flex: 0 0 auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .composer-buttons {
+      --composer-control-h: 2rem;
+      display: flex;
+      gap: 0.35rem;
+      flex: 0 0 auto;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .composer-buttons .btn-attach,
+    .composer-buttons .btn-think,
+    .composer-buttons .btn-agent,
+    .composer-buttons .btn-send,
+    .composer-buttons #btnStop {
+      height: var(--composer-control-h);
+      min-height: var(--composer-control-h);
+      box-sizing: border-box;
+      line-height: 1;
+    }
+    .composer-buttons .btn-attach {
+      width: var(--composer-control-h);
+      padding: 0;
+    }
+    .composer-buttons .btn-think { padding: 0 0.6rem; }
+    .composer-buttons .btn-agent { padding: 0 0.55rem 0 0.4rem; }
+    .composer-buttons .btn-send,
+    .composer-buttons #btnStop { padding: 0 0.9rem; }
     .composer-attachments {
       display: flex;
       flex-wrap: wrap;
@@ -1983,10 +2074,8 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 2.1rem;
-      height: 2.1rem;
       border: 1px solid var(--color-rule-2);
-      border-radius: 10px;
+      border-radius: var(--radius-input);
       background: transparent;
       color: var(--color-ink-2);
       cursor: pointer;
@@ -2045,7 +2134,7 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
       color: var(--color-muted);
-      padding: 0.28rem 0.6rem;
+      padding: 0 0.6rem;
       border-radius: 999px;
       border: 1px solid var(--color-rule);
       background: transparent;
@@ -2124,7 +2213,7 @@
       letter-spacing: 0.05em;
       text-transform: uppercase;
       color: var(--color-muted);
-      padding: 0.28rem 0.55rem 0.28rem 0.4rem;
+      padding: 0 0.55rem 0 0.4rem;
       border-radius: 999px;
       border-color: var(--color-rule);
       background: transparent;
@@ -2663,7 +2752,22 @@
       .msg-role-user .msg-bubble { max-width: 92%; }
     }
     @media (prefers-reduced-motion: reduce) {
-      * { transition-duration: 1ms !important; }
+      *, *::before, *::after {
+        transition-duration: 1ms !important;
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+      }
+      .btn:active:not(:disabled) { transform: none; }
+      .dialog-backdrop > .dialog,
+      .dialog-backdrop > .settings-dialog,
+      .dialog-backdrop > .search-dialog,
+      .dialog-backdrop > .unlock-dialog,
+      .dialog-backdrop > .project-dialog,
+      .chat-model-menu {
+        transform: none !important;
+      }
+      ::view-transition-old(root),
+      ::view-transition-new(root) { animation: none !important; }
     }
   </style>
 </head>
@@ -3386,20 +3490,84 @@
       return 'dark';
     }
 
+    function prefersReducedMotion() {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+
+    function motionEnter(el, { y = 14, duration = 220, delay = 0 } = {}) {
+      if (!el || prefersReducedMotion() || typeof el.animate !== 'function') return null;
+      el.classList.add('motion-enter');
+      const anim = el.animate(
+        [
+          { opacity: 0, transform: 'translateY(' + y + 'px)' },
+          { opacity: 1, transform: 'translateY(0)' },
+        ],
+        {
+          duration,
+          delay,
+          easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          fill: 'both',
+        }
+      );
+      anim.finished.finally(() => el.classList.remove('motion-enter')).catch(() => {});
+      return anim;
+    }
+
+    function openBackdrop(el) {
+      if (!el) return;
+      el.classList.remove('is-hidden');
+      // Force layout so the enter transition runs from opacity 0.
+      void el.offsetWidth;
+      requestAnimationFrame(() => el.classList.add('is-open'));
+    }
+
+    function closeBackdrop(el) {
+      if (!el) return;
+      el.classList.remove('is-open');
+      if (prefersReducedMotion() || el.classList.contains('is-hidden')) {
+        el.classList.add('is-hidden');
+        return;
+      }
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        el.classList.add('is-hidden');
+        el.removeEventListener('transitionend', onEnd);
+      };
+      const onEnd = (event) => {
+        if (event.target === el && event.propertyName === 'opacity') finish();
+      };
+      el.addEventListener('transitionend', onEnd);
+      window.setTimeout(finish, 360);
+    }
+
     function applyTheme(theme) {
       const pref = normalizeThemePref(theme);
       const resolved = resolveTheme(pref);
       const prevResolved = document.documentElement.dataset.theme;
       currentTheme = pref;
-      document.documentElement.dataset.theme = resolved;
-      document.documentElement.dataset.themePref = pref;
-      document.querySelectorAll('[data-theme-choice]').forEach((btn) => {
-        const active = btn.dataset.themeChoice === pref;
-        btn.classList.toggle('is-active', active);
-        btn.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      if (prevResolved !== resolved && typeof repaintStarfield === 'function') {
-        repaintStarfield();
+      const paint = () => {
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.dataset.themePref = pref;
+        document.querySelectorAll('[data-theme-choice]').forEach((btn) => {
+          const active = btn.dataset.themeChoice === pref;
+          btn.classList.toggle('is-active', active);
+          btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        if (prevResolved !== resolved && typeof repaintStarfield === 'function') {
+          repaintStarfield();
+        }
+      };
+      if (
+        prevResolved
+        && prevResolved !== resolved
+        && !prefersReducedMotion()
+        && typeof document.startViewTransition === 'function'
+      ) {
+        document.startViewTransition(paint);
+      } else {
+        paint();
       }
     }
 
@@ -4143,14 +4311,14 @@
       setUnlockModalError('');
       const input = document.getElementById('unlockModalPassphrase');
       if (input) input.value = '';
-      modal.classList.remove('is-hidden');
+      openBackdrop(modal);
       queueMicrotask(() => input?.focus());
     }
 
     function hideUnlockSession() {
       const modal = document.getElementById('unlockModal');
       if (!modal) return;
-      modal.classList.add('is-hidden');
+      closeBackdrop(modal);
       setUnlockModalError('');
       const input = document.getElementById('unlockModalPassphrase');
       if (input) input.value = '';
@@ -5013,7 +5181,7 @@
       fillSettingsFormFromState();
       refreshLocalDataPane();
       showSettingsPane('personalization');
-      settingsModal.classList.remove('is-hidden');
+      openBackdrop(settingsModal);
       document.getElementById('settingName').focus();
       loadUserSkills();
     }
@@ -5041,7 +5209,7 @@
     }
 
     function closeSettings() {
-      settingsModal.classList.add('is-hidden');
+      closeBackdrop(settingsModal);
       hideSkillEditor();
     }
 
@@ -5967,12 +6135,12 @@
       document.getElementById('projectName').value = project.name;
       document.getElementById('projectInstructions').value = project.instructions;
       document.getElementById('projectMemory').value = project.memory;
-      projectModal.classList.remove('is-hidden');
+      openBackdrop(projectModal);
       document.getElementById('projectName').focus();
     }
 
     function closeProjectSettings() {
-      projectModal.classList.add('is-hidden');
+      closeBackdrop(projectModal);
       editingProjectId = null;
     }
 
@@ -6417,7 +6585,7 @@
       row.appendChild(actions);
     }
 
-    function buildBubble(role, content, index, message) {
+    function buildBubble(role, content, index, message, { animate = false } = {}) {
       const row = document.createElement('div');
       row.className = 'msg msg-role-' + role;
       row.dataset.msgIndex = String(index);
@@ -6433,6 +6601,7 @@
         bubble.innerHTML = formatUserMessageHtml(message || { content });
       }
       attachMessageActions(row);
+      if (animate) queueMicrotask(() => motionEnter(row, { y: role === 'user' ? 10 : 14 }));
       return row;
     }
 
@@ -6719,18 +6888,25 @@
       chatModelMenu.style.left = Math.round(left) + 'px';
       chatModelMenu.style.width = Math.round(menuWidth) + 'px';
       chatModelMenu.style.right = 'auto';
-      chatModelMenu.style.transform = 'none';
     }
 
     function closeModelMenu() {
       if (!chatModelMenu || chatModelMenu.classList.contains('is-hidden')) return;
-      chatModelMenu.classList.add('is-hidden');
+      chatModelMenu.classList.remove('is-open');
       chatModelSelectWrap.classList.remove('is-open');
       chatModelSelect.setAttribute('aria-expanded', 'false');
       modelMenuActiveIndex = -1;
-      if (chatModelMenu.parentElement !== chatModelSelectWrap) {
-        chatModelSelectWrap.appendChild(chatModelMenu);
+      const finish = () => {
+        chatModelMenu.classList.add('is-hidden');
+        if (chatModelMenu.parentElement !== chatModelSelectWrap) {
+          chatModelSelectWrap.appendChild(chatModelMenu);
+        }
+      };
+      if (prefersReducedMotion()) {
+        finish();
+        return;
       }
+      window.setTimeout(finish, 180);
     }
 
     function paintModelMenuActive() {
@@ -6752,6 +6928,8 @@
       modelMenuActiveIndex = Math.max(0, modelMenuOptions.findIndex((o) => o.value === selectedChatModel));
       positionModelMenu();
       paintModelMenuActive();
+      void chatModelMenu.offsetWidth;
+      requestAnimationFrame(() => chatModelMenu.classList.add('is-open'));
     }
 
     function chooseModelOption(value) {
@@ -7010,7 +7188,9 @@
       renderSidebar();
 
       showThread(convo);
-      chatThread.appendChild(buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage));
+      chatThread.appendChild(
+        buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage, { animate: true })
+      );
       composerInput.value = '';
       clearPendingAttachments();
       composerMentionIds.clear();
@@ -7059,8 +7239,17 @@
       assistantRow.appendChild(bubble);
       attachMessageActions(assistantRow);
       chatThread.appendChild(assistantRow);
+      queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
       const thinkingOrb = mountOrb(orbCanvas, 20);
-      stream.dom = { row: assistantRow, statusEl, thinkingLabel, traceEl, answerEl, thinkingOrb };
+      stream.dom = {
+        row: assistantRow,
+        statusEl,
+        thinkingLabel,
+        traceEl,
+        answerEl,
+        thinkingOrb,
+        enteredSteps: 0,
+      };
       return stream.dom;
     }
 
@@ -7156,10 +7345,17 @@
           answerEl.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
           if (!streaming) enhanceCodeBlocks(answerEl);
           scrollThinkStreams(answerEl);
+          const steps = answerEl.querySelectorAll(':scope > .agent-step');
+          const seen = stream.enteredSteps || 0;
+          steps.forEach((el, index) => {
+            if (index >= seen) motionEnter(el, { y: 10, duration: 200, delay: Math.min(index - seen, 6) * 28 });
+          });
+          stream.enteredSteps = steps.length;
         }
       } else if (!streaming) {
         answerEl.innerHTML = '';
         delete answerEl.dataset.committedSig;
+        stream.enteredSteps = 0;
       }
 
       const toolLive = stream.timeline.some((part) => part.type === 'tool' && part.live);
@@ -7658,7 +7854,7 @@
 
     function closeSearchModal() {
       if (!searchModal) return;
-      searchModal.classList.add('is-hidden');
+      closeBackdrop(searchModal);
       if (searchModalInput) searchModalInput.value = '';
       searchActiveIndex = 0;
       searchResultItems = [];
@@ -7667,7 +7863,7 @@
     function openSearchModal() {
       if (!searchModal || !requireUnlockedData()) return;
       closeSettings();
-      searchModal.classList.remove('is-hidden');
+      openBackdrop(searchModal);
       if (searchModalInput) {
         searchModalInput.value = '';
         queueMicrotask(() => searchModalInput.focus());

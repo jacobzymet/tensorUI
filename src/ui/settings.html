@@ -47,7 +47,13 @@
       --text-display: clamp(1.5rem, 1.5vw + 1rem, 2rem);
 
       --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-      --dur-short: 180ms;
+      --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
+      --ease-press: linear;
+      --ease-release: cubic-bezier(0.34, 1.35, 0.64, 1);
+      --dur-press: 70ms;
+      --dur-short: 160ms;
+      --dur-enter: 220ms;
+      --dur-theme: 320ms;
       --radius-input: 6px;
       --radius-panel: 8px;
       --sidebar-w: 15rem;
@@ -140,12 +146,20 @@
       font-size: var(--text-sm);
       font-weight: 500;
       cursor: pointer;
-      transition: background var(--dur-short) var(--ease-out),
-                  border-color var(--dur-short) var(--ease-out),
-                  opacity var(--dur-short) var(--ease-out);
+      transform: translateZ(0);
+      transition:
+        background var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle),
+        color var(--dur-short) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-release);
     }
     .btn:hover { border-color: var(--color-accent); }
-    .btn:active { opacity: 0.88; }
+    .btn:active:not(:disabled) {
+      transform: scale(0.96);
+      transition-duration: var(--dur-press);
+      transition-timing-function: var(--ease-press);
+    }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn:disabled:hover { border-color: var(--color-rule-2); }
     .btn-primary {
@@ -659,6 +673,17 @@
       cursor: not-allowed;
     }
 
+    .wordmark { view-transition-name: tensor-wordmark; }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: var(--dur-theme);
+      animation-timing-function: var(--ease-settle);
+    }
+    ::view-transition-old(tensor-wordmark),
+    ::view-transition-new(tensor-wordmark) {
+      animation: none;
+      mix-blend-mode: normal;
+    }
     .dialog-backdrop {
       position: fixed;
       inset: 0;
@@ -667,6 +692,13 @@
       place-items: center;
       padding: var(--space-md);
       z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-theme) var(--ease-settle);
+    }
+    .dialog-backdrop.is-open {
+      opacity: 1;
+      pointer-events: auto;
     }
     .dialog {
       width: min(24rem, 100%);
@@ -674,6 +706,15 @@
       border: 1px solid var(--color-rule);
       border-radius: var(--radius-panel);
       padding: var(--space-md);
+      opacity: 0;
+      transform: translateY(12px) scale(0.985);
+      transition:
+        opacity var(--dur-enter) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-settle);
+    }
+    .dialog-backdrop.is-open .dialog {
+      opacity: 1;
+      transform: none;
     }
     .dialog h2 { font-size: var(--text-lg); margin-bottom: 0.35rem; }
     .dialog p {
@@ -741,7 +782,14 @@
       .content { padding: var(--space-md); }
     }
     @media (prefers-reduced-motion: reduce) {
-      * { transition-duration: 1ms !important; }
+      *, *::before, *::after {
+        transition-duration: 1ms !important;
+        animation-duration: 1ms !important;
+      }
+      .btn:active:not(:disabled),
+      .dialog { transform: none !important; }
+      ::view-transition-old(root),
+      ::view-transition-new(root) { animation: none !important; }
     }
   </style>
 </head>
@@ -940,12 +988,57 @@
         return 'dark';
       }
 
+      function prefersReducedMotion() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      }
+
+      function openBackdrop(el) {
+        if (!el) return;
+        el.classList.remove('is-hidden');
+        void el.offsetWidth;
+        requestAnimationFrame(() => el.classList.add('is-open'));
+      }
+
+      function closeBackdrop(el) {
+        if (!el) return;
+        el.classList.remove('is-open');
+        if (prefersReducedMotion() || el.classList.contains('is-hidden')) {
+          el.classList.add('is-hidden');
+          return;
+        }
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          el.classList.add('is-hidden');
+          el.removeEventListener('transitionend', onEnd);
+        };
+        const onEnd = (event) => {
+          if (event.target === el && event.propertyName === 'opacity') finish();
+        };
+        el.addEventListener('transitionend', onEnd);
+        window.setTimeout(finish, 360);
+      }
+
       function applyTheme(theme) {
         const pref = normalizeThemePref(theme);
         const resolved = resolveTheme(pref);
+        const prevResolved = document.documentElement.dataset.theme;
         currentTheme = pref;
-        document.documentElement.dataset.theme = resolved;
-        document.documentElement.dataset.themePref = pref;
+        const paint = () => {
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.dataset.themePref = pref;
+        };
+        if (
+          prevResolved
+          && prevResolved !== resolved
+          && !prefersReducedMotion()
+          && typeof document.startViewTransition === 'function'
+        ) {
+          document.startViewTransition(paint);
+        } else {
+          paint();
+        }
       }
 
       if (window.matchMedia) {
@@ -1390,13 +1483,13 @@
         show(id, name) {
           pendingRemoveId = id;
           document.getElementById('removeProviderBody').textContent =
-            'Remove “' + (name || 'this provider') + '” from tensorUI? The remote host is unchanged.'
+            'Remove “' + (name || 'this provider') + '” from tensorUI? The API host is unchanged.'
             + (activeProvider()?.id === id ? ' Chat will need another active provider.' : '');
-          document.getElementById('removeProviderModal').classList.remove('is-hidden');
+          openBackdrop(document.getElementById('removeProviderModal'));
         },
         hide() {
           pendingRemoveId = '';
-          document.getElementById('removeProviderModal').classList.add('is-hidden');
+          closeBackdrop(document.getElementById('removeProviderModal'));
         },
       };
 
