@@ -84,8 +84,10 @@ const ORB_PRESETS = {
     },
   },
 };
-/* Multiplied into the grayscale ink value; max channel 1 keeps highlights bright. */
-const ORB_TINT = [0.72, 0.84, 1];
+/* Multiplied into the grayscale ink value; max channel 1 keeps highlights bright.
+ * Tuned to the cobalt accent (oklch(70% 0.15 255)) so the mark reads as part of
+ * the accent family rather than a neutral gray sphere. */
+const ORB_TINT = [0.62, 0.79, 1];
 
 /** Deterministic hash in [0, 1). */
 function orbHash(a, b) {
