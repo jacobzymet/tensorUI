@@ -50,7 +50,8 @@ pub fn extract_attachment(req: ExtractRequest) -> Result<ExtractResponse, String
         || mime == "application/javascript"
         || looks_like_text_filename(&lower_name)
     {
-        let text = String::from_utf8(bytes).map_err(|_| "File is not valid UTF-8 text".to_string())?;
+        let text =
+            String::from_utf8(bytes).map_err(|_| "File is not valid UTF-8 text".to_string())?;
         return Ok(ExtractResponse {
             text: normalize_extracted_text(&text),
             kind: "text",
@@ -69,21 +70,49 @@ fn decode_base64(raw: &str) -> Result<Vec<u8>, String> {
         .unwrap_or(trimmed);
     base64::engine::general_purpose::STANDARD
         .decode(payload.trim())
-        .or_else(|_| {
-            base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload.trim())
-        })
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload.trim()))
         .map_err(|error| format!("Invalid base64 attachment payload: {error}"))
 }
 
 fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
-    pdf_extract::extract_text_from_mem(bytes).map_err(|error| format!("PDF extract failed: {error}"))
+    pdf_extract::extract_text_from_mem(bytes)
+        .map_err(|error| format!("PDF extract failed: {error}"))
 }
 
 fn looks_like_text_filename(name: &str) -> bool {
     const EXTS: &[&str] = &[
-        ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".xml", ".html", ".htm",
-        ".css", ".js", ".ts", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h",
-        ".hpp", ".yml", ".yaml", ".toml", ".ini", ".log", ".sql", ".sh", ".bat", ".ps1",
+        ".txt",
+        ".md",
+        ".markdown",
+        ".csv",
+        ".tsv",
+        ".json",
+        ".jsonl",
+        ".xml",
+        ".html",
+        ".htm",
+        ".css",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".py",
+        ".rs",
+        ".go",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".yml",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".log",
+        ".sql",
+        ".sh",
+        ".bat",
+        ".ps1",
     ];
     EXTS.iter().any(|ext| name.ends_with(ext))
 }

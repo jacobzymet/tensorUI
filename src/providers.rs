@@ -1191,10 +1191,10 @@ fn fetch_ollama_vision_capability(
 ) -> Option<bool> {
     let body = fetch_ollama_show_body(root, token, model, timeout)?;
     let caps = body.get("capabilities")?.as_array()?;
-    Some(caps.iter().any(|c| {
-        c.as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case("vision"))
-    }))
+    Some(
+        caps.iter()
+            .any(|c| c.as_str().is_some_and(|s| s.eq_ignore_ascii_case("vision"))),
+    )
 }
 
 fn fetch_lmstudio_vision_map(

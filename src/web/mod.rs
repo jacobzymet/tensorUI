@@ -870,11 +870,10 @@ async fn import_skill(
 async fn extract_attachment(
     Json(body): Json<ExtractRequest>,
 ) -> Result<Json<attachments::ExtractResponse>, ApiError> {
-    let extracted =
-        tokio::task::spawn_blocking(move || attachments::extract_attachment(body))
-            .await
-            .map_err(|error| ApiError::bad_request(error.to_string()))?
-            .map_err(ApiError::bad_request)?;
+    let extracted = tokio::task::spawn_blocking(move || attachments::extract_attachment(body))
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map_err(ApiError::bad_request)?;
     Ok(Json(extracted))
 }
 
