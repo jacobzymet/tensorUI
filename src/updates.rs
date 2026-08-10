@@ -189,14 +189,12 @@ async fn fetch_latest_release() -> Result<UpdateStatus, String> {
 
 /// Return a cached or freshly fetched update status.
 pub async fn check(force: bool) -> UpdateStatus {
-    if !force {
-        if let Ok(guard) = cache().lock() {
-            if let Some(cached) = guard.as_ref() {
-                if cached.at.elapsed() < CACHE_TTL {
-                    return cached.status.clone();
-                }
-            }
-        }
+    if !force
+        && let Ok(guard) = cache().lock()
+        && let Some(cached) = guard.as_ref()
+        && cached.at.elapsed() < CACHE_TTL
+    {
+        return cached.status.clone();
     }
 
     let status = match fetch_latest_release().await {
