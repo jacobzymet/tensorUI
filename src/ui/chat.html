@@ -1207,15 +1207,12 @@
     .agent-answer { min-width: 0; }
 
     .think-block {
-      margin: 0 0 0.9rem;
-      padding: 0 0 0 0.85rem;
+      margin: 0;
+      padding: 0;
       border: 0;
-      border-left: 2px solid color-mix(in oklch, var(--color-rule) 85%, transparent);
       background: transparent;
       border-radius: 0;
-    }
-    .think-block.is-streaming {
-      border-left-color: color-mix(in oklch, var(--color-accent) 70%, var(--color-rule));
+      min-width: 0;
     }
     .think-block > summary {
       list-style: none;
@@ -1234,15 +1231,6 @@
       transition: color var(--dur-short) var(--ease-out);
     }
     .think-block > summary::-webkit-details-marker { display: none; }
-    .think-block > summary::before {
-      content: "";
-      width: 0.35rem;
-      height: 0.35rem;
-      border-radius: 999px;
-      background: var(--color-rule-2);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-rule) 35%, transparent);
-      transition: background var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out);
-    }
     .think-summary-label { flex: 0 1 auto; min-width: 0; }
     .think-chevron {
       flex: 0 0 auto;
@@ -1257,13 +1245,8 @@
     .think-block[open] > summary { color: var(--color-ink-2); }
     .think-block[open] > summary .think-chevron { transform: rotate(180deg); }
     .think-block.is-streaming > summary { color: var(--color-ink); }
-    .think-block.is-streaming > summary::before {
-      background: var(--color-accent);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 22%, transparent);
-      animation: think-pulse 1.4s var(--ease-in-out) infinite;
-    }
     .think-live {
-      margin: 0.15rem 0 0.85rem;
+      margin: 0;
       min-width: 0;
     }
     .think-stream, .think-body {
@@ -2092,24 +2075,32 @@
     .agent-step {
       display: grid;
       grid-template-columns: 1.1rem minmax(0, 1fr);
-      gap: 0.55rem 0.7rem;
+      column-gap: 0.7rem;
       position: relative;
+      align-items: start;
     }
     .agent-step + .agent-step { margin-top: 0.15rem; }
     .agent-step-rail {
       position: relative;
       display: flex;
       justify-content: center;
+      /* Shared for think + tool so the left rail stays on one vertical axis. */
       padding-top: 0.4rem;
+      width: 1.1rem;
     }
-    .agent-step:not(:last-child) .agent-step-rail::after {
+    /* Connect consecutive timeline steps (think ↔ tool) on one shared rail. */
+    .agent-step:has(+ .agent-step) .agent-step-rail::after,
+    .agent-step:has(+ .agent-live) .agent-step-rail::after {
       content: "";
       position: absolute;
       top: 1rem;
-      bottom: -0.35rem;
+      bottom: calc(-0.15rem - 0.85rem);
+      left: 50%;
       width: 1px;
+      transform: translateX(-50%);
       background: color-mix(in oklch, var(--color-rule) 80%, transparent);
     }
+    .agent-live:empty { display: none; }
     .agent-step-dot {
       width: 0.45rem;
       height: 0.45rem;
@@ -2117,6 +2108,7 @@
       background: var(--color-rule-2);
       box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-paper) 80%, var(--color-rule));
       z-index: 1;
+      flex: 0 0 auto;
     }
     .agent-step.is-live .agent-step-dot {
       background: var(--color-accent);
@@ -2127,6 +2119,15 @@
       background: color-mix(in oklch, var(--color-ok) 75%, var(--color-rule));
       box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-ok) 14%, transparent);
       animation: none;
+    }
+    .agent-step.is-think:not(.is-live) .agent-step-dot {
+      background: var(--color-rule-2);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-rule) 35%, transparent);
+      animation: none;
+    }
+    /* Tool cards have extra top padding; nudge the rail to the title row. */
+    .agent-step:not(.is-think) .agent-step-rail {
+      padding-top: 0.62rem;
     }
     .agent-step-card {
       min-width: 0;
@@ -4764,16 +4765,34 @@
     const THINK_CHEVRON =
       '<svg class="think-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 
+    function agentStepRailHtml() {
+      return '<div class="agent-step-rail"><span class="agent-step-dot" aria-hidden="true"></span></div>';
+    }
+
+    function wrapTimelineStep(innerHtml, { think = false, live = false, done = false } = {}) {
+      const classes = ['agent-step'];
+      if (think) classes.push('is-think');
+      if (live) classes.push('is-live');
+      if (done) classes.push('is-done');
+      return (
+        '<div class="' + classes.join(' ') + '">' +
+          agentStepRailHtml() +
+          innerHtml +
+        '</div>'
+      );
+    }
+
     function renderThinkBlock(content, { open, streaming }) {
       const mode = settings.thinking;
       if (mode === 'hidden') return '';
       const live = streaming && open;
       const md = renderThinkMarkdown(content);
       if (live && mode !== 'visible') {
-        return (
+        return wrapTimelineStep(
           '<div class="think-live" aria-label="Reasoning progress">' +
             '<div class="think-stream">' + md + '</div>' +
-          '</div>'
+          '</div>',
+          { think: true, live: true }
         );
       }
       const detailsOpen = mode === 'visible' || (mode === 'collapsed' && live);
@@ -4783,13 +4802,13 @@
       const body = live
         ? '<div class="think-stream">' + md + '</div>'
         : '<div class="think-body">' + md + '</div>';
-      return (
+      const details =
         '<details class="think-block' + (live ? ' is-streaming' : '') + '"' +
         (detailsOpen ? ' open' : '') + '>' +
         '<summary>' + summary + '</summary>' +
         body +
-        '</details>'
-      );
+        '</details>';
+      return wrapTimelineStep(details, { think: true, live });
     }
 
     function renderCommittedParts(parts) {
@@ -4886,18 +4905,15 @@
     }
 
     function agentStepHtml({ name, detail, result, live }) {
-      const state = live ? 'is-live' : 'is-done';
-      return (
-        '<div class="agent-step ' + state + '">' +
-          '<div class="agent-step-rail"><span class="agent-step-dot" aria-hidden="true"></span></div>' +
-          '<div class="agent-step-card">' +
-            '<div class="agent-step-kind">' + escapeHtml(skillLabel(name)) + '</div>' +
-            (detail
-              ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em> · ' + escapeHtml(detail) + '</div>'
-              : '') +
-            agentStepResultHtml(result) +
-          '</div>' +
-        '</div>'
+      return wrapTimelineStep(
+        '<div class="agent-step-card">' +
+          '<div class="agent-step-kind">' + escapeHtml(skillLabel(name)) + '</div>' +
+          (detail
+            ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em> · ' + escapeHtml(detail) + '</div>'
+            : '') +
+          agentStepResultHtml(result) +
+        '</div>',
+        { live: !!live, done: !live }
       );
     }
 
@@ -6407,7 +6423,9 @@
         return !!segment.content.trim();
       });
       if (hasOther) return false;
-      let streamEl = rootEl.querySelector(':scope > .think-live > .think-stream, :scope > .think-block.is-streaming > .think-stream');
+      let streamEl = rootEl.querySelector(
+        ':scope > .agent-step.is-think .think-stream, :scope > .think-live > .think-stream, :scope > .think-block.is-streaming > .think-stream'
+      );
       if (!streamEl) {
         rootEl.innerHTML = renderThinkBlock(openThink.content, { open: true, streaming: true });
         streamEl = rootEl.querySelector('.think-stream');

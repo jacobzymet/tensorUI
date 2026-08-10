@@ -339,14 +339,28 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
                 depth.label()
             ),
         };
-        lines.push(format!(
+        let mut web_line = format!(
             "Tool web_search — search the public web via DuckDuckGo. {depth_note}"
-        ));
+        );
+        if skills.fetch_url {
+            web_line.push_str(
+                " After results arrive, you may call fetch_url on promising http(s) URLs if you need more detail than the snippets/excerpts already provide."
+            );
+        }
+        lines.push(web_line);
     }
     if skills.fetch_url {
-        lines.push(format!(
+        let mut fetch_line = format!(
             "Tool fetch_url — open one http(s) URL and extract readable text (~{FETCH_URL_MAX_CHARS} characters)."
-        ));
+        );
+        if skills.web_search {
+            fetch_line.push_str(
+                " Useful after web_search when a specific result page deserves a fuller read, or when the user already gave a concrete URL."
+            );
+        } else {
+            fetch_line.push_str(" Prefer when the user already gave a concrete URL.");
+        }
+        lines.push(fetch_line);
     }
     if !user_skills.is_empty() {
         lines.push(
@@ -695,11 +709,19 @@ fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) 
 fn openai_tools_payload(skills: &AgentSkills, user_skills: &[UserSkill]) -> Vec<Value> {
     let mut tools = Vec::new();
     if skills.web_search {
+        let mut description = String::from(
+            "Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.",
+        );
+        if skills.fetch_url {
+            description.push_str(
+                " After you get results, you may call fetch_url on promising result URLs if you need more detail than snippets/excerpts.",
+            );
+        }
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "web_search",
-                "description": "Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.",
+                "description": description,
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -714,11 +736,16 @@ fn openai_tools_payload(skills: &AgentSkills, user_skills: &[UserSkill]) -> Vec<
         }));
     }
     if skills.fetch_url {
+        let description = if skills.web_search {
+            "Open one specific http(s) URL and extract readable page text. Use after web_search for a fuller read of a promising result, or when the user already gave a concrete URL."
+        } else {
+            "Open one specific http(s) URL and extract readable page text. Prefer when the user already gave a concrete URL."
+        };
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "fetch_url",
-                "description": "Open one specific http(s) URL and extract readable page text. Prefer when the user already gave a concrete URL.",
+                "description": description,
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -870,7 +897,13 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            duckduckgo_search(query, skills.web_search_depth).await
+            let mut result = duckduckgo_search(query, skills.web_search_depth).await?;
+            if skills.fetch_url {
+                result.push_str(
+                    "\n\nNote: fetch_url is available. If a result URL looks useful and you need more detail than the snippets/excerpts above, call fetch_url on that URL before answering.",
+                );
+            }
+            Ok(result)
         }
         "fetch_url" => {
             let url = call
