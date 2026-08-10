@@ -4,11 +4,13 @@
 pub mod chat;
 pub mod skills;
 
-use std::time::Duration;
+use std::{io::ErrorKind, process::Stdio, time::Duration};
 
+use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -20,11 +22,11 @@ use crate::{
 };
 
 const MAX_AGENT_ROUNDS: usize = 6;
-const SEARCH_TIMEOUT: Duration = Duration::from_secs(25);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_SEARCH_RESULTS: usize = 6;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
 const FETCH_URL_MAX_CHARS: usize = 8_000;
+const DDGS_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentRequest {
@@ -916,7 +918,7 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let (result, note) = duckduckgo_search(query, skills.web_search_depth).await?;
+            let (result, note) = ddgs_web_search(query, skills.web_search_depth).await?;
             let ui_result = result.clone();
             let mut model_result = result;
             if skills.fetch_url {
@@ -979,6 +981,166 @@ struct SearchHit {
     snippet: String,
 }
 
+#[derive(Deserialize)]
+struct DdgsSearchResponse {
+    results: Vec<DdgsSearchHit>,
+}
+
+#[derive(Deserialize)]
+struct DdgsSearchHit {
+    title: String,
+    url: String,
+    snippet: String,
+}
+
+async fn ddgs_web_search(query: &str, depth: WebSearchDepth) -> Result<(String, String), String> {
+    let hits = ddgs_search_hits(query).await?;
+    if hits.is_empty() {
+        return Err("DDGS returned no linked results.".to_string());
+    }
+
+    let mut out = format!("Web search results for {query:?} (DDGS):\n");
+    for (index, hit) in hits.iter().take(MAX_SEARCH_RESULTS).enumerate() {
+        out.push_str(&format!(
+            "\n{}. {}\n   URL: {}\n   {}\n",
+            index + 1,
+            hit.title,
+            hit.url,
+            hit.snippet
+        ));
+    }
+    append_scraped_pages(&mut out, &hits, depth).await;
+    Ok((out, "via DDGS".to_string()))
+}
+
+async fn ddgs_search_hits(query: &str) -> Result<Vec<SearchHit>, String> {
+    let request = serde_json::to_string(&json!({
+        "query": query,
+        "max_results": MAX_SEARCH_RESULTS,
+    }))
+    .map_err(|error| format!("Could not encode DDGS request: {error}"))?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(request);
+
+    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut candidates: Vec<(std::path::PathBuf, Vec<&str>)> = Vec::new();
+    if cfg!(windows) {
+        candidates.push((
+            project_root
+                .join(".venv")
+                .join("Scripts")
+                .join("python.exe"),
+            Vec::new(),
+        ));
+        candidates.push(("py".into(), vec!["-3"]));
+        candidates.push(("python".into(), Vec::new()));
+    } else {
+        candidates.push((
+            project_root.join(".venv").join("bin").join("python"),
+            Vec::new(),
+        ));
+        candidates.push(("python3".into(), Vec::new()));
+        candidates.push(("python".into(), Vec::new()));
+    }
+
+    let mut found_python = false;
+    let mut missing_ddgs = false;
+    let mut unsupported_python = false;
+    let mut missing_python_runtime = false;
+    let mut runtime_error = None;
+    for (program, prefix) in candidates {
+        let output = tokio::time::timeout(
+            DDGS_TIMEOUT,
+            Command::new(&program)
+                .args(prefix)
+                .arg("-c")
+                .arg(include_str!("ddgs_search.py"))
+                .arg(&payload)
+                .stdin(Stdio::null())
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .map_err(|_| "DDGS search timed out after 45 seconds.".to_string())?;
+
+        let output = match output {
+            Ok(output) => {
+                found_python = true;
+                output
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!("Could not start {}: {error}", program.display()));
+            }
+        };
+
+        if output.status.success() {
+            let response: DdgsSearchResponse = serde_json::from_slice(&output.stdout)
+                .map_err(|error| format!("Invalid DDGS response: {error}"))?;
+            return Ok(response
+                .results
+                .into_iter()
+                .filter(|hit| !hit.title.trim().is_empty() && scrapeable_url(&hit.url))
+                .take(MAX_SEARCH_RESULTS)
+                .map(|hit| SearchHit {
+                    title: hit.title,
+                    url: hit.url,
+                    snippet: hit.snippet,
+                })
+                .collect());
+        }
+
+        let detail = String::from_utf8_lossy(&output.stderr);
+        if detail.contains("TENSORUI_DDGS_NOT_INSTALLED") {
+            missing_ddgs = true;
+            continue;
+        }
+        if detail.contains("TENSORUI_DDGS_PYTHON_VERSION") {
+            unsupported_python = true;
+            continue;
+        }
+        let lower_detail = detail.to_ascii_lowercase();
+        if lower_detail.contains("no installed python found")
+            || lower_detail.contains("python was not found")
+            || lower_detail.contains("no suitable python runtime found")
+        {
+            missing_python_runtime = true;
+            continue;
+        }
+        let message = detail
+            .strip_prefix("TENSORUI_DDGS_ERROR:")
+            .unwrap_or(detail.trim())
+            .trim();
+        runtime_error = Some(truncate_chars(message, 360));
+    }
+
+    if let Some(error) = runtime_error {
+        return Err(format!("DDGS search failed: {error}"));
+    }
+    if missing_ddgs {
+        return Err(ddgs_setup_message("The `ddgs` package is not installed."));
+    }
+    if unsupported_python {
+        return Err(ddgs_setup_message("Python 3.10 or newer is required."));
+    }
+    if missing_python_runtime {
+        return Err(ddgs_setup_message("Python was not found."));
+    }
+    if !found_python {
+        return Err(ddgs_setup_message("Python was not found."));
+    }
+    Err(ddgs_setup_message(
+        "No usable Python installation was found.",
+    ))
+}
+
+fn ddgs_setup_message(reason: &str) -> String {
+    format!(
+        "{reason} Install Python 3.10+, then set up DDGS from the repository: Windows: `py -3 -m venv .venv` then `.venv\\Scripts\\python -m pip install -r requirements-search.txt`; macOS/Linux: `python3 -m venv .venv` then `./.venv/bin/python -m pip install -r requirements-search.txt`."
+    )
+}
+
+/* Retired direct DuckDuckGo HTTP implementation. DDGS now owns provider selection,
+request handling, parsing, and failover.
 #[derive(Debug, Clone, Copy)]
 enum SearchBackend {
     Lite,
@@ -1236,6 +1398,7 @@ async fn duckduckgo_instant_answer(
     Ok(out)
 }
 
+*/
 async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], depth: WebSearchDepth) {
     let Some((page_count, max_chars)) = depth.scrape_plan() else {
         return;
@@ -1463,6 +1626,7 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
+/* Retired direct DuckDuckGo HTML parsers.
 fn parse_ddg_html(html: &str) -> Vec<SearchHit> {
     let mut hits = Vec::new();
     let mut rest = html;
@@ -1578,6 +1742,7 @@ fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
     Some(&s[start..end])
 }
 
+*/
 fn strip_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -1605,6 +1770,7 @@ fn html_unescape(s: &str) -> String {
         .replace("&apos;", "'")
 }
 
+/* Redirect decoder used only by the retired direct parser.
 fn decode_ddg_href(href: &str) -> String {
     let full = if let Some(rest) = href.strip_prefix("//") {
         format!("https://{rest}")
@@ -1654,6 +1820,7 @@ fn from_hex(b: u8) -> Option<u8> {
     }
 }
 
+*/
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1773,12 +1940,6 @@ mod tests {
         let visible = strip_think_blocks(text);
         let call = extract_tool_call(&visible).unwrap();
         assert_eq!(call.arguments["query"], "hi");
-    }
-
-    #[test]
-    fn decodes_ddg_redirect() {
-        let href = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpath&rut=x";
-        assert_eq!(decode_ddg_href(href), "https://example.com/path");
     }
 
     #[test]

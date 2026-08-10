@@ -1,4 +1,5 @@
 /target/
+/.venv/
 **/*.rs.bk
 .agents/
 skills-lock.json

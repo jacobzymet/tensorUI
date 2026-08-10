@@ -11,10 +11,25 @@ tensorUI does **not** run an inference server. You point it at a base URL such a
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (for building from source)
+- [Python 3.10+](https://www.python.org/downloads/) with `ddgs` (for web search)
 - A modern web browser
 - An OpenAI-compatible or Anthropic Messages–compatible API endpoint
 
 ## Run
+
+Create an isolated environment and install the pinned search dependency once:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-search.txt
+```
+
+On macOS or Linux:
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements-search.txt
+```
 
 ```
 cargo run -- --open
