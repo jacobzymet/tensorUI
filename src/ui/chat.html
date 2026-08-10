@@ -540,6 +540,12 @@
       text-align: left;
       transition: background var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out);
     }
+    .sidebar-link svg {
+      flex: 0 0 auto;
+      width: 1rem;
+      height: 1rem;
+      opacity: 0.88;
+    }
     .sidebar-link:hover {
       background: var(--surface-hover);
       color: var(--color-ink);
@@ -3559,7 +3565,10 @@
       <div class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-section" aria-label="Workspace">
           <p class="sidebar-label">Workspace</p>
-          <button type="button" class="sidebar-link" id="btnProjectsNav">Projects</button>
+          <button type="button" class="sidebar-link" id="btnProjectsNav">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/><path d="M2 10v10a2 2 0 0 0 2 2h14"/></svg>
+            <span>Projects</span>
+          </button>
         </div>
         <div id="sidebarProjectContext" class="sidebar-project-context is-hidden"></div>
         <p class="sidebar-label" id="sidebarConvoLabel">Recents</p>
