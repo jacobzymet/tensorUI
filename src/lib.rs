@@ -8,6 +8,7 @@ pub mod http;
 pub mod providers;
 pub mod store;
 pub mod system;
+pub mod updates;
 pub mod web;
 
 pub use agent::{chat, skills};

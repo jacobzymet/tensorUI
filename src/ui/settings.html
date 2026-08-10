@@ -960,6 +960,19 @@
       color: var(--color-muted);
       font-family: var(--font-mono);
     }
+    .statusbar-trailing {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      min-width: 0;
+    }
+    .statusbar-trailing .btn {
+      height: 1.55rem;
+      min-height: 1.55rem;
+      padding: 0 0.55rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.02em;
+    }
 
     .sidebar-backdrop { display: none; }
 
@@ -1116,7 +1129,10 @@
 
       <footer class="statusbar">
         <span id="statusDetail">Connecting…</span>
-        <span id="statusVersion"></span>
+        <div class="statusbar-trailing">
+          <button type="button" class="btn btn-ghost" id="btnCheckUpdates" title="Check GitHub for a newer release">Check for updates</button>
+          <span id="statusVersion"></span>
+        </div>
       </footer>
     </div>
   </div>
@@ -1971,6 +1987,41 @@
       pollTimer = setInterval(refreshState, 1000);
       window.addEventListener('beforeunload', () => {
         if (pollTimer) clearInterval(pollTimer);
+      });
+
+      document.getElementById('btnCheckUpdates')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btnCheckUpdates');
+        const versionEl = document.getElementById('statusVersion');
+        const previous = btn ? btn.textContent : '';
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Checking…';
+        }
+        try {
+          const response = await fetch('/api/updates/check?force=1');
+          const status = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(status.error || ('HTTP ' + response.status));
+          if (status.error) throw new Error(status.error);
+          if (status.update_available && status.latest) {
+            const latest = 'v' + String(status.latest).replace(/^v/i, '');
+            const url = status.release_url || 'https://github.com/jacobzymet/tensorUI/releases';
+            if (versionEl) versionEl.textContent = latest + ' available';
+            if (window.confirm('tensorUI ' + latest + ' is available. Open the release page?')) {
+              window.open(url, '_blank', 'noopener,noreferrer');
+            }
+          } else {
+            const current = status.current ? ('v' + String(status.current).replace(/^v/i, '')) : 'this build';
+            if (versionEl && status.current) versionEl.textContent = 'v' + String(status.current).replace(/^v/i, '');
+            window.alert('You’re up to date (' + current + ').');
+          }
+        } catch (error) {
+          window.alert('Could not check for updates: ' + (error.message || error));
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = previous || 'Check for updates';
+          }
+        }
       });
     })();
   </script>

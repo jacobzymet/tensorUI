@@ -141,7 +141,8 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             "/api/skills/{id}",
             axum::routing::patch(update_skill).delete(delete_skill),
         )
-        .route("/api/attachments/extract", post(extract_attachment));
+        .route("/api/attachments/extract", post(extract_attachment))
+        .route("/api/updates/check", get(check_updates));
 
     let router = Router::new()
         .route("/", get(chat_page))
@@ -960,6 +961,22 @@ async fn focus(State(_app): State<SharedApp>) -> Result<Json<InstanceInfo>, ApiE
         version: env!("CARGO_PKG_VERSION"),
         focused: false,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateCheckQuery {
+    #[serde(default)]
+    force: Option<String>,
+}
+
+async fn check_updates(
+    axum::extract::Query(query): axum::extract::Query<UpdateCheckQuery>,
+) -> Result<Json<crate::updates::UpdateStatus>, ApiError> {
+    let force = matches!(
+        query.force.as_deref().map(str::trim),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    );
+    Ok(Json(crate::updates::check(force).await))
 }
 
 fn with_app(app: SharedApp, action: impl FnOnce(&mut App)) -> Result<Json<AppState>, ApiError> {
