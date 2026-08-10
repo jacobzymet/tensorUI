@@ -149,8 +149,8 @@ fn read_json_file(path: &Path) -> Result<Option<Value>> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("could not read {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
@@ -221,10 +221,7 @@ fn encode_for_disk(value: &Value, key: Option<&crypto::DiskKey>, aad: &[u8]) -> 
 }
 
 pub fn encryption_enabled(root: &Path) -> bool {
-    crypto::load_meta(root)
-        .ok()
-        .flatten()
-        .is_some()
+    crypto::load_meta(root).ok().flatten().is_some()
 }
 
 pub fn load_chats(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, StoreError> {
@@ -256,7 +253,10 @@ pub fn save_chats(
         return Err(StoreError::Locked);
     }
     let normalized = normalize_store(value);
-    if !normalized.get("projects").map(|v| v.is_array()).unwrap_or(false)
+    if !normalized
+        .get("projects")
+        .map(|v| v.is_array())
+        .unwrap_or(false)
         || !normalized
             .get("conversations")
             .map(|v| v.is_array())
@@ -350,8 +350,12 @@ mod tests {
     fn preferences_roundtrip() {
         let dir = tempdir().unwrap();
         let root = dir.path();
-        save_preferences(root, serde_json::json!({ "name": "Ada", "agentMode": true }), None)
-            .unwrap();
+        save_preferences(
+            root,
+            serde_json::json!({ "name": "Ada", "agentMode": true }),
+            None,
+        )
+        .unwrap();
         let loaded = load_preferences(root, None).unwrap();
         assert_eq!(loaded["name"], "Ada");
         assert_eq!(loaded["agentMode"], true);

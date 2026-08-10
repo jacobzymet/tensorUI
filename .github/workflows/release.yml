@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARGET="${{ matrix.target }}"
+          ARCHIVE="${{ matrix.archive }}"
+          BIN_NAME="tensorui"
+          EXT=""
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            EXT=".exe"
+          fi
+          SRC="target/${TARGET}/release/${BIN_NAME}${EXT}"
+          STAGING_NAME="${BIN_NAME}-${VERSION}-${TARGET}"
+          mkdir -p "dist/${STAGING_NAME}"
+          cp "${SRC}" "dist/${STAGING_NAME}/"
+          cp README.md "dist/${STAGING_NAME}/"
+          ASSET_NAME="${STAGING_NAME}.${ARCHIVE}"
+          if [[ "${ARCHIVE}" == "zip" ]]; then
+            # tar is available on GitHub Windows runners; avoids needing zip(1).
+            tar -a -cf "dist/${ASSET_NAME}" -C dist "${STAGING_NAME}"
+          else
+            tar -czf "dist/${ASSET_NAME}" -C dist "${STAGING_NAME}"
+          fi
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tensorui-${{ matrix.target }}
+          path: dist/tensorui-*.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: false
+          generate_release_notes: true
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

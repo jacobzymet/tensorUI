@@ -22,8 +22,8 @@ use crate::{
     chat,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
-        normalize_openai_base, probe_provider_catalog, probe_provider_health,
-        probe_provider_style, provider_base_same_host,
+        normalize_openai_base, probe_provider_catalog, probe_provider_health, probe_provider_style,
+        provider_base_same_host,
     },
     store::{self, StorageMode},
     system,
@@ -249,9 +249,8 @@ async fn set_ui_theme(
     State(app): State<SharedApp>,
     Json(body): Json<ThemeRequest>,
 ) -> Result<Json<AppState>, ApiError> {
-    let theme = crate::config::UiTheme::parse(&body.theme).ok_or_else(|| {
-        ApiError::bad_request("theme must be \"dark\", \"light\", or \"system\"")
-    })?;
+    let theme = crate::config::UiTheme::parse(&body.theme)
+        .ok_or_else(|| ApiError::bad_request("theme must be \"dark\", \"light\", or \"system\""))?;
     with_app(app, |app| app.set_ui_theme(theme))
 }
 
@@ -343,22 +342,15 @@ async fn chat_title(
                     "No provider configured. Add one in Settings.",
                 ));
             };
-            let api_base = normalize_openai_base(&active.base).ok_or_else(|| {
-                ApiError::bad_request("Active provider has an invalid base URL.")
-            })?;
+            let api_base = normalize_openai_base(&active.base)
+                .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
             (api_base, active.token.clone(), active.api_style)
         }
     };
 
-    let title = chat::generate_chat_title(
-        &api_base,
-        &token,
-        api_style,
-        model.as_deref(),
-        message,
-    )
-    .await
-    .map_err(ApiError::bad_request)?;
+    let title = chat::generate_chat_title(&api_base, &token, api_style, model.as_deref(), message)
+        .await
+        .map_err(ApiError::bad_request)?;
     Ok(Json(ChatTitleResponse { title }))
 }
 
@@ -404,9 +396,8 @@ async fn chat_completions(
                     "No provider configured. Add one in Settings.",
                 ));
             };
-            let api_base = normalize_openai_base(&active.base).ok_or_else(|| {
-                ApiError::bad_request("Active provider has an invalid base URL.")
-            })?;
+            let api_base = normalize_openai_base(&active.base)
+                .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
             Some((api_base, active.token.clone(), active.api_style))
         };
         (remote, user_skills)
@@ -522,7 +513,12 @@ async fn test_provider(
         let trimmed = body.token.trim().to_string();
         if !trimmed.is_empty() {
             trimmed
-        } else if let Some(id) = body.id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        } else if let Some(id) = body
+            .id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
             let app = app.lock().map_err(|_| ApiError::lock())?;
             app.config
                 .providers
@@ -541,8 +537,7 @@ async fn test_provider(
     let probe_token = token.clone();
     let (probe, catalog) = tokio::task::spawn_blocking(move || {
         let probe = probe_provider_style(&probe_base, &probe_token, forced_style);
-        let catalog = if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty)
-        {
+        let catalog = if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty) {
             Some(probe_provider_catalog(
                 &probe_base,
                 &probe_token,
@@ -744,12 +739,15 @@ async fn open_data_dir(State(app): State<SharedApp>) -> Result<Json<serde_json::
     let path = {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         let root = app.data_dir();
-        store::ensure_data_dir(&root).map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+        store::ensure_data_dir(&root)
+            .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
         root
     };
     system::open_in_file_manager(&path)
         .map_err(|error| ApiError::bad_request(format!("could not open folder: {error}")))?;
-    Ok(Json(serde_json::json!({ "ok": true, "path": path.display().to_string() })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "path": path.display().to_string() }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

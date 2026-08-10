@@ -36,9 +36,7 @@ pub fn url_allows_insecure_tls(url: &str) -> bool {
 }
 
 fn build_client(timeout: Duration, insecure: bool, user_agent: &str) -> Client {
-    let mut builder = Client::builder()
-        .timeout(timeout)
-        .user_agent(user_agent);
+    let mut builder = Client::builder().timeout(timeout).user_agent(user_agent);
     if insecure {
         builder = builder.danger_accept_invalid_certs(true);
     }

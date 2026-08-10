@@ -339,9 +339,8 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
                 depth.label()
             ),
         };
-        let mut web_line = format!(
-            "Tool web_search — search the public web via DuckDuckGo. {depth_note}"
-        );
+        let mut web_line =
+            format!("Tool web_search — search the public web via DuckDuckGo. {depth_note}");
         if skills.fetch_url {
             web_line.push_str(
                 " After results arrive, you may call fetch_url on promising http(s) URLs if you need more detail than the snippets/excerpts already provide."
@@ -518,15 +517,7 @@ where
             if line.ends_with('\r') {
                 line.pop();
             }
-            apply_openai_sse_line(
-                &line,
-                content,
-                reasoning,
-                native_tools,
-                forwarding,
-                tx,
-            )
-            .await?;
+            apply_openai_sse_line(&line, content, reasoning, native_tools, forwarding, tx).await?;
         }
     }
     Ok(())
@@ -555,10 +546,7 @@ where
             if line.ends_with('\r') {
                 line.pop();
             }
-            for frame in translator
-                .push_line(&line)
-                .map_err(StreamFail::Other)?
-            {
+            for frame in translator.push_line(&line).map_err(StreamFail::Other)? {
                 apply_openai_sse_frame(&frame, content, reasoning, native_tools, forwarding, tx)
                     .await?;
             }
@@ -609,8 +597,8 @@ async fn apply_openai_sse_line(
         return Ok(());
     };
 
-    if let Some(chunk) = delta_string(delta, "reasoning_content")
-        .or_else(|| delta_string(delta, "reasoning"))
+    if let Some(chunk) =
+        delta_string(delta, "reasoning_content").or_else(|| delta_string(delta, "reasoning"))
     {
         reasoning.push_str(chunk);
         if *forwarding {
@@ -656,7 +644,10 @@ async fn apply_openai_sse_line(
 }
 
 fn delta_string<'a>(delta: &'a Value, key: &str) -> Option<&'a str> {
-    delta.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    delta
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
 }
 
 fn append_tool_arguments(slot: &mut AccumToolCall, args: &Value) {
@@ -760,10 +751,7 @@ fn openai_tools_payload(skills: &AgentSkills, user_skills: &[UserSkill]) -> Vec<
         }));
     }
     if !user_skills.is_empty() {
-        let names: Vec<String> = user_skills
-            .iter()
-            .map(|skill| skill.name.clone())
-            .collect();
+        let names: Vec<String> = user_skills.iter().map(|skill| skill.name.clone()).collect();
         tools.push(json!({
             "type": "function",
             "function": {
@@ -793,9 +781,8 @@ fn tool_call_from_native(slots: &[Option<AccumToolCall>]) -> Option<ToolCall> {
     let arguments = if call.arguments.trim().is_empty() {
         json!({})
     } else {
-        serde_json::from_str::<Value>(&call.arguments).unwrap_or_else(|_| {
-            json!({ "raw": call.arguments })
-        })
+        serde_json::from_str::<Value>(&call.arguments)
+            .unwrap_or_else(|_| json!({ "raw": call.arguments }))
     };
     Some(ToolCall {
         id: if call.id.trim().is_empty() {
@@ -1539,7 +1526,10 @@ mod tests {
     #[test]
     fn finalize_keeps_reasoning_when_content_empty() {
         let turn = resolve_streamed_turn("planning a search", "", &[]);
-        assert!(turn.assistant_text().contains("<think>planning a search</think>"));
+        assert!(
+            turn.assistant_text()
+                .contains("<think>planning a search</think>")
+        );
         assert!(turn.tool.is_none());
     }
 

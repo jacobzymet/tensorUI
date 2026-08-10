@@ -132,8 +132,8 @@ pub fn load_meta(root: &Path) -> Result<Option<EncryptionMeta>> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(&path)
-        .with_context(|| format!("could not read {}", path.display()))?;
+    let raw =
+        fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
@@ -291,9 +291,7 @@ pub fn validate_passphrase(passphrase: &str) -> Result<()> {
 
 pub fn is_envelope(value: &Value) -> bool {
     matches!(
-        value
-            .get("tensorui_crypto")
-            .and_then(|v| v.as_u64()),
+        value.get("tensorui_crypto").and_then(|v| v.as_u64()),
         Some(1 | 2)
     ) && value.get("ciphertext").and_then(|v| v.as_str()).is_some()
         && value.get("nonce").and_then(|v| v.as_str()).is_some()
@@ -412,8 +410,7 @@ mod tests {
     fn aad_mismatch_fails() {
         let salt = random_salt().unwrap();
         let key = derive_key("correct horse battery", &salt).unwrap();
-        let envelope =
-            encrypt_value(&key, &serde_json::json!({ "a": 1 }), AAD_CHATS).unwrap();
+        let envelope = encrypt_value(&key, &serde_json::json!({ "a": 1 }), AAD_CHATS).unwrap();
         assert!(decrypt_value(&key, &envelope, AAD_PREFERENCES).is_err());
     }
 
@@ -422,8 +419,7 @@ mod tests {
         let salt = random_salt().unwrap();
         let key = derive_key("passphrase-one", &salt).unwrap();
         let other = derive_key("passphrase-two", &salt).unwrap();
-        let envelope =
-            encrypt_value(&key, &serde_json::json!({ "a": 1 }), AAD_CHATS).unwrap();
+        let envelope = encrypt_value(&key, &serde_json::json!({ "a": 1 }), AAD_CHATS).unwrap();
         assert!(decrypt_value(&other, &envelope, AAD_CHATS).is_err());
     }
 

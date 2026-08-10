@@ -10,6 +10,8 @@ use crate::{
     store::{self, StorageMode, StoreError},
 };
 
+type WarmTarget = (ApiStyle, String, String);
+
 #[derive(Debug)]
 pub struct App {
     pub config: Config,
@@ -166,12 +168,7 @@ impl App {
         false
     }
 
-    pub fn provider_warm_targets(
-        &self,
-    ) -> (
-        Vec<(ApiStyle, String, String)>,
-        Option<(ApiStyle, String, String)>,
-    ) {
+    pub fn provider_warm_targets(&self) -> (Vec<WarmTarget>, Option<WarmTarget>) {
         let health_targets = self
             .config
             .providers
@@ -508,12 +505,12 @@ impl App {
         let _ = store::load_preferences(&root, Some(&key)).map_err(Self::map_store_err)?;
 
         // Migrate legacy meta to include a key verifier (and bump version).
-        if meta.verifier.is_none() {
-            if let Ok(verifier) = crypto::make_verifier(&key) {
-                meta.version = 2;
-                meta.verifier = Some(verifier);
-                let _ = crypto::save_meta(&root, &meta);
-            }
+        if meta.verifier.is_none()
+            && let Ok(verifier) = crypto::make_verifier(&key)
+        {
+            meta.version = 2;
+            meta.verifier = Some(verifier);
+            let _ = crypto::save_meta(&root, &meta);
         }
 
         self.disk_key = Some(key);

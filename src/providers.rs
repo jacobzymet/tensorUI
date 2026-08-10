@@ -119,16 +119,9 @@ impl ProvidersConfig {
             }
         }
         if self.active_provider_id.trim().is_empty()
-            || !self
-                .items
-                .iter()
-                .any(|p| p.id == self.active_provider_id)
+            || !self.items.iter().any(|p| p.id == self.active_provider_id)
         {
-            self.active_provider_id = self
-                .items
-                .first()
-                .map(|p| p.id.clone())
-                .unwrap_or_default();
+            self.active_provider_id = self.items.first().map(|p| p.id.clone()).unwrap_or_default();
         }
     }
 
@@ -222,11 +215,7 @@ impl ProvidersConfig {
         }
         self.items.retain(|p| p.id != id);
         if self.active_provider_id == id {
-            self.active_provider_id = self
-                .items
-                .first()
-                .map(|p| p.id.clone())
-                .unwrap_or_default();
+            self.active_provider_id = self.items.first().map(|p| p.id.clone()).unwrap_or_default();
         }
         Ok(())
     }
@@ -412,10 +401,10 @@ impl HealthCache {
     }
 
     pub fn probe(&self, style: ApiStyle, base: &str, token: &str) -> ProviderHealth {
-        if self.is_fresh(style, base, token) {
-            if let Some(health) = self.peek(style, base, token) {
-                return health;
-            }
+        if self.is_fresh(style, base, token)
+            && let Some(health) = self.peek(style, base, token)
+        {
+            return health;
         }
         let health = probe_provider_health(base, token, style);
         self.put(style, base, token, health.clone());
@@ -445,13 +434,12 @@ impl CatalogCache {
         if let Ok(mut guard) = self.last.lock() {
             // A transient probe failure often yields []. Don't wipe a good catalog —
             // just refresh the TTL so we retry later without flickering the selector.
-            if catalog.is_empty() {
-                if let Some((at, existing)) = guard.get_mut(&key) {
-                    if !existing.is_empty() {
-                        *at = Instant::now();
-                        return;
-                    }
-                }
+            if catalog.is_empty()
+                && let Some((at, existing)) = guard.get_mut(&key)
+                && !existing.is_empty()
+            {
+                *at = Instant::now();
+                return;
             }
             guard.insert(key, (Instant::now(), catalog));
         }
@@ -464,10 +452,10 @@ impl CatalogCache {
         token: &str,
         extra_ports: &[u16],
     ) -> Vec<RemoteModelOption> {
-        if self.is_fresh(style, base, token) {
-            if let Some(catalog) = self.peek(style, base, token) {
-                return catalog;
-            }
+        if self.is_fresh(style, base, token)
+            && let Some(catalog) = self.peek(style, base, token)
+        {
+            return catalog;
         }
         let catalog = probe_provider_catalog(base, token, style, extra_ports);
         self.put(style, base, token, catalog.clone());
@@ -557,7 +545,8 @@ pub fn detect_provider_api_style(base: &str, token: &str) -> (ApiStyle, Provider
     }
 
     let prefer_anthropic = anthropic_score > openai_score
-        || (anthropic_score == openai_score && style_hint(base, token) == Some(ApiStyle::Anthropic));
+        || (anthropic_score == openai_score
+            && style_hint(base, token) == Some(ApiStyle::Anthropic));
 
     if prefer_anthropic {
         (
@@ -721,11 +710,7 @@ pub fn classify_provider_error(error: &str) -> ProviderHealthKind {
     ProviderHealthKind::Error
 }
 
-fn fetch_remote_models(
-    base: &str,
-    token: &str,
-    style: ApiStyle,
-) -> Result<Vec<String>, String> {
+fn fetch_remote_models(base: &str, token: &str, style: ApiStyle) -> Result<Vec<String>, String> {
     fetch_remote_models_with_timeout(base, token, style, Duration::from_secs(2))
 }
 
@@ -863,11 +848,7 @@ fn thinking_from_models_endpoint(
             out.insert(id.to_string(), supported);
         }
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn thinking_hint_from_model_object(entry: &serde_json::Value) -> Option<bool> {
@@ -935,10 +916,10 @@ fn fetch_ollama_thinking_capability(
     }
     let body = response.json::<serde_json::Value>().ok()?;
     let caps = body.get("capabilities")?.as_array()?;
-    Some(
-        caps.iter()
-            .any(|c| c.as_str().is_some_and(|s| s.eq_ignore_ascii_case("thinking"))),
-    )
+    Some(caps.iter().any(|c| {
+        c.as_str()
+            .is_some_and(|s| s.eq_ignore_ascii_case("thinking"))
+    }))
 }
 
 fn fetch_lmstudio_thinking_map(
@@ -985,18 +966,16 @@ fn fetch_lmstudio_thinking_map(
                         reasoning.as_bool().unwrap_or(false)
                     }
                 } else {
-                    caps.get("thinking").and_then(|v| v.as_bool()).unwrap_or(false)
+                    caps.get("thinking")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
                 }
             }
             None => continue,
         };
         out.insert(id.to_string(), supported);
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn props_root_from_openai_base(base: &str) -> Option<String> {
@@ -1131,8 +1110,7 @@ pub fn probe_provider_catalog(
         let Ok(models) = fetch_remote_models_with_timeout(&candidate, token, style, timeout) else {
             continue;
         };
-        let thinking =
-            fetch_remote_thinking_support(&candidate, token, style, &models, timeout);
+        let thinking = fetch_remote_thinking_support(&candidate, token, style, &models, timeout);
         for model in models {
             let id = format!("remote|{candidate}|{model}");
             if !seen.insert(id.clone()) {
@@ -1260,6 +1238,30 @@ fn template_suggests_thinking(template: &str) -> bool {
     false
 }
 
+fn jinja_mentions_ident(template: &str, ident: &str) -> bool {
+    let mut rest = template;
+    while let Some(open) = rest.find("{{").or_else(|| rest.find("{%")) {
+        let chunk = &rest[open..];
+        let close = if chunk.starts_with("{{") {
+            chunk.find("}}").map(|i| i + 2)
+        } else {
+            chunk.find("%}").map(|i| i + 2)
+        };
+        let Some(end) = close else { break };
+        let block = &chunk[..end];
+        if block
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|tok| tok.eq_ignore_ascii_case(ident))
+        {
+            return true;
+        }
+        rest = &chunk[end..];
+    }
+    template
+        .to_ascii_lowercase()
+        .contains(&ident.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1307,28 +1309,4 @@ mod tests {
         assert_eq!(classify_route_status(401), RouteSignal::Present);
         assert_eq!(classify_route_status(200), RouteSignal::Present);
     }
-}
-
-fn jinja_mentions_ident(template: &str, ident: &str) -> bool {
-    let mut rest = template;
-    while let Some(open) = rest.find("{{").or_else(|| rest.find("{%")) {
-        let chunk = &rest[open..];
-        let close = if chunk.starts_with("{{") {
-            chunk.find("}}").map(|i| i + 2)
-        } else {
-            chunk.find("%}").map(|i| i + 2)
-        };
-        let Some(end) = close else { break };
-        let block = &chunk[..end];
-        if block
-            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-            .any(|tok| tok.eq_ignore_ascii_case(ident))
-        {
-            return true;
-        }
-        rest = &chunk[end..];
-    }
-    template
-        .to_ascii_lowercase()
-        .contains(&ident.to_ascii_lowercase())
 }

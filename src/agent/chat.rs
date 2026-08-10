@@ -16,8 +16,7 @@ pub(crate) const CHANNEL_CAPACITY: usize = 32;
 
 /// SSE byte frames. Work runs as a child of this stream: client disconnect
 /// drops the body → drops the worker → drops the upstream HTTP response.
-pub type ChatStream =
-    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
+pub type ChatStream = Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
 #[derive(Debug)]
 pub(crate) enum StreamFail {
@@ -117,8 +116,8 @@ pub fn stream_remote_completion(
             }
             ApiStyle::Anthropic => {
                 let url = format!("{api_base}/messages");
-                let anth = anthropic::openai_to_anthropic_messages(&payload)
-                    .map_err(StreamFail::Other)?;
+                let anth =
+                    anthropic::openai_to_anthropic_messages(&payload).map_err(StreamFail::Other)?;
                 proxy_anthropic_sse(&api_base, &url, &token, &anth, &tx).await
             }
         }
@@ -164,9 +163,11 @@ async fn proxy_openai_sse(
     let response = match open_llm_sse(api_base, url, ApiStyle::Openai, token, payload).await {
         Ok(response) => response,
         Err(StreamFail::Other(message)) => {
-            return Err(StreamFail::Other(
-                message.replacen("LLM API", upstream_label, 1),
-            ));
+            return Err(StreamFail::Other(message.replacen(
+                "LLM API",
+                upstream_label,
+                1,
+            )));
         }
         Err(StreamFail::Cancelled) => return Err(StreamFail::Cancelled),
     };
@@ -194,10 +195,7 @@ async fn proxy_anthropic_sse(
             if line.ends_with('\r') {
                 line.pop();
             }
-            for frame in translator
-                .push_line(&line)
-                .map_err(StreamFail::Other)?
-            {
+            for frame in translator.push_line(&line).map_err(StreamFail::Other)? {
                 send_sse(tx, frame).await?;
             }
             if translator.is_finished() {
@@ -299,10 +297,7 @@ pub async fn generate_chat_title(
         let text = response.text().await.unwrap_or_default();
         return Err(format!("title request failed ({status}): {text}"));
     }
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| error.to_string())?;
+    let value: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
     let raw = match style {
         ApiStyle::Openai => extract_openai_title_text(&value),
         ApiStyle::Anthropic => extract_anthropic_text(&value),
@@ -347,10 +342,10 @@ fn extract_openai_title_text(value: &serde_json::Value) -> String {
             }
         }
     }
-    if text.trim().is_empty() {
-        if let Some(legacy) = value.pointer("/choices/0/text").and_then(|v| v.as_str()) {
-            text = legacy.to_string();
-        }
+    if text.trim().is_empty()
+        && let Some(legacy) = value.pointer("/choices/0/text").and_then(|v| v.as_str())
+    {
+        text = legacy.to_string();
     }
     strip_think_blocks(&text)
 }
@@ -436,7 +431,7 @@ fn sanitize_chat_title(raw: &str) -> Option<String> {
         }
     }
     title = title
-        .trim_end_matches(|c: char| matches!(c, '.' | '!' | '?' | ':' | ';'))
+        .trim_end_matches(['.', '!', '?', ':', ';'])
         .trim()
         .to_string();
     // Reject titles that are just the raw user greeting when the model echoed it.

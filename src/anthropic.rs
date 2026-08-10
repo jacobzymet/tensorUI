@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Read};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u64 = 8192;
@@ -162,19 +162,18 @@ fn message_content_to_text(msg: &Value) -> String {
 }
 
 fn push_anthropic_message(messages: &mut Vec<Value>, role: &str, content: &str) {
-    if let Some(last) = messages.last_mut() {
-        if last.get("role").and_then(|v| v.as_str()) == Some(role) {
-            if let Some(existing) = last.get("content").and_then(|v| v.as_str()) {
-                let merged = if existing.is_empty() {
-                    content.to_string()
-                } else {
-                    format!("{existing}\n\n{content}")
-                };
-                last.as_object_mut()
-                    .map(|obj| obj.insert("content".into(), Value::String(merged)));
-                return;
-            }
-        }
+    if let Some(last) = messages.last_mut()
+        && last.get("role").and_then(|v| v.as_str()) == Some(role)
+        && let Some(existing) = last.get("content").and_then(|v| v.as_str())
+    {
+        let merged = if existing.is_empty() {
+            content.to_string()
+        } else {
+            format!("{existing}\n\n{content}")
+        };
+        last.as_object_mut()
+            .map(|obj| obj.insert("content".into(), Value::String(merged)));
+        return;
     }
     messages.push(json!({
         "role": role,
@@ -305,10 +304,7 @@ impl AnthropicSseTranslator {
             "content_block_start" => {
                 let block = payload.get("content_block").cloned().unwrap_or(Value::Null);
                 if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                    let index = payload
-                        .get("index")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
+                    let index = payload.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     self.tool_index = Some(index);
                     self.tool_id = block
                         .get("id")
