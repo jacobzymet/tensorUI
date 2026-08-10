@@ -47,6 +47,31 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      - name: Install Python for search helper
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-search.txt
+            requirements-search-build.txt
+
+      - name: Install search helper dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-search-build.txt
+
+      - name: Build standalone search helper
+        run: python -m PyInstaller --noconfirm --clean --onefile --name tensorui-search --collect-all ddgs --distpath target/search-helper --workpath target/search-helper-build --specpath target src/agent/ddgs_search.py
+
+      - name: Verify standalone search helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXT=""
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            EXT=".exe"
+          fi
+          "target/search-helper/tensorui-search${EXT}" --self-test
+
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
@@ -63,9 +88,11 @@ jobs:
             EXT=".exe"
           fi
           SRC="target/${TARGET}/release/${BIN_NAME}${EXT}"
+          SEARCH_HELPER="target/search-helper/tensorui-search${EXT}"
           STAGING_NAME="${BIN_NAME}-${VERSION}-${TARGET}"
           mkdir -p "dist/${STAGING_NAME}"
           cp "${SRC}" "dist/${STAGING_NAME}/"
+          cp "${SEARCH_HELPER}" "dist/${STAGING_NAME}/"
           cp README.md "dist/${STAGING_NAME}/"
           ASSET_NAME="${STAGING_NAME}.${ARCHIVE}"
           if [[ "${ARCHIVE}" == "zip" ]]; then

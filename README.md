@@ -11,13 +11,15 @@ tensorUI does **not** run an inference server. You point it at a base URL such a
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (for building from source)
-- [Python 3.10+](https://www.python.org/downloads/) with `ddgs` (for web search)
+- [Python 3.10+](https://www.python.org/downloads/) with `ddgs` (only for web search when running from a source checkout; release archives include a standalone helper)
 - A modern web browser
 - An OpenAI-compatible or Anthropic Messages–compatible API endpoint
 
 ## Run
 
-Create an isolated environment and install the pinned search dependency once:
+Official release archives include `tensorui-search`, a standalone web-search helper containing its own Python runtime and pinned DDGS dependency. Keep it beside the main `tensorui` executable; no system Python installation is needed.
+
+When running from a source checkout, create an isolated environment and install the pinned search dependency once:
 
 ```powershell
 py -3 -m venv .venv
@@ -105,8 +107,17 @@ Env override for bind: `TENSORUI_BIND=127.0.0.1:3930`. Non-loopback binds (`0.0.
 
 ## Build
 
-The release binary embeds Chat and Server HTML, `orb.js`, highlight.js, marked, DOMPurify, and icons:
+The Rust binary embeds Chat and Server HTML, `orb.js`, highlight.js, marked, DOMPurify, and icons:
 
 ```powershell
 cargo build --release
 ```
+
+That command builds the Rust application only. Web search can use the source checkout's `.venv` during development. The release workflow additionally builds `src/agent/ddgs_search.py` with PyInstaller and packages the resulting `tensorui-search` helper beside the Rust executable. To reproduce that helper locally:
+
+```powershell
+.\.venv\Scripts\python -m pip install -r requirements-search-build.txt
+.\.venv\Scripts\python -m PyInstaller --noconfirm --clean --onefile --name tensorui-search --collect-all ddgs --distpath target/search-helper --workpath target/search-helper-build --specpath target src/agent/ddgs_search.py
+```
+
+On macOS/Linux, use `./.venv/bin/python` for those two commands. You can override helper discovery with `TENSORUI_SEARCH_HELPER=/path/to/tensorui-search`; otherwise tensorUI checks beside its executable, the app-data `search-helper` folder, then source-development Python fallbacks.

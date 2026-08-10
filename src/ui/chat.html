@@ -3142,21 +3142,86 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable web search</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    DuckDuckGo search, then fetch page text from top results so the model can dig past headlines.
+                    Search through DDGS, then optionally fetch page text from top results so the model can dig past headlines.
                   </span>
                 </span>
               </label>
-              <div class="settings-row" id="webSearchDepthRow">
-                <label class="field-label" for="settingWebSearchDepth">Page depth</label>
-                <div>
-                  <select class="field-select" id="settingWebSearchDepth">
-                    <option value="auto">Auto (default) — 3 pages</option>
-                    <option value="off">Snippets only — no page fetch</option>
-                    <option value="light">Light — 2 pages</option>
-                    <option value="standard">Standard — 4 pages</option>
-                    <option value="deep">Deep — 6 pages</option>
+              <div id="webSearchOptions" style="display:grid;gap:1rem">
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchBackend">Search engine</label>
+                  <div>
+                    <select class="field-select" id="settingWebSearchBackend">
+                      <option value="auto">Auto (recommended)</option>
+                      <option value="duckduckgo">DuckDuckGo</option>
+                      <option value="brave">Brave</option>
+                      <option value="bing">Bing</option>
+                      <option value="google">Google</option>
+                      <option value="mojeek">Mojeek</option>
+                      <option value="startpage">Startpage</option>
+                      <option value="yahoo">Yahoo</option>
+                      <option value="yandex">Yandex</option>
+                      <option value="wikipedia">Wikipedia</option>
+                    </select>
+                    <p class="field-hint">Auto lets DDGS choose and fall back between available search engines.</p>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchResults">Result count</label>
+                  <div>
+                    <input class="field-input" id="settingWebSearchResults" type="number" min="1" max="20" step="1" value="6">
+                    <p class="field-hint">How many linked results to return to the model (1–20).</p>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchRegion">Region</label>
+                  <div>
+                    <input class="field-input" id="settingWebSearchRegion" type="text" list="webSearchRegionOptions" maxlength="5" value="us-en" spellcheck="false" autocomplete="off">
+                    <datalist id="webSearchRegionOptions">
+                      <option value="wt-wt">Worldwide</option>
+                      <option value="us-en">United States</option>
+                      <option value="uk-en">United Kingdom</option>
+                      <option value="ca-en">Canada (English)</option>
+                      <option value="ca-fr">Canada (French)</option>
+                      <option value="au-en">Australia</option>
+                      <option value="de-de">Germany</option>
+                      <option value="fr-fr">France</option>
+                      <option value="es-es">Spain</option>
+                      <option value="it-it">Italy</option>
+                      <option value="jp-jp">Japan</option>
+                    </datalist>
+                    <p class="field-hint">A DDGS region code such as <code>us-en</code>, <code>uk-en</code>, or <code>wt-wt</code> for worldwide.</p>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchSafeSearch">SafeSearch</label>
+                  <select class="field-select" id="settingWebSearchSafeSearch">
+                    <option value="moderate">Moderate (default)</option>
+                    <option value="on">Strict</option>
+                    <option value="off">Off</option>
                   </select>
-                  <p class="field-hint">How many result pages to open and how much text to extract after the search listing.</p>
+                </div>
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchRecency">Recency</label>
+                  <select class="field-select" id="settingWebSearchRecency">
+                    <option value="any">Any time</option>
+                    <option value="day">Past day</option>
+                    <option value="week">Past week</option>
+                    <option value="month">Past month</option>
+                    <option value="year">Past year</option>
+                  </select>
+                </div>
+                <div class="settings-row">
+                  <label class="field-label" for="settingWebSearchDepth">Page depth</label>
+                  <div>
+                    <select class="field-select" id="settingWebSearchDepth">
+                      <option value="auto">Auto (default) — 3 pages</option>
+                      <option value="off">Snippets only — no page fetch</option>
+                      <option value="light">Light — 2 pages</option>
+                      <option value="standard">Standard — 4 pages</option>
+                      <option value="deep">Deep — 6 pages</option>
+                    </select>
+                    <p class="field-hint">How many result pages to open and how much text to extract after the search listing.</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3431,6 +3496,9 @@
       max: 65536,
     };
     const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
+    const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'brave', 'bing', 'google', 'mojeek', 'startpage', 'yahoo', 'yandex', 'wikipedia'];
+    const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
+    const WEB_SEARCH_RECENCIES = ['any', 'day', 'week', 'month', 'year'];
     const ATTACHMENTS_MODES = ['auto', 'on', 'off'];
     const ATTACHMENT_MIN_CONTEXT = 16384;
     const ATTACHMENT_MAX_FILES = 6;
@@ -3444,6 +3512,11 @@
       enterSends: true,
       skillWebSearch: true,
       webSearchDepth: 'auto', // auto | off | light | standard | deep
+      webSearchBackend: 'auto',
+      webSearchResults: 6,
+      webSearchRegion: 'us-en',
+      webSearchSafeSearch: 'moderate',
+      webSearchRecency: 'any',
       skillFetchUrl: true,
       agentMode: false,
       attachmentsMode: 'auto', // auto | on | off
@@ -4047,6 +4120,8 @@
     function normalizeSettings(parsed) {
       if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
       const maxChars = Number(parsed.attachmentMaxChars);
+      const searchResults = Number(parsed.webSearchResults);
+      const searchRegion = String(parsed.webSearchRegion || '').trim().toLowerCase();
       return {
         name: typeof parsed.name === 'string' ? parsed.name : '',
         about: typeof parsed.about === 'string' ? parsed.about : '',
@@ -4062,6 +4137,21 @@
         webSearchDepth: WEB_SEARCH_DEPTHS.includes(parsed.webSearchDepth)
           ? parsed.webSearchDepth
           : DEFAULT_SETTINGS.webSearchDepth,
+        webSearchBackend: WEB_SEARCH_BACKENDS.includes(parsed.webSearchBackend)
+          ? parsed.webSearchBackend
+          : DEFAULT_SETTINGS.webSearchBackend,
+        webSearchResults: Number.isFinite(searchResults)
+          ? Math.min(20, Math.max(1, Math.round(searchResults)))
+          : DEFAULT_SETTINGS.webSearchResults,
+        webSearchRegion: /^[a-z]{2}-[a-z]{2}$/.test(searchRegion)
+          ? searchRegion
+          : DEFAULT_SETTINGS.webSearchRegion,
+        webSearchSafeSearch: WEB_SEARCH_SAFESEARCH.includes(parsed.webSearchSafeSearch)
+          ? parsed.webSearchSafeSearch
+          : DEFAULT_SETTINGS.webSearchSafeSearch,
+        webSearchRecency: WEB_SEARCH_RECENCIES.includes(parsed.webSearchRecency)
+          ? parsed.webSearchRecency
+          : DEFAULT_SETTINGS.webSearchRecency,
         skillFetchUrl: parsed.skillFetchUrl !== false,
         agentMode: parsed.agentMode === true,
         attachmentsMode: ATTACHMENTS_MODES.includes(parsed.attachmentsMode)
@@ -4131,6 +4221,11 @@
         && value.enterSends === DEFAULT_SETTINGS.enterSends
         && value.skillWebSearch === DEFAULT_SETTINGS.skillWebSearch
         && value.webSearchDepth === DEFAULT_SETTINGS.webSearchDepth
+        && value.webSearchBackend === DEFAULT_SETTINGS.webSearchBackend
+        && value.webSearchResults === DEFAULT_SETTINGS.webSearchResults
+        && value.webSearchRegion === DEFAULT_SETTINGS.webSearchRegion
+        && value.webSearchSafeSearch === DEFAULT_SETTINGS.webSearchSafeSearch
+        && value.webSearchRecency === DEFAULT_SETTINGS.webSearchRecency
         && value.skillFetchUrl === DEFAULT_SETTINGS.skillFetchUrl
         && value.agentMode === DEFAULT_SETTINGS.agentMode
         && value.attachmentsMode === DEFAULT_SETTINGS.attachmentsMode
@@ -4957,6 +5052,19 @@
           web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
             ? settings.webSearchDepth
             : 'auto',
+          web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
+            ? settings.webSearchBackend
+            : 'auto',
+          web_search_max_results: Math.min(20, Math.max(1, Number(settings.webSearchResults) || 6)),
+          web_search_region: /^[a-z]{2}-[a-z]{2}$/.test(settings.webSearchRegion)
+            ? settings.webSearchRegion
+            : 'us-en',
+          web_search_safesearch: WEB_SEARCH_SAFESEARCH.includes(settings.webSearchSafeSearch)
+            ? settings.webSearchSafeSearch
+            : 'moderate',
+          web_search_recency: WEB_SEARCH_RECENCIES.includes(settings.webSearchRecency)
+            ? settings.webSearchRecency
+            : 'any',
           fetch_url: fetchUrl,
         },
       };
@@ -5205,12 +5313,17 @@
       document.getElementById('settingEnterSends').checked = settings.enterSends;
       document.getElementById('settingSkillWebSearch').checked = settings.skillWebSearch;
       document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'auto';
+      document.getElementById('settingWebSearchBackend').value = settings.webSearchBackend || 'auto';
+      document.getElementById('settingWebSearchResults').value = String(settings.webSearchResults || 6);
+      document.getElementById('settingWebSearchRegion').value = settings.webSearchRegion || 'us-en';
+      document.getElementById('settingWebSearchSafeSearch').value = settings.webSearchSafeSearch || 'moderate';
+      document.getElementById('settingWebSearchRecency').value = settings.webSearchRecency || 'any';
       document.getElementById('settingSkillFetchUrl').checked = settings.skillFetchUrl;
       document.getElementById('settingAttachmentsMode').value = settings.attachmentsMode || 'auto';
       document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
       document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
       document.getElementById('settingAttachmentMaxChars').value = String(settings.attachmentMaxChars || 48000);
-      syncWebSearchDepthControls();
+      syncWebSearchControls();
       syncAttachmentFallbackControls();
     }
 
@@ -5223,12 +5336,14 @@
       loadUserSkills();
     }
 
-    function syncWebSearchDepthControls() {
+    function syncWebSearchControls() {
       const enabled = document.getElementById('settingSkillWebSearch').checked;
-      const depth = document.getElementById('settingWebSearchDepth');
-      const row = document.getElementById('webSearchDepthRow');
-      if (depth) depth.disabled = !enabled;
-      if (row) row.style.opacity = enabled ? '' : '0.55';
+      const options = document.getElementById('webSearchOptions');
+      if (!options) return;
+      options.querySelectorAll('input, select').forEach((control) => {
+        control.disabled = !enabled;
+      });
+      options.style.opacity = enabled ? '' : '0.55';
     }
 
     function syncAttachmentFallbackControls() {
@@ -5482,6 +5597,8 @@
     function commitSettings() {
       if (!requireUnlockedData()) return;
       const maxCharsRaw = Number(document.getElementById('settingAttachmentMaxChars').value);
+      const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
+      const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
       saveSettings({
         name: document.getElementById('settingName').value.trim(),
         about: document.getElementById('settingAbout').value,
@@ -5493,6 +5610,21 @@
         webSearchDepth: WEB_SEARCH_DEPTHS.includes(document.getElementById('settingWebSearchDepth').value)
           ? document.getElementById('settingWebSearchDepth').value
           : 'auto',
+        webSearchBackend: WEB_SEARCH_BACKENDS.includes(document.getElementById('settingWebSearchBackend').value)
+          ? document.getElementById('settingWebSearchBackend').value
+          : 'auto',
+        webSearchResults: Number.isFinite(searchResultsRaw)
+          ? Math.min(20, Math.max(1, Math.round(searchResultsRaw)))
+          : DEFAULT_SETTINGS.webSearchResults,
+        webSearchRegion: /^[a-z]{2}-[a-z]{2}$/.test(searchRegionRaw)
+          ? searchRegionRaw
+          : DEFAULT_SETTINGS.webSearchRegion,
+        webSearchSafeSearch: WEB_SEARCH_SAFESEARCH.includes(document.getElementById('settingWebSearchSafeSearch').value)
+          ? document.getElementById('settingWebSearchSafeSearch').value
+          : 'moderate',
+        webSearchRecency: WEB_SEARCH_RECENCIES.includes(document.getElementById('settingWebSearchRecency').value)
+          ? document.getElementById('settingWebSearchRecency').value
+          : 'any',
         skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
         agentMode: settings.agentMode,
         attachmentsMode: ATTACHMENTS_MODES.includes(document.getElementById('settingAttachmentsMode').value)
@@ -6371,6 +6503,10 @@
 
     /** When true, streaming/paint keeps the viewport pinned to the latest message. */
     let stickToBottom = true;
+    /** Explicit upward input wins until the user intentionally returns downward. */
+    let userScrollOverride = false;
+    let resumeBottomIntent = false;
+    let lastViewportScrollTop = 0;
     const STICK_BOTTOM_PX = 48;
 
     function isNearBottom() {
@@ -6380,24 +6516,50 @@
 
     function scrollToBottom({ force = false } = {}) {
       if (!force && !stickToBottom) return;
+      if (force) {
+        stickToBottom = true;
+        userScrollOverride = false;
+        resumeBottomIntent = false;
+      }
       chatViewport.scrollTop = chatViewport.scrollHeight;
-      if (force) stickToBottom = true;
+      lastViewportScrollTop = chatViewport.scrollTop;
     }
 
     function unpinFromBottom() {
       stickToBottom = false;
+      userScrollOverride = true;
+      resumeBottomIntent = false;
     }
 
     chatViewport.addEventListener('scroll', () => {
-      stickToBottom = isNearBottom();
+      const currentTop = chatViewport.scrollTop;
+      const movingDown = currentTop > lastViewportScrollTop + 0.5;
+      const nearBottom = isNearBottom();
+
+      if (userScrollOverride) {
+        if (nearBottom && (resumeBottomIntent || movingDown)) {
+          userScrollOverride = false;
+          resumeBottomIntent = false;
+          stickToBottom = true;
+        } else {
+          stickToBottom = false;
+        }
+      } else {
+        stickToBottom = nearBottom;
+      }
+
+      lastViewportScrollTop = currentTop;
     }, { passive: true });
     // Unpin immediately on intentional upward scroll (don't wait for layout).
     chatViewport.addEventListener('wheel', (event) => {
       if (event.deltaY < 0) unpinFromBottom();
+      else if (event.deltaY > 0 && userScrollOverride) resumeBottomIntent = true;
     }, { passive: true });
     chatViewport.addEventListener('keydown', (event) => {
       if (event.key === 'PageUp' || event.key === 'Home' || event.key === 'ArrowUp') {
         unpinFromBottom();
+      } else if (event.key === 'PageDown' || event.key === 'End' || event.key === 'ArrowDown') {
+        resumeBottomIntent = true;
       }
     });
     let touchStickY = null;
@@ -6407,7 +6569,15 @@
     chatViewport.addEventListener('touchmove', (event) => {
       if (touchStickY == null || !event.touches[0]) return;
       // Finger moving down → content scrolls up → user is reading earlier messages.
-      if (event.touches[0].clientY - touchStickY > 8) unpinFromBottom();
+      const nextY = event.touches[0].clientY;
+      const deltaY = nextY - touchStickY;
+      if (deltaY > 8) {
+        unpinFromBottom();
+        touchStickY = nextY;
+      } else if (deltaY < -8) {
+        if (userScrollOverride) resumeBottomIntent = true;
+        touchStickY = nextY;
+      }
     }, { passive: true });
 
     function greetingForNow() {
@@ -6733,6 +6903,8 @@
       activeId = id;
       activeProjectId = convo.projectId || null;
       stickToBottom = stickByConvo.has(id) ? stickByConvo.get(id) : true;
+      userScrollOverride = !stickToBottom;
+      resumeBottomIntent = false;
       showChatView();
       renderSidebar();
       showThread(convo);
@@ -6754,6 +6926,8 @@
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = null;
       stickToBottom = true;
+      userScrollOverride = false;
+      resumeBottomIntent = false;
       showChatView();
       renderSidebar();
       showEmptyState();
@@ -7427,6 +7601,19 @@
         web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
           ? settings.webSearchDepth
           : 'auto',
+        web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
+          ? settings.webSearchBackend
+          : 'auto',
+        web_search_max_results: Math.min(20, Math.max(1, Number(settings.webSearchResults) || 6)),
+        web_search_region: /^[a-z]{2}-[a-z]{2}$/.test(settings.webSearchRegion)
+          ? settings.webSearchRegion
+          : 'us-en',
+        web_search_safesearch: WEB_SEARCH_SAFESEARCH.includes(settings.webSearchSafeSearch)
+          ? settings.webSearchSafeSearch
+          : 'moderate',
+        web_search_recency: WEB_SEARCH_RECENCIES.includes(settings.webSearchRecency)
+          ? settings.webSearchRecency
+          : 'any',
         fetch_url: !!settings.skillFetchUrl,
       };
       const controller = new AbortController();
@@ -8053,7 +8240,7 @@
     document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
     document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
     document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
-    document.getElementById('settingSkillWebSearch').addEventListener('change', syncWebSearchDepthControls);
+    document.getElementById('settingSkillWebSearch').addEventListener('change', syncWebSearchControls);
     document.getElementById('btnSkillCreate').addEventListener('click', () => {
       openSkillEditor({
         name: '',

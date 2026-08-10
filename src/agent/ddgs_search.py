@@ -1,4 +1,3 @@
-import base64
 import json
 import sys
 
@@ -26,15 +25,40 @@ except ModuleNotFoundError as error:
     raise
 
 try:
-    encoded = sys.argv[-1]
-    encoded += "=" * (-len(encoded) % 4)
-    request = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+    if "--self-test" in sys.argv:
+        response = json.dumps(
+            {"ok": True, "protocol": 1}, ensure_ascii=True, separators=(",", ":")
+        )
+        sys.stdout.buffer.write(response.encode("ascii"))
+        raise SystemExit(0)
+
+    request = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+    if request.get("protocol", 1) != 1:
+        fail("TENSORUI_DDGS_ERROR", "unsupported search helper protocol")
     query = str(request.get("query", "")).strip()
     max_results = max(1, min(int(request.get("max_results", 6)), 20))
+    backend = str(request.get("backend", "auto")).strip().lower() or "auto"
+    region = str(request.get("region", "us-en")).strip().lower() or "us-en"
+    safesearch = str(request.get("safesearch", "moderate")).strip().lower()
+    recency = str(request.get("recency", "any")).strip().lower()
+    timelimit = {
+        "any": None,
+        "day": "d",
+        "week": "w",
+        "month": "m",
+        "year": "y",
+    }.get(recency)
     if not query:
         fail("TENSORUI_DDGS_ERROR", "query is empty")
 
-    raw_results = DDGS().text(query, max_results=max_results)
+    raw_results = DDGS().text(
+        query,
+        region=region,
+        safesearch=safesearch,
+        timelimit=timelimit,
+        max_results=max_results,
+        backend=backend,
+    )
     results = []
     for item in raw_results or []:
         url = clean(item.get("href") or item.get("url"))
@@ -50,7 +74,9 @@ try:
         )
     # Emit locale-independent ASCII JSON. This avoids Windows console code pages
     # producing non-UTF-8 bytes while still preserving Unicode through \u escapes.
-    response = json.dumps({"results": results}, ensure_ascii=True, separators=(",", ":"))
+    response = json.dumps(
+        {"protocol": 1, "results": results}, ensure_ascii=True, separators=(",", ":")
+    )
     sys.stdout.buffer.write(response.encode("ascii"))
 except SystemExit:
     raise

@@ -6,10 +6,10 @@ pub mod skills;
 
 use std::{io::ErrorKind, process::Stdio, time::Duration};
 
-use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
@@ -23,7 +23,8 @@ use crate::{
 
 const MAX_AGENT_ROUNDS: usize = 6;
 const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
-const MAX_SEARCH_RESULTS: usize = 6;
+const DEFAULT_SEARCH_RESULTS: usize = 6;
+const MAX_SEARCH_RESULTS: usize = 20;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
 const FETCH_URL_MAX_CHARS: usize = 8_000;
 const DDGS_TIMEOUT: Duration = Duration::from_secs(45);
@@ -78,19 +79,146 @@ impl WebSearchDepth {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchBackend {
+    #[default]
+    Auto,
+    Duckduckgo,
+    Brave,
+    Bing,
+    Google,
+    Mojeek,
+    Startpage,
+    Yahoo,
+    Yandex,
+    Wikipedia,
+}
+
+impl WebSearchBackend {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Duckduckgo => "duckduckgo",
+            Self::Brave => "brave",
+            Self::Bing => "bing",
+            Self::Google => "google",
+            Self::Mojeek => "mojeek",
+            Self::Startpage => "startpage",
+            Self::Yahoo => "yahoo",
+            Self::Yandex => "yandex",
+            Self::Wikipedia => "wikipedia",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchSafeSearch {
+    On,
+    #[default]
+    Moderate,
+    Off,
+}
+
+impl WebSearchSafeSearch {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Moderate => "moderate",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchRecency {
+    #[default]
+    Any,
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+impl WebSearchRecency {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Year => "year",
+        }
+    }
+}
+
+fn default_web_search_max_results() -> usize {
+    DEFAULT_SEARCH_RESULTS
+}
+
+fn default_web_search_region() -> String {
+    "us-en".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentSkills {
     #[serde(default)]
     pub web_search: bool,
     #[serde(default)]
     pub web_search_depth: WebSearchDepth,
     #[serde(default)]
+    pub web_search_backend: WebSearchBackend,
+    #[serde(default = "default_web_search_max_results")]
+    pub web_search_max_results: usize,
+    #[serde(default = "default_web_search_region")]
+    pub web_search_region: String,
+    #[serde(default)]
+    pub web_search_safesearch: WebSearchSafeSearch,
+    #[serde(default)]
+    pub web_search_recency: WebSearchRecency,
+    #[serde(default)]
     pub fetch_url: bool,
+}
+
+impl Default for AgentSkills {
+    fn default() -> Self {
+        Self {
+            web_search: false,
+            web_search_depth: WebSearchDepth::default(),
+            web_search_backend: WebSearchBackend::default(),
+            web_search_max_results: default_web_search_max_results(),
+            web_search_region: default_web_search_region(),
+            web_search_safesearch: WebSearchSafeSearch::default(),
+            web_search_recency: WebSearchRecency::default(),
+            fetch_url: false,
+        }
+    }
 }
 
 impl AgentSkills {
     pub fn any_enabled(&self) -> bool {
         self.web_search || self.fetch_url
+    }
+
+    fn search_result_count(&self) -> usize {
+        self.web_search_max_results.clamp(1, MAX_SEARCH_RESULTS)
+    }
+
+    fn search_region(&self) -> String {
+        let region = self.web_search_region.trim().to_ascii_lowercase();
+        if region.len() == 5
+            && region.as_bytes()[2] == b'-'
+            && region
+                .bytes()
+                .enumerate()
+                .all(|(index, byte)| index == 2 || byte.is_ascii_lowercase())
+        {
+            region
+        } else {
+            default_web_search_region()
+        }
     }
 }
 
@@ -341,8 +469,18 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
                 depth.label()
             ),
         };
-        let mut web_line =
-            format!("Tool web_search — search the public web via DuckDuckGo. {depth_note}");
+        let recency_note = match skills.web_search_recency {
+            WebSearchRecency::Any => "any date".to_string(),
+            value => format!("past {}", value.as_str()),
+        };
+        let mut web_line = format!(
+            "Tool web_search — search the public web via DDGS (engine: {}, region: {}, SafeSearch: {}, recency: {}, up to {} results). {depth_note}",
+            skills.web_search_backend.as_str(),
+            skills.search_region(),
+            skills.web_search_safesearch.as_str(),
+            recency_note,
+            skills.search_result_count(),
+        );
         if skills.fetch_url {
             web_line.push_str(
                 " After results arrive, you may call fetch_url on promising http(s) URLs if you need more detail than the snippets/excerpts already provide."
@@ -918,7 +1056,7 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let (result, note) = ddgs_web_search(query, skills.web_search_depth).await?;
+            let (result, note) = ddgs_web_search(query, skills).await?;
             let ui_result = result.clone();
             let mut model_result = result;
             if skills.fetch_url {
@@ -993,14 +1131,20 @@ struct DdgsSearchHit {
     snippet: String,
 }
 
-async fn ddgs_web_search(query: &str, depth: WebSearchDepth) -> Result<(String, String), String> {
-    let hits = ddgs_search_hits(query).await?;
+async fn ddgs_web_search(query: &str, skills: &AgentSkills) -> Result<(String, String), String> {
+    let result_count = skills.search_result_count();
+    let hits = ddgs_search_hits(query, skills).await?;
     if hits.is_empty() {
         return Err("DDGS returned no linked results.".to_string());
     }
 
-    let mut out = format!("Web search results for {query:?} (DDGS):\n");
-    for (index, hit) in hits.iter().take(MAX_SEARCH_RESULTS).enumerate() {
+    let mut out = format!(
+        "Web search results for {query:?} (DDGS, {}, {}, {}):\n",
+        skills.web_search_backend.as_str(),
+        skills.search_region(),
+        skills.web_search_safesearch.as_str(),
+    );
+    for (index, hit) in hits.iter().take(result_count).enumerate() {
         out.push_str(&format!(
             "\n{}. {}\n   URL: {}\n   {}\n",
             index + 1,
@@ -1009,69 +1153,125 @@ async fn ddgs_web_search(query: &str, depth: WebSearchDepth) -> Result<(String, 
             hit.snippet
         ));
     }
-    append_scraped_pages(&mut out, &hits, depth).await;
-    Ok((out, "via DDGS".to_string()))
+    append_scraped_pages(&mut out, &hits, skills.web_search_depth).await;
+    Ok((
+        out,
+        format!("via DDGS · {}", skills.web_search_backend.as_str()),
+    ))
 }
 
-async fn ddgs_search_hits(query: &str) -> Result<Vec<SearchHit>, String> {
-    let request = serde_json::to_string(&json!({
+async fn ddgs_search_hits(query: &str, skills: &AgentSkills) -> Result<Vec<SearchHit>, String> {
+    let result_count = skills.search_result_count();
+    let request = serde_json::to_vec(&json!({
+        "protocol": 1,
         "query": query,
-        "max_results": MAX_SEARCH_RESULTS,
+        "max_results": result_count,
+        "backend": skills.web_search_backend.as_str(),
+        "region": skills.search_region(),
+        "safesearch": skills.web_search_safesearch.as_str(),
+        "recency": skills.web_search_recency.as_str(),
     }))
     .map_err(|error| format!("Could not encode DDGS request: {error}"))?;
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(request);
 
-    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut candidates: Vec<(std::path::PathBuf, Vec<&str>)> = Vec::new();
+    let mut candidates: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
+    let helper_name = if cfg!(windows) {
+        "tensorui-search.exe"
+    } else {
+        "tensorui-search"
+    };
+
+    // Release archives ship a self-contained helper beside tensorUI. The env
+    // override and app-data location also leave room for managed/helper updates.
+    if let Some(path) = std::env::var_os("TENSORUI_SEARCH_HELPER").filter(|v| !v.is_empty()) {
+        candidates.push((path.into(), Vec::new()));
+    }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(directory) = executable.parent()
+    {
+        candidates.push((directory.join(helper_name), Vec::new()));
+    }
+    candidates.push((
+        crate::store::data_dir()
+            .join("search-helper")
+            .join(helper_name),
+        Vec::new(),
+    ));
+
+    // Source-development fallback. Unlike CARGO_MANIFEST_DIR, this does not
+    // bake a developer machine's absolute repository path into release builds.
+    let working_directory = std::env::current_dir().unwrap_or_else(|_| ".".into());
     if cfg!(windows) {
         candidates.push((
-            project_root
+            working_directory
                 .join(".venv")
                 .join("Scripts")
                 .join("python.exe"),
-            Vec::new(),
+            vec!["-c".into(), include_str!("ddgs_search.py").into()],
         ));
-        candidates.push(("py".into(), vec!["-3"]));
-        candidates.push(("python".into(), Vec::new()));
+        candidates.push((
+            "py".into(),
+            vec![
+                "-3".into(),
+                "-c".into(),
+                include_str!("ddgs_search.py").into(),
+            ],
+        ));
+        candidates.push((
+            "python".into(),
+            vec!["-c".into(), include_str!("ddgs_search.py").into()],
+        ));
     } else {
         candidates.push((
-            project_root.join(".venv").join("bin").join("python"),
-            Vec::new(),
+            working_directory.join(".venv").join("bin").join("python"),
+            vec!["-c".into(), include_str!("ddgs_search.py").into()],
         ));
-        candidates.push(("python3".into(), Vec::new()));
-        candidates.push(("python".into(), Vec::new()));
+        candidates.push((
+            "python3".into(),
+            vec!["-c".into(), include_str!("ddgs_search.py").into()],
+        ));
     }
 
-    let mut found_python = false;
+    let mut found_runtime = false;
     let mut missing_ddgs = false;
     let mut unsupported_python = false;
     let mut missing_python_runtime = false;
     let mut runtime_error = None;
     for (program, prefix) in candidates {
-        let output = tokio::time::timeout(
-            DDGS_TIMEOUT,
-            Command::new(&program)
-                .args(prefix)
-                .arg("-c")
-                .arg(include_str!("ddgs_search.py"))
-                .arg(&payload)
-                .stdin(Stdio::null())
-                .kill_on_drop(true)
-                .output(),
-        )
-        .await
-        .map_err(|_| "DDGS search timed out after 45 seconds.".to_string())?;
+        let child = Command::new(&program)
+            .args(prefix)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn();
 
-        let output = match output {
-            Ok(output) => {
-                found_python = true;
-                output
+        let mut child = match child {
+            Ok(child) => {
+                found_runtime = true;
+                child
             }
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
             Err(error) => {
                 return Err(format!("Could not start {}: {error}", program.display()));
             }
         };
+
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            format!(
+                "Could not open stdin for search helper {}",
+                program.display()
+            )
+        })?;
+        stdin
+            .write_all(&request)
+            .await
+            .map_err(|error| format!("Could not send request to {}: {error}", program.display()))?;
+        drop(stdin);
+
+        let output = tokio::time::timeout(DDGS_TIMEOUT, child.wait_with_output())
+            .await
+            .map_err(|_| "DDGS search timed out after 45 seconds.".to_string())?
+            .map_err(|error| format!("Search helper {} failed: {error}", program.display()))?;
 
         if output.status.success() {
             let response: DdgsSearchResponse = serde_json::from_slice(&output.stdout)
@@ -1080,7 +1280,7 @@ async fn ddgs_search_hits(query: &str) -> Result<Vec<SearchHit>, String> {
                 .results
                 .into_iter()
                 .filter(|hit| !hit.title.trim().is_empty() && scrapeable_url(&hit.url))
-                .take(MAX_SEARCH_RESULTS)
+                .take(result_count)
                 .map(|hit| SearchHit {
                     title: hit.title,
                     url: hit.url,
@@ -1123,19 +1323,23 @@ async fn ddgs_search_hits(query: &str) -> Result<Vec<SearchHit>, String> {
         return Err(ddgs_setup_message("Python 3.10 or newer is required."));
     }
     if missing_python_runtime {
-        return Err(ddgs_setup_message("Python was not found."));
+        return Err(ddgs_setup_message(
+            "The bundled search helper was not found and Python was not available.",
+        ));
     }
-    if !found_python {
-        return Err(ddgs_setup_message("Python was not found."));
+    if !found_runtime {
+        return Err(ddgs_setup_message(
+            "The bundled search helper and a compatible Python runtime were not found.",
+        ));
     }
     Err(ddgs_setup_message(
-        "No usable Python installation was found.",
+        "No usable search helper or Python installation was found.",
     ))
 }
 
 fn ddgs_setup_message(reason: &str) -> String {
     format!(
-        "{reason} Install Python 3.10+, then set up DDGS from the repository: Windows: `py -3 -m venv .venv` then `.venv\\Scripts\\python -m pip install -r requirements-search.txt`; macOS/Linux: `python3 -m venv .venv` then `./.venv/bin/python -m pip install -r requirements-search.txt`."
+        "{reason} Official release archives include `tensorui-search` beside the main executable. For a source checkout, install Python 3.10+ and set up DDGS: Windows: `py -3 -m venv .venv` then `.venv\\Scripts\\python -m pip install -r requirements-search.txt`; macOS/Linux: `python3 -m venv .venv` then `./.venv/bin/python -m pip install -r requirements-search.txt`."
     )
 }
 
