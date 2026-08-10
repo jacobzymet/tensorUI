@@ -1097,30 +1097,35 @@
       background: var(--color-accent);
       flex: 0 0 auto;
     }
-    /* JS measures the longest model label and supplies the preferred width.
-       Clamp it so short catalogs still produce a useful target and unusually
-       long ids cannot grow beyond the current centered layout. */
+    /* Closed: hug the selected model. Open: grow to fit the longest label.
+       Width is driven by --model-picker-closed-width / --model-picker-width. */
     .chat-model-select-wrap {
       position: relative;
       z-index: 30;
+      width: var(--model-picker-closed-width, 9.25rem);
       min-width: 0;
-      width: var(--model-picker-width, 20rem);
-      min-width: 15rem;
       max-width: min(30rem, 42vw);
       display: inline-flex;
       align-items: center;
-      gap: 0.45rem;
+      gap: 0.38rem;
       border: 1px solid var(--color-rule);
       background: var(--color-paper-2);
       border-radius: var(--radius-pill);
-      padding: 0.32rem 0.65rem 0.32rem 0.85rem;
+      padding: 0.26rem 0.52rem 0.26rem 0.68rem;
       cursor: pointer;
       pointer-events: auto;
       /* Hard backstop: nothing may escape the capsule when space runs out.
          Safe because the menu is moved to <body> whenever it is visible. */
       overflow: hidden;
       box-shadow: var(--shadow-1);
-      transition: border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
+      transition:
+        width var(--dur-enter) var(--ease-settle),
+        max-width var(--dur-enter) var(--ease-settle),
+        padding var(--dur-enter) var(--ease-settle),
+        gap var(--dur-enter) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-out),
+        background var(--dur-short) var(--ease-out),
+        box-shadow var(--dur-short) var(--ease-out);
     }
     .chat-model-select-wrap:hover {
       border-color: var(--color-rule-2);
@@ -1128,18 +1133,24 @@
     }
     .chat-model-select-wrap.is-open {
       z-index: 80;
+      width: var(--model-picker-width, 20rem);
+      max-width: min(36rem, 72vw);
+      padding: 0.32rem 0.65rem 0.32rem 0.85rem;
+      gap: 0.45rem;
       border-color: var(--accent-edge);
       background: var(--color-paper-3);
     }
     .chat-model-select-caret {
       flex: 0 0 auto;
-      width: 0.85rem;
-      height: 0.85rem;
+      width: 0.82rem;
+      height: 0.82rem;
       color: var(--color-muted);
       pointer-events: none;
-      transition: transform 0.15s ease;
+      transition: transform 0.15s ease, width var(--dur-enter) var(--ease-settle), height var(--dur-enter) var(--ease-settle);
     }
     .chat-model-select-wrap.is-open .chat-model-select-caret {
+      width: 0.85rem;
+      height: 0.85rem;
       transform: rotate(180deg);
     }
     .chat-model-select {
@@ -1152,16 +1163,22 @@
       background: transparent;
       color: var(--color-ink);
       border-radius: 0;
-      padding: 0.15rem 0.1rem;
+      padding: 0.14rem 0.08rem;
       font: inherit;
-      font-size: var(--text-sm);
+      font-size: 0.88rem;
       font-weight: 600;
-      letter-spacing: -0.005em;
+      letter-spacing: -0.006em;
       cursor: pointer;
       text-align: left;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      transition: font-size var(--dur-enter) var(--ease-settle), padding var(--dur-enter) var(--ease-settle);
+    }
+    .chat-model-select-wrap.is-open .chat-model-select {
+      font-size: var(--text-sm);
+      padding: 0.15rem 0.1rem;
+      letter-spacing: -0.005em;
     }
     .chat-model-select:focus {
       outline: none;
@@ -1185,13 +1202,34 @@
       color: var(--color-accent);
       background: color-mix(in oklch, var(--color-accent) 16%, transparent);
       white-space: nowrap;
-      max-width: 7rem;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    /* In the trigger the badge yields before the capsule can overflow; in menu
-       rows it stays whole and the model name takes the ellipsis instead. */
-    .chat-model-select-wrap > .chat-model-origin-pill { flex: 0 1 auto; }
+    /* In the closed trigger, hide the provider badge so the capsule stays tiny;
+       it reappears when the menu opens. Menu rows always show the badge. */
+    .chat-model-select-wrap > .chat-model-origin-pill {
+      flex: 0 0 auto;
+      max-width: 0;
+      margin: 0;
+      padding-inline: 0;
+      opacity: 0;
+      border-width: 0;
+      overflow: hidden;
+      pointer-events: none;
+      transition:
+        max-width var(--dur-enter) var(--ease-settle),
+        padding var(--dur-enter) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle);
+    }
+    .chat-model-select-wrap.is-open > .chat-model-origin-pill {
+      /* Room for the full provider name (was hard-capped at 7rem). */
+      max-width: 16rem;
+      padding-inline: 0.48rem;
+      opacity: 1;
+      border-width: 1px;
+      overflow: visible;
+      text-overflow: clip;
+    }
     .chat-model-origin-pill.is-hidden { display: none !important; }
     .chat-model-select-wrap.is-hidden { display: none !important; }
     .chat-model-menu {
@@ -1310,7 +1348,10 @@
       text-overflow: ellipsis;
     }
     .chat-model-option .chat-model-origin-pill {
-      max-width: 6.5rem;
+      flex: 0 0 auto;
+      max-width: none;
+      overflow: visible;
+      text-overflow: clip;
     }
     .chat-model-option:hover,
     .chat-model-option.is-active {
@@ -2785,8 +2826,10 @@
       background: var(--accent-wash);
     }
     .btn-think-caret {
-      font-size: 0.55rem;
-      opacity: 0.7;
+      font-size: 1.15rem;
+      line-height: 1;
+      opacity: 0.9;
+      transform: translateY(-0.04em);
     }
     .think-menu {
       position: absolute;
@@ -3449,8 +3492,12 @@
          provider badge here only — every row in the open menu still shows it. */
       .chat-model-select-wrap > .chat-model-origin-pill { display: none !important; }
       .chat-model-select-wrap {
-        width: clamp(12rem, var(--model-picker-width, 20rem), 74vw);
+        width: clamp(8rem, var(--model-picker-closed-width, 9.25rem), 74vw);
         min-width: 0;
+        max-width: 74vw;
+      }
+      .chat-model-select-wrap.is-open {
+        width: clamp(12rem, var(--model-picker-width, 20rem), 74vw);
         max-width: 74vw;
       }
       .chat-model-select { max-width: none; }
@@ -8457,12 +8504,18 @@
     function positionModelMenu() {
       if (!chatModelMenu || !chatModelSelectWrap) return;
       const rect = chatModelSelectWrap.getBoundingClientRect();
-      const preferred = rect.width;
+      // Size to the open target width, not the mid-animation trigger rect.
+      const openTarget = Number.parseFloat(
+        chatModelSelectWrap.style.getPropertyValue('--model-picker-width')
+      ) || rect.width;
+      const preferred = Math.max(rect.width, openTarget);
       // Never wider than the window can hold, or the menu hangs off the edge.
       const menuWidth = Math.min(preferred, window.innerWidth - 16);
       const maxLeft = window.innerWidth - menuWidth - 8;
       // Align to the centered trigger, clamping only near viewport edges.
-      const left = Math.min(Math.max(8, rect.left), maxLeft);
+      // Prefer centering under the expanding capsule's eventual width.
+      const idealLeft = rect.left + (rect.width - menuWidth) / 2;
+      const left = Math.min(Math.max(8, idealLeft), maxLeft);
       chatModelMenu.style.top = Math.round(rect.bottom + 6) + 'px';
       chatModelMenu.style.left = Math.round(left) + 'px';
       chatModelMenu.style.width = Math.round(menuWidth) + 'px';
@@ -8515,6 +8568,7 @@
       modelMenuFilter = '';
       if (chatModelSearch) chatModelSearch.value = '';
       chatModelMenu.classList.remove('is-hidden');
+      syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
       chatModelSelectWrap.classList.add('is-open');
       chatModelSelect.setAttribute('aria-expanded', 'true');
       computeModelMatches();
@@ -8522,6 +8576,16 @@
       modelMenuActiveIndex = Math.max(0, modelMenuMatches.findIndex((o) => o.value === selectedChatModel));
       positionModelMenu();
       paintModelMenuActive();
+      // Keep the floating menu aligned while the trigger width eases open.
+      if (!prefersReducedMotion()) {
+        const started = performance.now();
+        const track = (now) => {
+          if (!modelMenuIsOpen()) return;
+          positionModelMenu();
+          if (now - started < 260) requestAnimationFrame(track);
+        };
+        requestAnimationFrame(track);
+      }
       // Typing filters immediately when the field is there; otherwise the
       // trigger keeps focus and its own arrow-key handler stays in charge.
       if (searchable) chatModelSearch.focus();
@@ -8545,6 +8609,7 @@
           ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
           : '';
         syncModelOriginPill(true, selected && selected.provider);
+        syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
         chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
           const isSelected = btn.getAttribute('data-value') === selectedChatModel;
           btn.classList.toggle('is-selected', isSelected);
@@ -8584,22 +8649,49 @@
       return context.measureText(text).width + Math.max(0, text.length - 1) * spacing;
     }
 
-    /** Size the closed picker from the longest model name, with room for its
-     * provider badge and caret. CSS applies the final min/max constraints. */
-    function syncModelSelectorWidth(options) {
-      const longestModel = options.reduce(
+    /** Closed width hugs the selected model; open width fits the longest label
+     * plus provider badge and caret. CSS applies the final clamps. */
+    function syncModelSelectorWidth(options, selectedValue = selectedChatModel) {
+      const list = Array.isArray(options) ? options : modelMenuOptions;
+      if (!chatModelSelectWrap) return;
+      if (!list.length) {
+        chatModelSelectWrap.style.removeProperty('--model-picker-closed-width');
+        chatModelSelectWrap.style.removeProperty('--model-picker-width');
+        return;
+      }
+      const longestModel = list.reduce(
         (width, option) => Math.max(width, measuredTextWidth(chatModelSelect, option.label)),
         0
       );
-      const longestProvider = options.reduce(
+      const longestProvider = list.reduce(
         (width, option) => Math.max(width, measuredTextWidth(chatModelOriginPill, option.provider)),
         0
       );
-      // Provider badge is capped at 7rem by CSS. The remaining 3.8rem covers
-      // capsule/button padding, flex gaps, border, and the caret.
-      const providerRoom = longestProvider ? Math.min(longestProvider + 18, 112) : 0;
-      const preferred = Math.ceil(longestModel + providerRoom + 61);
-      chatModelSelectWrap.style.setProperty('--model-picker-width', preferred + 'px');
+      const selected = list.find((option) => option.value === selectedValue) || list[0];
+      const selectedModel = measuredTextWidth(chatModelSelect, selected?.label || 'Model');
+      // Closed trigger hides the provider pill — size to the model name only,
+      // and cap so long ids stay compact with an ellipsis.
+      const closedChrome = 48;
+      const openChrome = 58;
+      const openProviderRoom = longestProvider
+        ? longestProvider + 22
+        : 0;
+      const pillVisible = window.matchMedia('(min-width: 521px)').matches;
+      const closed = Math.min(
+        Math.ceil(selectedModel + closedChrome),
+        188
+      );
+      const preferred = Math.ceil(
+        longestModel + (pillVisible ? openProviderRoom : 0) + openChrome
+      );
+      chatModelSelectWrap.style.setProperty(
+        '--model-picker-closed-width',
+        Math.max(closed, 92) + 'px'
+      );
+      chatModelSelectWrap.style.setProperty(
+        '--model-picker-width',
+        Math.max(preferred, closed, 160) + 'px'
+      );
     }
 
     function syncModelSelector(data) {
@@ -10125,6 +10217,7 @@
       closeModelMenu();
     });
     window.addEventListener('resize', () => {
+      if (modelMenuOptions.length) syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
       if (modelMenuIsOpen()) positionModelMenu();
     });
     document.addEventListener('scroll', () => {
