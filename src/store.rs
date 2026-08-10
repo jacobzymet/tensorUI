@@ -1,0 +1,401 @@
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use anyhow::{Context, Result};
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::crypto;
+
+pub const CHATS_FILE: &str = "chats.json";
+pub const PREFERENCES_FILE: &str = "preferences.json";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageMode {
+    #[default]
+    Disk,
+    Browser,
+}
+
+impl StorageMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disk => "disk",
+            Self::Browser => "browser",
+        }
+    }
+
+    pub fn is_browser(self) -> bool {
+        matches!(self, Self::Browser)
+    }
+}
+
+#[derive(Debug)]
+pub enum StoreError {
+    Locked,
+    Other(anyhow::Error),
+}
+
+impl StoreError {
+    pub fn message(&self) -> String {
+        match self {
+            Self::Locked => {
+                "Local data is encrypted. Unlock with your passphrase to continue.".into()
+            }
+            Self::Other(error) => format!("{error:#}"),
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Locked => "encrypted_locked",
+            Self::Other(_) => "store_error",
+        }
+    }
+}
+
+impl From<anyhow::Error> for StoreError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::Other(value)
+    }
+}
+
+pub fn data_dir() -> PathBuf {
+    ProjectDirs::from("", "", "tensorUI")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("tensorUI-data"))
+}
+
+pub fn chats_path(root: &Path) -> PathBuf {
+    root.join(CHATS_FILE)
+}
+
+pub fn preferences_path(root: &Path) -> PathBuf {
+    root.join(PREFERENCES_FILE)
+}
+
+pub fn ensure_data_dir(root: &Path) -> Result<()> {
+    fs::create_dir_all(root).with_context(|| format!("could not create {}", root.display()))
+}
+
+fn atomic_write_json(path: &Path, value: &Value) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
+    let file_name = path
+        .file_name()
+        .context("path has no file name")?
+        .to_string_lossy();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
+
+    let result = (|| -> Result<()> {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .with_context(|| format!("could not create {}", temporary.display()))?;
+        let raw = serde_json::to_vec_pretty(value).context("could not serialize JSON")?;
+        file.write_all(&raw)
+            .with_context(|| format!("could not write {}", temporary.display()))?;
+        file.write_all(b"\n").ok();
+        file.sync_all()
+            .with_context(|| format!("could not flush {}", temporary.display()))?;
+        drop(file);
+        replace_file(&temporary, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        match fs::rename(temporary, destination) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                fs::remove_file(destination)
+                    .with_context(|| format!("could not replace {}", destination.display()))?;
+                fs::rename(temporary, destination)
+                    .with_context(|| format!("could not replace {}", destination.display()))
+            }
+            Err(error) => {
+                Err(error).with_context(|| format!("could not replace {}", destination.display()))
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(temporary, destination)
+            .with_context(|| format!("could not replace {}", destination.display()))
+    }
+}
+
+fn read_json_file(path: &Path) -> Result<Option<Value>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("could not read {}", path.display()))?;
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    let value = serde_json::from_str(&raw)
+        .with_context(|| format!("invalid JSON at {}", path.display()))?;
+    Ok(Some(value))
+}
+
+fn empty_store() -> Value {
+    serde_json::json!({
+        "version": 2,
+        "projects": [],
+        "conversations": [],
+    })
+}
+
+fn normalize_store(value: Value) -> Value {
+    match value {
+        Value::Array(conversations) => serde_json::json!({
+            "version": 2,
+            "projects": [],
+            "conversations": conversations,
+        }),
+        Value::Object(mut map) => {
+            if !map.contains_key("projects") {
+                map.insert("projects".into(), Value::Array(vec![]));
+            }
+            if !map.contains_key("conversations") {
+                map.insert("conversations".into(), Value::Array(vec![]));
+            }
+            if !map.contains_key("version") {
+                map.insert("version".into(), Value::from(2));
+            }
+            Value::Object(map)
+        }
+        _ => empty_store(),
+    }
+}
+
+fn decode_stored(
+    value: Value,
+    key: Option<&crypto::DiskKey>,
+    aad: &[u8],
+    encryption_on: bool,
+) -> Result<Value, StoreError> {
+    if crypto::is_envelope(&value) {
+        let Some(key) = key else {
+            return Err(StoreError::Locked);
+        };
+        Ok(crypto::decrypt_value(key, &value, aad)?)
+    } else if encryption_on {
+        // Meta says encrypted — refuse plaintext so a swapped/leftover file
+        // cannot silently bypass the passphrase.
+        Err(StoreError::Other(anyhow::anyhow!(
+            "Encrypted local data is missing or was replaced with plaintext. Restore the encrypted file or turn encryption off with a backup."
+        )))
+    } else {
+        Ok(value)
+    }
+}
+
+fn encode_for_disk(value: &Value, key: Option<&crypto::DiskKey>, aad: &[u8]) -> Result<Value> {
+    if let Some(key) = key {
+        crypto::encrypt_value(key, value, aad)
+    } else {
+        Ok(value.clone())
+    }
+}
+
+pub fn encryption_enabled(root: &Path) -> bool {
+    crypto::load_meta(root)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+pub fn load_chats(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, StoreError> {
+    ensure_data_dir(root)?;
+    let encryption_on = encryption_enabled(root);
+    if encryption_on && key.is_none() {
+        // Even if the file is missing, treat as locked so the UI prompts unlock.
+        return Err(StoreError::Locked);
+    }
+    match read_json_file(&chats_path(root))? {
+        Some(value) => Ok(normalize_store(decode_stored(
+            value,
+            key,
+            crypto::AAD_CHATS,
+            encryption_on,
+        )?)),
+        // Empty is allowed while encrypted (fresh enable before first save).
+        None => Ok(empty_store()),
+    }
+}
+
+pub fn save_chats(
+    root: &Path,
+    value: Value,
+    key: Option<&crypto::DiskKey>,
+) -> Result<(), StoreError> {
+    ensure_data_dir(root)?;
+    if encryption_enabled(root) && key.is_none() {
+        return Err(StoreError::Locked);
+    }
+    let normalized = normalize_store(value);
+    if !normalized.get("projects").map(|v| v.is_array()).unwrap_or(false)
+        || !normalized
+            .get("conversations")
+            .map(|v| v.is_array())
+            .unwrap_or(false)
+    {
+        return Err(StoreError::Other(anyhow::anyhow!(
+            "store must include projects and conversations arrays"
+        )));
+    }
+    let on_disk = encode_for_disk(&normalized, key, crypto::AAD_CHATS)?;
+    atomic_write_json(&chats_path(root), &on_disk)?;
+    Ok(())
+}
+
+pub fn load_preferences(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, StoreError> {
+    ensure_data_dir(root)?;
+    let encryption_on = encryption_enabled(root);
+    if encryption_on && key.is_none() {
+        return Err(StoreError::Locked);
+    }
+    match read_json_file(&preferences_path(root))? {
+        Some(value) => match decode_stored(value, key, crypto::AAD_PREFERENCES, encryption_on)? {
+            Value::Object(map) => Ok(Value::Object(map)),
+            _ => Ok(serde_json::json!({})),
+        },
+        None => Ok(serde_json::json!({})),
+    }
+}
+
+pub fn save_preferences(
+    root: &Path,
+    value: Value,
+    key: Option<&crypto::DiskKey>,
+) -> Result<(), StoreError> {
+    ensure_data_dir(root)?;
+    if encryption_enabled(root) && key.is_none() {
+        return Err(StoreError::Locked);
+    }
+    let Value::Object(_) = &value else {
+        return Err(StoreError::Other(anyhow::anyhow!(
+            "preferences must be a JSON object"
+        )));
+    };
+    let on_disk = encode_for_disk(&value, key, crypto::AAD_PREFERENCES)?;
+    atomic_write_json(&preferences_path(root), &on_disk)?;
+    Ok(())
+}
+
+/// Write plaintext while encryption meta still exists (disable path only).
+pub fn save_chats_plaintext_for_disable(root: &Path, value: Value) -> Result<(), StoreError> {
+    ensure_data_dir(root)?;
+    let normalized = normalize_store(value);
+    atomic_write_json(&chats_path(root), &normalized)?;
+    Ok(())
+}
+
+/// Write plaintext while encryption meta still exists (disable path only).
+pub fn save_preferences_plaintext_for_disable(root: &Path, value: Value) -> Result<(), StoreError> {
+    ensure_data_dir(root)?;
+    let Value::Object(_) = &value else {
+        return Err(StoreError::Other(anyhow::anyhow!(
+            "preferences must be a JSON object"
+        )));
+    };
+    atomic_write_json(&preferences_path(root), &value)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn chats_roundtrip_and_legacy_array() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        save_chats(
+            root,
+            serde_json::json!([{ "id": "c1", "title": "Hi", "messages": [] }]),
+            None,
+        )
+        .unwrap();
+        let loaded = load_chats(root, None).unwrap();
+        assert_eq!(loaded["version"], 2);
+        assert!(loaded["projects"].as_array().unwrap().is_empty());
+        assert_eq!(loaded["conversations"][0]["id"], "c1");
+    }
+
+    #[test]
+    fn preferences_roundtrip() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        save_preferences(root, serde_json::json!({ "name": "Ada", "agentMode": true }), None)
+            .unwrap();
+        let loaded = load_preferences(root, None).unwrap();
+        assert_eq!(loaded["name"], "Ada");
+        assert_eq!(loaded["agentMode"], true);
+    }
+
+    #[test]
+    fn encrypted_roundtrip_requires_key() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("test-passphrase", &salt).unwrap();
+        let meta = crypto::meta_for_key(&key, salt).unwrap();
+        // Encrypt files before meta so a crash cannot leave "enabled + plaintext".
+        save_chats(
+            root,
+            serde_json::json!([{ "id": "c1", "title": "Secret", "messages": [] }]),
+            Some(&key),
+        )
+        .unwrap();
+        crypto::save_meta(root, &meta).unwrap();
+        assert!(matches!(load_chats(root, None), Err(StoreError::Locked)));
+        let loaded = load_chats(root, Some(&key)).unwrap();
+        assert_eq!(loaded["conversations"][0]["title"], "Secret");
+        let raw = read_json_file(&chats_path(root)).unwrap().unwrap();
+        assert!(crypto::is_envelope(&raw));
+    }
+
+    #[test]
+    fn encryption_rejects_plaintext_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("test-passphrase", &salt).unwrap();
+        crypto::save_meta(root, &crypto::meta_for_key(&key, salt).unwrap()).unwrap();
+        // Attacker (or crash) left plaintext on disk while meta claims encryption.
+        atomic_write_json(
+            &chats_path(root),
+            &serde_json::json!({
+                "version": 2,
+                "projects": [],
+                "conversations": [{ "id": "c1", "title": "leaked", "messages": [] }],
+            }),
+        )
+        .unwrap();
+        assert!(load_chats(root, Some(&key)).is_err());
+    }
+}
