@@ -23,8 +23,8 @@ use crate::{
     chat,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
-        find_provider_for_base, normalize_openai_base, probe_provider_catalog,
-        probe_provider_health, probe_provider_style,
+        apply_thinking_control, find_provider_for_base, normalize_openai_base,
+        probe_provider_catalog, probe_provider_health, probe_provider_style,
     },
     store::{self, StorageMode},
     system,
@@ -68,6 +68,15 @@ fn schedule_provider_cache_warm(app: SharedApp) {
             Ok(guard) => guard.provider_warm_targets(),
             Err(_) => return,
         };
+        // Ports owned by sibling providers, resolved under the same lock so the
+        // probe below can keep each provider's catalog to its own endpoint.
+        let catalog_others: Vec<Vec<u16>> = match app.lock() {
+            Ok(guard) => catalog_targets
+                .iter()
+                .map(|(_, base, _)| guard.other_provider_ports(base))
+                .collect(),
+            Err(_) => return,
+        };
 
         let health_results: Vec<_> = health_targets
             .into_iter()
@@ -78,8 +87,9 @@ fn schedule_provider_cache_warm(app: SharedApp) {
             .collect();
         let catalog_results: Vec<_> = catalog_targets
             .into_iter()
-            .map(|(style, base, token)| {
-                let catalog = probe_provider_catalog(&base, &token, style, &[]);
+            .zip(catalog_others)
+            .map(|((style, base, token), others)| {
+                let catalog = probe_provider_catalog(&base, &token, style, &[], &others);
                 (style, base, token, catalog)
             })
             .collect();
@@ -362,7 +372,7 @@ async fn chat_completions(
         .and_then(|v| v.as_str())
         .map(str::to_string);
 
-    let (remote, user_skills) = {
+    let (remote, user_skills, thinking_model) = {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         let user_skills = app.enabled_user_skills();
         let providers = &app.config.providers;
@@ -385,7 +395,17 @@ async fn chat_completions(
                 .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
             Some((api_base, active.token.clone(), active.api_style))
         };
-        (remote, user_skills)
+        let thinking_model = remote.as_ref().and_then(|(base, _, _)| {
+            remote_model.as_deref().and_then(|model| {
+                app.remote_model_catalog_cached()
+                    .into_iter()
+                    .find(|option| {
+                        option.model == model
+                            && normalize_openai_base(&option.base).as_ref() == Some(base)
+                    })
+            })
+        });
+        (remote, user_skills, thinking_model)
     };
 
     let Some((api_base, token, api_style)) = remote else {
@@ -399,6 +419,7 @@ async fn chat_completions(
     {
         obj.insert("model".to_string(), serde_json::Value::String(model));
     }
+    apply_thinking_control(&mut body, thinking_model.as_ref());
     let key = (!token.trim().is_empty()).then_some(token.as_str());
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
         Ok(request) if agent::should_run_agent(&request, &user_skills) => {
@@ -466,6 +487,9 @@ struct TestProviderResponse {
     base: String,
     api_style: &'static str,
     detected: bool,
+    /// How many models this endpoint offers — the useful fact to report back,
+    /// rather than an arbitrary sample model name.
+    models: usize,
     health: ProviderHealth,
 }
 
@@ -520,6 +544,12 @@ async fn test_provider(
 
     let probe_base = base.clone();
     let probe_token = token.clone();
+    // Testing one URL the user typed: keep the result to that endpoint rather
+    // than reporting models that actually belong to an already-saved provider.
+    let probe_others = {
+        let app = app.lock().map_err(|_| ApiError::lock())?;
+        app.other_provider_ports(&base)
+    };
     let (probe, catalog) = tokio::task::spawn_blocking(move || {
         let probe = probe_provider_style(&probe_base, &probe_token, forced_style);
         let catalog = if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty) {
@@ -528,6 +558,7 @@ async fn test_provider(
                 &probe_token,
                 probe.api_style,
                 &[],
+                &probe_others,
             ))
         } else {
             None
@@ -537,10 +568,12 @@ async fn test_provider(
     .await
     .map_err(|error| ApiError::bad_request(format!("connection test failed: {error}")))?;
 
+    let mut model_count = 0;
     {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         app.store_remote_health(probe.api_style, &base, &token, probe.health.clone());
         if let Some(catalog) = catalog {
+            model_count = catalog.len();
             app.store_remote_catalog(probe.api_style, &base, &token, catalog);
         }
     }
@@ -550,6 +583,7 @@ async fn test_provider(
         base,
         api_style: probe.api_style.as_str(),
         detected: probe.detected,
+        models: model_count,
         health: probe.health,
     }))
 }

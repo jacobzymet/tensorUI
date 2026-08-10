@@ -21,7 +21,12 @@ use crate::{
     skills::UserSkill,
 };
 
-const MAX_AGENT_ROUNDS: usize = 6;
+/// After this many tool calls in one turn, surface a once-only UI notice that
+/// the model may be looping. There is no hard tool-round ceiling — Stop is the
+/// escape hatch.
+const TOOL_LOOP_NOTICE_AFTER: usize = 25;
+/// How many times we nudge after a blank visible reply before giving up.
+const MAX_EMPTY_RETRIES: usize = 2;
 const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const DEFAULT_SEARCH_RESULTS: usize = 6;
 const MAX_SEARCH_RESULTS: usize = 20;
@@ -44,6 +49,8 @@ pub struct AgentRequest {
     pub thinking_budget_tokens: Option<i64>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub reasoning: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -332,12 +339,20 @@ async fn run_agent_loop(
     )
     .await?;
 
-    for round in 0..MAX_AGENT_ROUNDS {
+    let mut tool_rounds = 0usize;
+    let mut empty_retries = 0usize;
+    let mut loop_notice_sent = false;
+
+    loop {
         send_sse(
             tx,
             sse_agent(json!({
                 "phase": "status",
-                "message": if round == 0 { "Processing…" } else { "Continuing…" }
+                "message": if tool_rounds == 0 && empty_retries == 0 {
+                    "Processing…"
+                } else {
+                    "Continuing…"
+                }
             })),
         )
         .await?;
@@ -352,6 +367,20 @@ async fn run_agent_loop(
                 )));
             }
 
+            tool_rounds += 1;
+            if !loop_notice_sent && tool_rounds >= TOOL_LOOP_NOTICE_AFTER {
+                loop_notice_sent = true;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "notice",
+                        "message": format!(
+                            "{TOOL_LOOP_NOTICE_AFTER} tool steps so far — the model may be stuck looping. Press Stop if this isn't making progress."
+                        ),
+                    })),
+                )
+                .await?;
+            }
             send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
             send_sse(
                 tx,
@@ -388,6 +417,12 @@ async fn run_agent_loop(
         // Reasoning-only / empty visible replies used to end the turn blank in the UI.
         // Nudge the model to either call a tool or answer plainly.
         if turn.content.trim().is_empty() {
+            if empty_retries >= MAX_EMPTY_RETRIES {
+                return Err(StreamFail::Other(
+                    "Agent produced no user-visible answer.".into(),
+                ));
+            }
+            empty_retries += 1;
             send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
             send_sse(
                 tx,
@@ -411,10 +446,6 @@ async fn run_agent_loop(
         send_sse(tx, b"data: [DONE]\n\n".to_vec()).await?;
         return Ok(());
     }
-
-    Err(StreamFail::Other(
-        "Agent stopped after too many tool rounds.".into(),
-    ))
 }
 
 fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill]) -> bool {
@@ -577,6 +608,9 @@ async fn stream_once(
         }
         if let Some(effort) = &request.reasoning_effort {
             object.insert("reasoning_effort".into(), json!(effort));
+        }
+        if let Some(reasoning) = &request.reasoning {
+            object.insert("reasoning".into(), reasoning.clone());
         }
     }
 

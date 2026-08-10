@@ -5,7 +5,8 @@ use crate::{
     crypto,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, RemoteModelOption,
-        mask_token, probe_provider_catalog, probe_provider_health,
+        mask_token, normalize_provider_base, probe_provider_catalog, probe_provider_health,
+        split_openai_base,
     },
     store::{self, StorageMode, StoreError},
 };
@@ -616,6 +617,23 @@ impl App {
             .any(|m| m.thinking_supported)
     }
 
+    /// Primary ports owned by every configured provider *other* than `base`.
+    /// Feeds `probe_provider_catalog` so providers can't absorb each other.
+    pub fn other_provider_ports(&self, base: &str) -> Vec<u16> {
+        let own = normalize_provider_base(base, ApiStyle::Openai);
+        self.config
+            .providers
+            .items
+            .iter()
+            .filter(|provider| {
+                let candidate = provider.base.trim();
+                !candidate.is_empty()
+                    && normalize_provider_base(candidate, provider.api_style) != own
+            })
+            .filter_map(|provider| split_openai_base(provider.base.trim()).map(|(_, _, port)| port))
+            .collect()
+    }
+
     pub fn warm_provider_caches(&self) {
         let (health_targets, catalog_targets) = self.provider_warm_targets();
         for (style, base, token) in health_targets {
@@ -623,7 +641,8 @@ impl App {
             self.store_remote_health(style, &base, &token, health);
         }
         for (style, base, token) in catalog_targets {
-            let catalog = probe_provider_catalog(&base, &token, style, &[]);
+            let others = self.other_provider_ports(&base);
+            let catalog = probe_provider_catalog(&base, &token, style, &[], &others);
             self.store_remote_catalog(style, &base, &token, catalog);
         }
     }

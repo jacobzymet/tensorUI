@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DM+Sans:wght@400;500;600&family=Fira+Code:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Sans:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Literata:opsz,wght@7..72,400;500;600&family=Source+Code+Pro:wght@400;500;600&family=Source+Sans+3:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DM+Sans:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Sans:wght@500;600&family=Inter:wght@400;500;600&family=Literata:opsz,wght@7..72,400;500;600&family=Source+Sans+3:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
@@ -45,7 +45,7 @@
       --font-display: "Space Grotesk", system-ui, sans-serif;
       --font-logo: "Syne", var(--font-display);
       --font-body: "Inter", system-ui, sans-serif;
-      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+      --font-mono: var(--font-body);
 
       --space-3xs: 0.2rem;
       --space-2xs: 0.4rem;
@@ -88,6 +88,7 @@
       --control-h-sm: 1.9rem;
 
       --sidebar-w: 15.5rem;
+      --trace-sidebar-w: 22rem;
       --composer-max: 47rem;
       --thread-max: 47rem;
     }
@@ -359,7 +360,6 @@
       border-radius: var(--radius-pill);
       background: currentColor;
       flex: 0 0 auto;
-      box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 18%, transparent);
     }
     .status-ready {
       color: var(--color-ok);
@@ -465,7 +465,7 @@
     .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: inline-flex; }
     /* Clear the fixed expand control so the session title isn't underneath it. */
     .chat-shell.sidebar-collapsed .chat-topbar {
-      padding-left: 3.35rem;
+      padding-inline: 3.35rem;
     }
 
     .sidebar-actions {
@@ -788,6 +788,218 @@
         var(--color-paper);
       overflow: hidden;
     }
+    .chat-workspace {
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+    }
+    /* Conversation column: topbar + thread + composer stay aligned together so
+       the model picker centers on the reading width, not the activity rail. */
+    .chat-column {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-column > .chat-viewport {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+    }
+    /* Activity timeline for the selected assistant turn (desktop). */
+    .trace-sidebar {
+      flex: 0 0 var(--trace-sidebar-w);
+      width: var(--trace-sidebar-w);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--color-rule);
+      background: color-mix(in oklch, var(--color-graphite) 55%, var(--color-paper));
+      overflow: hidden;
+      transition:
+        flex-basis var(--dur-enter) var(--ease-settle),
+        width var(--dur-enter) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle);
+    }
+    .chat-shell.trace-collapsed .trace-sidebar {
+      flex-basis: 0;
+      width: 0;
+      border-left-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .trace-sidebar-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      min-height: 2.6rem;
+      padding: 0.55rem 0.65rem 0.55rem 0.9rem;
+      border-bottom: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+    }
+    .trace-sidebar-title {
+      font-size: var(--text-xs);
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+    }
+    .trace-sidebar-head .btn-toggle-trace {
+      width: 1.85rem;
+      min-width: 1.85rem;
+      height: 1.85rem;
+      min-height: 1.85rem;
+      padding: 0;
+      color: var(--color-muted);
+    }
+    .trace-sidebar-head .btn-toggle-trace:hover { color: var(--color-ink); }
+    .trace-sidebar-head .btn-toggle-trace svg {
+      width: 1rem;
+      height: 1rem;
+    }
+    .trace-sidebar-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 0.85rem 0.85rem 1.25rem;
+      transition:
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-settle);
+    }
+    .trace-sidebar-body.is-swap {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    /* Room between reasoning / tool cards — especially when a think block opens. */
+    .trace-sidebar-body > .agent-step + .agent-step {
+      margin-top: 0.85rem;
+    }
+    .trace-sidebar-body > .agent-step.is-think:has(.think-block[open]) {
+      margin-bottom: 0.35rem;
+    }
+    .trace-sidebar-body > .agent-step.is-think:has(.think-block[open]) + .agent-step {
+      margin-top: 1.1rem;
+    }
+    .trace-sidebar-body > .agent-step + .agent-step.is-think:has(.think-block[open]) {
+      margin-top: 1.1rem;
+    }
+    .trace-sidebar-body .think-body,
+    .trace-sidebar-body .think-stream {
+      margin-top: 0.55rem;
+      margin-bottom: 0.35rem;
+      padding-bottom: 0.15rem;
+    }
+    .trace-sidebar-body > .agent-step:has(+ .agent-step) .agent-step-rail::after {
+      bottom: calc(-0.85rem - 0.85rem);
+    }
+    .trace-sidebar-empty {
+      margin: 1.25rem 0.25rem;
+      color: var(--color-muted);
+      font-size: var(--text-sm);
+      line-height: 1.5;
+    }
+    .trace-expand-fab {
+      display: none;
+      position: absolute;
+      top: calc(var(--chat-topbar-h) + 0.65rem);
+      right: 0.75rem;
+      z-index: 35;
+      width: 2rem;
+      min-width: 2rem;
+      height: 2rem;
+      min-height: 2rem;
+      padding: 0;
+      border-radius: var(--radius-pill);
+      background: var(--color-paper-2);
+      border-color: var(--color-rule);
+      box-shadow: var(--shadow-2);
+      color: var(--color-muted);
+    }
+    .trace-expand-fab:hover { color: var(--color-ink); }
+    .trace-expand-fab svg { width: 1rem; height: 1rem; }
+    .chat-shell.trace-collapsed:not(.is-projects) .trace-expand-fab {
+      display: inline-flex;
+    }
+    .msg-role-assistant.is-trace-selected > .msg-bubble {
+      border-color: color-mix(in oklch, var(--color-accent) 42%, var(--color-rule));
+      box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 18%, transparent);
+    }
+    .msg-role-assistant {
+      cursor: pointer;
+    }
+    .msg-role-assistant .msg-actions,
+    .msg-role-assistant .msg-action,
+    .msg-role-assistant details,
+    .msg-role-assistant summary,
+    .msg-role-assistant a,
+    .msg-role-assistant button,
+    .msg-role-assistant .md-code-copy {
+      cursor: auto;
+    }
+    .agent-timeline-fold {
+      margin: 0 0 0.85rem;
+    }
+    .agent-timeline-fold-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid var(--color-rule);
+      background: color-mix(in oklch, var(--color-ink) 3.5%, var(--color-paper-2));
+      color: var(--color-ink-2);
+      border-radius: var(--radius-pill);
+      padding: 0.32rem 0.7rem;
+      font: inherit;
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition:
+        background var(--dur-short) var(--ease-out),
+        border-color var(--dur-short) var(--ease-out),
+        color var(--dur-short) var(--ease-out);
+    }
+    .agent-timeline-fold-toggle:hover {
+      border-color: var(--color-rule-2);
+      color: var(--color-ink);
+    }
+    .agent-timeline-fold-toggle .think-chevron {
+      width: 0.9rem;
+      height: 0.9rem;
+      transition: transform var(--dur-short) var(--ease-settle);
+    }
+    .agent-timeline-fold:not(.is-collapsed) .agent-timeline-fold-toggle .think-chevron {
+      transform: rotate(180deg);
+    }
+    .agent-timeline-fold-panel {
+      display: grid;
+      grid-template-rows: 1fr;
+      opacity: 1;
+      transition:
+        grid-template-rows var(--dur-enter) var(--ease-settle),
+        opacity var(--dur-short) var(--ease-settle),
+        margin var(--dur-short) var(--ease-settle);
+      margin-top: 0.65rem;
+    }
+    .agent-timeline-fold.is-collapsed .agent-timeline-fold-panel {
+      grid-template-rows: 0fr;
+      opacity: 0;
+      margin-top: 0;
+      pointer-events: none;
+    }
+    .agent-timeline-fold-panel > .agent-timeline-fold-inner {
+      overflow: hidden;
+      min-height: 0;
+    }
+    .agent-final-answer {
+      min-width: 0;
+    }
     .chat-starfield {
       position: absolute;
       inset: 0;
@@ -814,7 +1026,10 @@
     .chat-topbar {
       flex: 0 0 auto;
       z-index: 40;
-      display: flex;
+      display: grid;
+      /* Equal side tracks keep the model picker geometrically centered even
+         when the conversation/project context only exists on the left. */
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
       align-items: center;
       gap: 0.55rem;
       min-height: var(--chat-topbar-h);
@@ -839,8 +1054,6 @@
     }
     .chat-topbar-trailing {
       min-width: 0;
-      flex: 0 0 auto;
-      margin-left: auto;
     }
     .btn-toggle-sidebar { display: inline-flex; align-items: center; justify-content: center; }
     .chat-topbar-context {
@@ -884,22 +1097,28 @@
       background: var(--color-accent);
       flex: 0 0 auto;
     }
-    /* Model picker anchors the leading edge — the first thing you reach for. */
+    /* JS measures the longest model label and supplies the preferred width.
+       Clamp it so short catalogs still produce a useful target and unusually
+       long ids cannot grow beyond the current centered layout. */
     .chat-model-select-wrap {
       position: relative;
       z-index: 30;
       min-width: 0;
-      max-width: min(22rem, 60%);
-      flex: 0 1 auto;
+      width: var(--model-picker-width, 20rem);
+      min-width: 15rem;
+      max-width: min(30rem, 42vw);
       display: inline-flex;
       align-items: center;
-      gap: 0.3rem;
+      gap: 0.45rem;
       border: 1px solid var(--color-rule);
       background: var(--color-paper-2);
       border-radius: var(--radius-pill);
-      padding: 0.2rem 0.5rem 0.2rem 0.7rem;
+      padding: 0.32rem 0.65rem 0.32rem 0.85rem;
       cursor: pointer;
       pointer-events: auto;
+      /* Hard backstop: nothing may escape the capsule when space runs out.
+         Safe because the menu is moved to <body> whenever it is visible. */
+      overflow: hidden;
       box-shadow: var(--shadow-1);
       transition: border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
     }
@@ -924,16 +1143,18 @@
       transform: rotate(180deg);
     }
     .chat-model-select {
-      width: max-content;
-      max-width: min(12rem, 48vw);
-      min-width: 4rem;
+      width: 100%;
+      max-width: none;
+      flex: 1 1 auto;
+      /* No floor — the label ellipsises so the provider pill keeps its room. */
+      min-width: 0;
       border: 0;
       background: transparent;
       color: var(--color-ink);
       border-radius: 0;
       padding: 0.15rem 0.1rem;
       font: inherit;
-      font-size: var(--text-xs);
+      font-size: var(--text-sm);
       font-weight: 600;
       letter-spacing: -0.005em;
       cursor: pointer;
@@ -951,6 +1172,7 @@
     }
     .chat-model-origin-pill {
       flex: 0 0 auto;
+      min-width: 0;
       pointer-events: none;
       font-family: var(--font-mono);
       font-size: 0.6rem;
@@ -967,16 +1189,21 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    /* In the trigger the badge yields before the capsule can overflow; in menu
+       rows it stays whole and the model name takes the ellipsis instead. */
+    .chat-model-select-wrap > .chat-model-origin-pill { flex: 0 1 auto; }
     .chat-model-origin-pill.is-hidden { display: none !important; }
     .chat-model-select-wrap.is-hidden { display: none !important; }
     .chat-model-menu {
       position: fixed;
       z-index: 200;
-      min-width: 17rem;
-      max-width: min(28rem, 92vw);
-      max-height: min(18rem, 52vh);
-      overflow: auto;
-      padding: 0.35rem;
+      min-width: 15rem;
+      max-width: min(36rem, calc(100vw - 1rem));
+      max-height: min(23rem, 60vh);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0;
       border-radius: var(--radius-xl);
       border: 1px solid var(--color-rule);
       background: var(--color-paper-2);
@@ -989,6 +1216,68 @@
       transition:
         opacity var(--dur-short) var(--ease-settle),
         transform var(--dur-short) var(--ease-settle);
+    }
+    /* Filter row pins to the top; only the option list scrolls under it. */
+    .chat-model-search {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.6rem 0.9rem;
+      border-bottom: 1px solid var(--color-rule);
+    }
+    .chat-model-search.is-hidden { display: none !important; }
+    .chat-model-search svg {
+      width: 0.95rem;
+      height: 0.95rem;
+      flex: 0 0 auto;
+      color: var(--color-muted);
+    }
+    .chat-model-search-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-ink);
+      font: inherit;
+      font-size: var(--text-sm);
+      outline: none;
+    }
+    .chat-model-search-input::placeholder { color: var(--color-muted); }
+    .chat-model-search-count {
+      flex: 0 0 auto;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.03em;
+      color: var(--color-muted);
+      padding: 0.18rem 0.5rem;
+      border-radius: var(--radius-pill);
+      background: color-mix(in oklch, var(--color-ink) 7%, transparent);
+    }
+    .chat-model-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .chat-model-empty {
+      margin: 0;
+      padding: 1.15rem 0.9rem 1.35rem;
+      text-align: center;
+      color: var(--color-muted);
+      font-size: var(--text-sm);
+      overflow-wrap: anywhere;
+    }
+    .chat-model-empty.is-hidden { display: none !important; }
+    .chat-model-mark {
+      background: color-mix(in oklch, var(--color-accent) 32%, transparent);
+      color: var(--color-ink);
+      border-radius: var(--radius-xs);
+      padding: 0 0.1em;
     }
     .chat-model-menu.is-open {
       opacity: 1;
@@ -2293,7 +2582,9 @@
        memory for from every other chat client. */
     .composer-actions {
       display: flex;
-      align-items: center;
+      /* flex-end so that when the tool pills wrap on narrow screens, send stays
+         level with the last row instead of floating beside the stack. */
+      align-items: flex-end;
       justify-content: space-between;
       gap: var(--space-sm);
     }
@@ -2707,6 +2998,15 @@
       line-height: 1.35;
       margin: -0.05rem 0 0.2rem;
     }
+    .agent-step.is-notice .agent-step-card {
+      border-color: color-mix(in oklch, var(--color-warn) 35%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-warn) 8%, var(--color-paper-2));
+    }
+    .agent-step-notice {
+      font-size: var(--text-sm);
+      color: var(--color-ink-2);
+      line-height: 1.45;
+    }
     .agent-step-detail {
       font-size: var(--text-sm);
       color: var(--color-ink-2);
@@ -3090,9 +3390,26 @@
     }
     .chat-shell.is-projects .chat-composer-dock,
     .chat-shell.is-projects .chat-topbar { display: none; }
-    .chat-shell.is-projects .chat-viewport { display: none; }
+    .chat-shell.is-projects .chat-viewport,
+    .chat-shell.is-projects .chat-workspace,
+    .chat-shell.is-projects .chat-column { display: none; }
 
     @media (max-width: 820px) {
+      .trace-sidebar,
+      .trace-expand-fab,
+      .chat-shell.trace-collapsed .trace-expand-fab {
+        display: none !important;
+      }
+      .chat-workspace { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+      .chat-column {
+        flex: 1 1 auto;
+        min-height: 0;
+        height: 100%;
+      }
+      .chat-column > .chat-viewport {
+        height: auto;
+        flex: 1 1 auto;
+      }
       /* Drawer overlay — ignore desktop collapse state. */
       .chat-shell.sidebar-collapsed .chat-sidebar {
         flex-basis: var(--sidebar-w);
@@ -3105,8 +3422,8 @@
       .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: none; }
       .sidebar-expand-fab { display: inline-flex; }
       .chat-shell.sidebar-open .sidebar-expand-fab { display: none; }
-      .chat-topbar { padding-left: 3.5rem; }
-      .chat-shell.sidebar-open .chat-topbar { padding-left: var(--space-md); }
+      .chat-topbar { padding-inline: 3.5rem; }
+      .chat-shell.sidebar-open .chat-topbar { padding-inline: var(--space-md); }
       .chat-sidebar {
         position: fixed;
         inset: 0 auto 0 0;
@@ -3121,6 +3438,27 @@
       }
       .chat-shell.sidebar-open .sidebar-backdrop { display: block; }
       .msg-role-user .msg-bubble { max-width: 92%; }
+    }
+    @media (max-width: 520px) {
+      /* The picker itself leaves enough room for the floating sidebar button;
+         reclaim symmetric topbar padding so it remains centered on phones. */
+      .chat-topbar,
+      .chat-shell.sidebar-collapsed .chat-topbar,
+      .chat-shell.sidebar-open .chat-topbar { padding-inline: 0.5rem; }
+      /* Phone widths can't fit "<model> <provider>" in the trigger. Drop the
+         provider badge here only — every row in the open menu still shows it. */
+      .chat-model-select-wrap > .chat-model-origin-pill { display: none !important; }
+      .chat-model-select-wrap {
+        width: clamp(12rem, var(--model-picker-width, 20rem), 74vw);
+        min-width: 0;
+        max-width: 74vw;
+      }
+      .chat-model-select { max-width: none; }
+      /* Buy back ~18px so the three tool pills stay on one row a bit longer. */
+      .composer-tools { gap: 0.25rem; }
+      .composer-tools .btn-think { padding: 0 0.55rem; }
+      .composer-tools .btn-agent { padding: 0 0.55rem 0 0.4rem; gap: 0.4rem; }
+      .chat-composer-dock { padding-left: 0.75rem; padding-right: 0.75rem; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -3143,7 +3481,7 @@
   </style>
 </head>
 <body>
-  <div class="chat-shell" id="chatShell">
+  <div class="chat-shell trace-collapsed" id="chatShell">
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <button type="button" class="btn btn-ghost btn-icon sidebar-expand-fab" id="btnExpandSidebar" aria-label="Show sidebar" title="Show sidebar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
@@ -3206,20 +3544,6 @@
       <div class="chat-starfield" aria-hidden="true">
         <canvas id="starfieldCanvas"></canvas>
       </div>
-      <header class="chat-topbar" id="chatTopbar">
-        <div class="chat-topbar-leading">
-          <div class="chat-model-select-wrap" id="chatModelSelectWrap">
-            <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
-            <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
-            <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            <div id="chatModelMenu" class="chat-model-menu is-hidden" role="listbox" aria-label="Models"></div>
-          </div>
-          <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
-          <div class="chat-topbar-title" id="convoTitle"></div>
-        </div>
-        <div class="chat-topbar-trailing" aria-hidden="true"></div>
-      </header>
-
       <div class="projects-view is-hidden" id="projectsView">
         <div class="projects-inner">
           <div class="projects-top">
@@ -3240,22 +3564,73 @@
         </div>
       </div>
 
-      <div class="chat-viewport" id="chatViewport" tabindex="0">
-        <div class="empty-state" id="emptyState">
-          <div class="empty-state-inner" id="emptyStateInner">
-            <canvas class="orb-mark" id="orbMark" role="img" aria-label="tensorUI"></canvas>
-            <p class="empty-eyebrow is-hidden" id="emptyEyebrow">Project</p>
-            <h1 class="empty-greeting" id="greeting">Hello</h1>
-            <p class="empty-sub" id="modelHint">—</p>
-            <!-- #composerCard is relocated here while the thread is empty -->
+      <div class="chat-workspace" id="chatWorkspace">
+        <button type="button" class="btn btn-ghost btn-icon trace-expand-fab" id="btnExpandTrace" aria-label="Show activity sidebar" title="Show activity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/></svg>
+        </button>
+        <div class="chat-column" id="chatColumn">
+          <header class="chat-topbar" id="chatTopbar">
+            <div class="chat-topbar-leading">
+              <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
+              <div class="chat-topbar-title" id="convoTitle"></div>
+            </div>
+            <div class="chat-model-select-wrap" id="chatModelSelectWrap">
+              <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
+              <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
+              <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              <div id="chatModelMenu" class="chat-model-menu is-hidden">
+                <div class="chat-model-search is-hidden" id="chatModelSearchWrap">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input
+                    type="text"
+                    id="chatModelSearch"
+                    class="chat-model-search-input"
+                    placeholder="Search models"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    role="combobox"
+                    aria-expanded="true"
+                    aria-autocomplete="list"
+                    aria-controls="chatModelList"
+                    aria-label="Search models"
+                  >
+                  <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
+                </div>
+                <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
+                <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
+              </div>
+            </div>
+            <div class="chat-topbar-trailing" aria-hidden="true"></div>
+          </header>
+          <div class="chat-viewport" id="chatViewport" tabindex="0">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-state-inner" id="emptyStateInner">
+                <canvas class="orb-mark" id="orbMark" role="img" aria-label="tensorUI"></canvas>
+                <p class="empty-eyebrow is-hidden" id="emptyEyebrow">Project</p>
+                <h1 class="empty-greeting" id="greeting">Hello</h1>
+                <p class="empty-sub" id="modelHint">—</p>
+                <!-- #composerCard is relocated here while the thread is empty -->
+              </div>
+            </div>
+            <div class="thread-wrap is-hidden" id="threadWrap">
+              <div id="chatThread"></div>
+            </div>
           </div>
+          <div class="chat-composer-dock" id="composerDock"></div>
         </div>
-        <div class="thread-wrap is-hidden" id="threadWrap">
-          <div id="chatThread"></div>
-        </div>
+        <aside class="trace-sidebar" id="traceSidebar" aria-label="Turn activity">
+          <div class="trace-sidebar-head">
+            <span class="trace-sidebar-title" id="traceSidebarTitle">Activity</span>
+            <button type="button" class="btn btn-ghost btn-icon btn-toggle-trace" id="btnToggleTrace" aria-label="Hide activity sidebar" title="Hide activity" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>
+            </button>
+          </div>
+          <div class="trace-sidebar-body" id="traceSidebarBody">
+            <p class="trace-sidebar-empty" id="traceSidebarEmpty">Select an assistant reply to inspect reasoning and tool steps.</p>
+          </div>
+        </aside>
       </div>
-
-      <div class="chat-composer-dock" id="composerDock"></div>
     </main>
   </div>
 
@@ -3418,18 +3793,6 @@
                 </div>
               </div>
               <div class="settings-row">
-                <label class="field-label" for="settingFontMono">Monospace</label>
-                <div>
-                  <select class="field-select" id="settingFontMono">
-                    <option value="jetbrains-mono">JetBrains Mono</option>
-                    <option value="ibm-plex-mono">IBM Plex Mono</option>
-                    <option value="source-code-pro">Source Code Pro</option>
-                    <option value="fira-code">Fira Code</option>
-                  </select>
-                  <p class="field-hint">Code, chips, and status labels.</p>
-                </div>
-              </div>
-              <div class="settings-row">
                 <label class="field-label">Text size</label>
                 <div class="segmented" id="fontScaleToggle" role="tablist" aria-label="Text size">
                   <button type="button" data-font-scale="compact" role="tab" aria-selected="false">Compact</button>
@@ -3460,7 +3823,7 @@
                     <option value="high">High</option>
                     <option value="max">Max</option>
                   </select>
-                  <p class="field-hint">Works on reasoning models (e.g. gpt-oss, Qwen3-thinking). Higher = slower but usually better answers. Harmless no-op on models that ignore it.</p>
+                  <p class="field-hint">Only options explicitly supported by the selected model are available.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -3830,16 +4193,8 @@
     const STORAGE_KEY = 'tensorui.chat.v1';
     const SETTINGS_KEY = 'tensorui.chat.settings.v1';
     const SIDEBAR_COLLAPSED_KEY = 'tensorui.chat.sidebarCollapsed';
+    const TRACE_DESKTOP_MQ = window.matchMedia('(min-width: 821px)');
     const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
-    // Soft caps for llama.cpp `thinking_budget_tokens`. Never send -1:
-    // LM Studio and other OpenAI-compat servers reject it with HTTP 400.
-    const THINKING_BUDGETS = {
-      off: 0,
-      low: 4096,
-      medium: 16384,
-      high: 32768,
-      max: 65536,
-    };
     const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
     const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'brave', 'bing', 'google', 'mojeek', 'startpage', 'yahoo', 'yandex', 'wikipedia'];
     const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
@@ -3903,12 +4258,24 @@
     const btnAttach = document.getElementById('btnAttach');
     const attachFileInput = document.getElementById('attachFileInput');
     const composerAttachmentsEl = document.getElementById('composerAttachments');
+    const traceSidebar = document.getElementById('traceSidebar');
+    const traceSidebarBody = document.getElementById('traceSidebarBody');
+    const traceSidebarTitle = document.getElementById('traceSidebarTitle');
+    const btnToggleTrace = document.getElementById('btnToggleTrace');
+    const btnExpandTrace = document.getElementById('btnExpandTrace');
 
-    let currentTheme = 'dark';
+    /** Selected assistant message index for the activity sidebar (desktop). */
+    let selectedTraceMsgIndex = null;
+    let traceSidebarSwapTimer = 0;
+    /** Convo id we already auto-opened the rail for during the current turn. */
+    let traceAutoOpenedForStream = null;
+    /** User manually hid the rail this turn — don't fight them with auto-open. */
+    let traceUserCollapsed = false;
+    /** Keep the activity rail pinned to the latest step unless the user scrolls up. */
+    let stickTraceSidebar = true;
     let currentFonts = {
       font_body: 'inter',
       font_display: 'space-grotesk',
-      font_mono: 'jetbrains-mono',
       font_scale: 'default',
     };
     let repaintStarfield = null;
@@ -3926,12 +4293,6 @@
       'dm-sans': '"DM Sans", system-ui, sans-serif',
       'instrument-sans': '"Instrument Sans", system-ui, sans-serif',
       fraunces: '"Fraunces", Georgia, serif',
-    };
-    const FONT_MONO_STACKS = {
-      'jetbrains-mono': '"JetBrains Mono", ui-monospace, monospace',
-      'ibm-plex-mono': '"IBM Plex Mono", ui-monospace, monospace',
-      'source-code-pro': '"Source Code Pro", ui-monospace, monospace',
-      'fira-code': '"Fira Code", ui-monospace, monospace',
     };
 
     function normalizeThemePref(theme) {
@@ -4042,26 +4403,22 @@
       const display = FONT_DISPLAY_STACKS[appearance.font_display]
         ? appearance.font_display
         : 'space-grotesk';
-      const mono = FONT_MONO_STACKS[appearance.font_mono]
-        ? appearance.font_mono
-        : 'jetbrains-mono';
       const scale = ['compact', 'default', 'large'].includes(appearance.font_scale)
         ? appearance.font_scale
         : 'default';
-      currentFonts = { font_body: body, font_display: display, font_mono: mono, font_scale: scale };
+      currentFonts = { font_body: body, font_display: display, font_scale: scale };
       const root = document.documentElement;
       root.style.setProperty('--font-body', FONT_BODY_STACKS[body]);
       root.style.setProperty('--font-display', FONT_DISPLAY_STACKS[display]);
-      root.style.setProperty('--font-mono', FONT_MONO_STACKS[mono]);
+      // No monospace anywhere — code, chips, and labels use the body face.
+      root.style.setProperty('--font-mono', FONT_BODY_STACKS[body]);
       root.style.setProperty('--font-logo', '"Syne", ' + FONT_DISPLAY_STACKS[display]);
       if (scale === 'default') delete root.dataset.fontScale;
       else root.dataset.fontScale = scale;
       const bodySelect = document.getElementById('settingFontBody');
       const displaySelect = document.getElementById('settingFontDisplay');
-      const monoSelect = document.getElementById('settingFontMono');
       if (bodySelect) bodySelect.value = body;
       if (displaySelect) displaySelect.value = display;
-      if (monoSelect) monoSelect.value = mono;
       document.querySelectorAll('[data-font-scale]').forEach((btn) => {
         const active = btn.dataset.fontScale === scale;
         btn.classList.toggle('is-active', active);
@@ -4075,7 +4432,6 @@
       applyFonts({
         font_body: data.font_body || currentFonts.font_body,
         font_display: data.font_display || currentFonts.font_display,
-        font_mono: data.font_mono || currentFonts.font_mono,
         font_scale: data.font_scale || currentFonts.font_scale,
       });
     }
@@ -4134,11 +4490,21 @@
     const chatModelSelectWrap = document.getElementById('chatModelSelectWrap');
     const chatModelOriginPill = document.getElementById('chatModelOriginPill');
     const chatModelMenu = document.getElementById('chatModelMenu');
+    const chatModelList = document.getElementById('chatModelList');
+    const chatModelSearchWrap = document.getElementById('chatModelSearchWrap');
+    const chatModelSearch = document.getElementById('chatModelSearch');
+    const chatModelSearchCount = document.getElementById('chatModelSearchCount');
+    const chatModelEmpty = document.getElementById('chatModelEmpty');
     const REMOTE_MODEL_KEY = 'tensorui_remote_model_id';
     const CHAT_MODEL_KEY = 'tensorui_chat_model';
+    /** Below this many models the filter field is more noise than help. */
+    const MODEL_SEARCH_MIN_OPTIONS = 6;
     let selectedRemoteModelId = localStorage.getItem(REMOTE_MODEL_KEY) || '';
     let selectedChatModel = localStorage.getItem(CHAT_MODEL_KEY) || '';
     let modelMenuOptions = [];
+    /** Options passing the current filter — what the arrow keys actually walk. */
+    let modelMenuMatches = [];
+    let modelMenuFilter = '';
     let modelMenuActiveIndex = -1;
     let latestState = null;
 
@@ -4454,6 +4820,7 @@
      *   timeline: Array<
      *     | {type:'think', content:string}
      *     | {type:'text', content:string}
+     *     | {type:'notice', content:string}
      *     | {type:'tool', name:string, detail:string, result:string, note?:string, live:boolean}
      *   >,
      *   errorMessage: string|null,
@@ -5137,7 +5504,10 @@
     }
 
     function isImageFile(file) {
-      return !!(file && file.type && file.type.startsWith('image/'));
+      if (!file) return false;
+      if (file.type && file.type.startsWith('image/')) return true;
+      // Some pickers omit MIME (notably certain HEIC/PNG paths). Fall back to name.
+      return /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(String(file.name || ''));
     }
 
     function isExtractableFile(file) {
@@ -5150,58 +5520,57 @@
       return /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|html?|css|js|tsx?|jsx|py|rs|go|java|c|cpp|h|hpp|ya?ml|toml|ini|log|sql|sh|bat|ps1)$/i.test(name);
     }
 
+    let attachHintUntil = 0;
+    function showAttachHint(message, { warn = true } = {}) {
+      if (!composerHint || !message) return;
+      composerHint.textContent = message;
+      composerHint.classList.toggle('is-warn', !!warn);
+      attachHintUntil = Date.now() + 8000;
+    }
+
     async function addFilesToPending(fileList) {
       if (!attachmentsUiEnabled()) {
-        composerHint.textContent = attachDisabledReason() || 'Attachments are disabled.';
-        composerHint.classList.add('is-warn');
+        showAttachHint(attachDisabledReason() || 'Attachments are disabled.');
         return;
       }
       const files = [...(fileList || [])].filter(Boolean);
+      let added = 0;
       for (const file of files) {
         if (pendingAttachments.length >= ATTACHMENT_MAX_FILES) {
-          composerHint.textContent = 'Attachment limit is ' + ATTACHMENT_MAX_FILES + ' files.';
-          composerHint.classList.add('is-warn');
+          showAttachHint('Attachment limit is ' + ATTACHMENT_MAX_FILES + ' files.');
           break;
         }
         if (file.size > ATTACHMENT_MAX_BYTES) {
-          composerHint.textContent = (file.name || 'File') + ' is larger than 8 MB.';
-          composerHint.classList.add('is-warn');
+          showAttachHint((file.name || 'File') + ' is larger than 8 MB.');
           continue;
         }
         if (!isImageFile(file) && !isExtractableFile(file)) {
-          composerHint.textContent = 'Unsupported file type: ' + (file.name || 'file');
-          composerHint.classList.add('is-warn');
+          showAttachHint('Unsupported file type: ' + (file.name || 'file'));
           continue;
         }
-        if (!isImageFile(file) && !attachmentsSupported && !textFallbackContextOk()) {
-          composerHint.textContent = 'Enable text extraction in Preferences → Attachments for non-image files.';
-          composerHint.classList.add('is-warn');
-          continue;
-        }
-        if (isImageFile(file) && !attachmentsSupported && !(settings.attachmentTextFallback && settings.attachmentOcr && textFallbackContextOk())) {
-          composerHint.textContent = 'This model lacks vision. Enable OCR fallback in Preferences → Attachments, or pick a vision model.';
-          composerHint.classList.add('is-warn');
-          continue;
-        }
+        // Queue anything the paperclip allows. Capability checks (vision / OCR /
+        // text extraction) run at send time so the chip always appears.
         try {
           const dataUrl = await fileToDataUrl(file);
+          const image = isImageFile(file);
           pendingAttachments.push({
             id: newId('a'),
-            name: file.name || (isImageFile(file) ? 'image' : 'attachment'),
-            mime: file.type || (isImageFile(file) ? 'image/png' : 'application/octet-stream'),
-            kind: isImageFile(file) ? 'image' : 'file',
+            name: file.name || (image ? 'image' : 'attachment'),
+            mime: file.type || (image ? 'image/png' : 'application/octet-stream'),
+            kind: image ? 'image' : 'file',
             size: file.size || 0,
             dataUrl,
-            previewUrl: isImageFile(file) ? dataUrl : '',
+            previewUrl: image ? dataUrl : '',
           });
+          added += 1;
         } catch (error) {
-          composerHint.textContent = error?.message || 'Failed to read file';
-          composerHint.classList.add('is-warn');
+          showAttachHint(error?.message || 'Failed to read file');
         }
       }
       renderPendingAttachments();
       updateSendEnabled();
-      if (pendingAttachments.length && serverReady) {
+      if (added && serverReady) {
+        attachHintUntil = 0;
         updateComposerHint();
       }
     }
@@ -5882,17 +6251,32 @@
     }
 
     let thinkingSupported = false;
+    let activeThinkingEffort = 'auto';
+    let availableThinkingEfforts = new Set(['auto']);
 
-    function syncComposerThinkVisibility(supported) {
-      thinkingSupported = !!supported;
+    function syncComposerThinkVisibility(model) {
+      const efforts = Array.isArray(model?.thinking_efforts) ? model.thinking_efforts : [];
+      const canDisable = !!model?.thinking_can_disable;
+      thinkingSupported = !!model?.thinking_control && (efforts.length > 0 || canDisable);
+      const allowed = (value) => value === 'auto'
+        || (value === 'off' ? canDisable : efforts.includes(value));
+      availableThinkingEfforts = new Set(THINKING_EFFORTS.filter(allowed));
+      activeThinkingEffort = allowed(settings.thinkingEffort) ? settings.thinkingEffort : 'auto';
       const wrap = document.getElementById('composerThinkWrap');
       if (!wrap) return;
       wrap.classList.toggle('is-hidden', !thinkingSupported);
       if (!thinkingSupported) setThinkMenuOpen(false);
+      document.querySelectorAll('#thinkMenu [data-effort]').forEach((item) => {
+        item.classList.toggle('is-hidden', !allowed(item.dataset.effort));
+      });
       const effort = document.getElementById('settingThinkingEffort');
       const effortRow = effort && effort.closest('.settings-row');
       if (effort) {
         effort.disabled = !thinkingSupported;
+        effort.querySelectorAll('option').forEach((option) => {
+          option.hidden = !allowed(option.value);
+          option.disabled = !allowed(option.value);
+        });
         if (effortRow) {
           effortRow.style.opacity = thinkingSupported ? '' : '0.55';
           effortRow.title = thinkingSupported
@@ -5900,37 +6284,12 @@
             : 'Current model does not expose controllable thinking.';
         }
       }
-    }
-
-    /** Reasoning knobs for llama.cpp + OpenAI-compat hosts (LM Studio, etc.). */
-    function reasoningRequestFields(effort) {
-      const value = THINKING_EFFORTS.includes(effort) ? effort : 'auto';
-      if (value === 'auto') return {};
-      if (value === 'off') {
-        return {
-          reasoning_effort: 'none',
-          thinking_budget_tokens: 0,
-          chat_template_kwargs: { enable_thinking: false },
-        };
-      }
-      // API / gpt-oss templates use low|medium|high (no "max").
-      const templateEffort = value === 'max' ? 'high' : value;
-      const fields = {
-        reasoning_effort: templateEffort,
-        chat_template_kwargs: {
-          enable_thinking: true,
-          reasoning_effort: templateEffort,
-        },
-      };
-      const budget = THINKING_BUDGETS[value];
-      if (typeof budget === 'number' && budget > 0) {
-        fields.thinking_budget_tokens = budget;
-      }
-      return fields;
+      syncThinkingEffortControls(activeThinkingEffort);
     }
 
     function setThinkingEffort(effort, persist = true) {
-      const value = THINKING_EFFORTS.includes(effort) ? effort : 'auto';
+      const value = availableThinkingEfforts.has(effort) ? effort : 'auto';
+      activeThinkingEffort = value;
       syncThinkingEffortControls(value);
       if (persist) {
         if (!requireUnlockedData()) {
@@ -6081,6 +6440,16 @@
           html += renderThinkBlock(part.content, { open: false, streaming: false });
         } else if (part.type === 'tool') {
           html += agentStepHtml(part);
+        } else if (part.type === 'notice') {
+          const text = String(part.content || '').trim();
+          if (!text) continue;
+          html +=
+            '<div class="agent-step is-notice is-done">' +
+              agentStepRailHtml() +
+              '<div class="agent-step-card"><div class="agent-step-notice">' +
+                escapeHtml(text) +
+              '</div></div>' +
+            '</div>';
         } else if (part.type === 'text') {
           if (!String(part.content || '').trim()) continue;
           html += renderMarkdown(part.content);
@@ -6114,12 +6483,310 @@
       return true;
     }
 
-    function renderAssistantMessage(message, { streaming = false } = {}) {
-      const partsHtml = renderCommittedParts(message.parts);
-      const bodyHtml = message.content
-        ? renderAssistantHtml(message.content, { streaming })
+    function isDesktopTraceLayout() {
+      return TRACE_DESKTOP_MQ.matches;
+    }
+
+    function timelinePartCount(parts) {
+      if (!Array.isArray(parts)) return 0;
+      return parts.reduce((count, part) => {
+        if (!part) return count;
+        if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') return count + 1;
+        if (part.type === 'text' && String(part.content || '').trim()) return count + 1;
+        return count;
+      }, 0);
+    }
+
+    /**
+     * Split an assistant turn into activity (reasoning / tools / sealed mid-turn
+     * text) vs the final visible answer.
+     */
+    function collectTimelineAndAnswer(message) {
+      const timelineParts = [];
+      for (const part of message?.parts || []) {
+        if (!part) continue;
+        if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') {
+          timelineParts.push(part);
+          continue;
+        }
+        if (part.type === 'text' && String(part.content || '').trim()) {
+          timelineParts.push(part);
+        }
+      }
+      let answerText = '';
+      const content = typeof message?.content === 'string' ? message.content : '';
+      if (content) {
+        for (const segment of parseThinkSegments(content)) {
+          if (segment.type === 'think') {
+            if (String(segment.content || '').trim()) {
+              timelineParts.push({ type: 'think', content: segment.content });
+            }
+          } else if (String(segment.content || '').trim()) {
+            answerText += segment.content;
+          }
+        }
+      }
+      return {
+        timelineParts,
+        answerText,
+        answerHtml: answerText ? renderMarkdown(answerText) : '',
+        stepCount: timelinePartCount(timelineParts),
+      };
+    }
+
+    function messageHasActivity(message) {
+      return collectTimelineAndAnswer(message).stepCount > 0;
+    }
+
+    function renderTimelineFold(timelineHtml, stepCount, { collapsed = true } = {}) {
+      const label = stepCount === 1
+        ? '1 activity step'
+        : (stepCount + ' activity steps');
+      return (
+        '<div class="agent-timeline-fold' + (collapsed ? ' is-collapsed' : '') + '">' +
+          '<button type="button" class="agent-timeline-fold-toggle" aria-expanded="' +
+            (collapsed ? 'false' : 'true') + '">' +
+            '<span>' + escapeHtml(label) + '</span>' +
+            THINK_CHEVRON +
+          '</button>' +
+          '<div class="agent-timeline-fold-panel">' +
+            '<div class="agent-timeline-fold-inner">' + timelineHtml + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderAssistantMessage(message, { streaming = false, collapseTimeline = null } = {}) {
+      if (streaming) {
+        const partsHtml = renderCommittedParts(message.parts);
+        const bodyHtml = message.content
+          ? renderAssistantHtml(message.content, { streaming: true })
+          : '';
+        return partsHtml + bodyHtml;
+      }
+
+      const { timelineParts, answerHtml, stepCount } = collectTimelineAndAnswer(message);
+      const timelineHtml = renderCommittedParts(timelineParts);
+      const finalHtml = answerHtml
+        ? '<div class="agent-final-answer">' + answerHtml + '</div>'
         : '';
-      return partsHtml + bodyHtml;
+
+      if (!timelineHtml) {
+        // No separable activity — fall back to the classic content renderer
+        // (still strips/shows think tags via settings).
+        return message.content
+          ? renderAssistantHtml(message.content, { streaming: false })
+          : finalHtml;
+      }
+
+      // Desktop: activity lives in the right sidebar; bubble stays answer-only.
+      if (isDesktopTraceLayout()) {
+        return finalHtml || '<div class="agent-final-answer"></div>';
+      }
+
+      // Mobile / compact: fold the finished timeline under a toggle.
+      const collapsed = collapseTimeline !== null ? !!collapseTimeline : true;
+      return renderTimelineFold(timelineHtml, stepCount, { collapsed }) + finalHtml;
+    }
+
+    function settleAssistantRow(row, message, { animateCollapse = false } = {}) {
+      if (!row || !message) return;
+      const bubble = row.querySelector('.msg-bubble');
+      if (!bubble) return;
+      const collapseTimeline = animateCollapse ? false : null;
+      bubble.innerHTML = renderAssistantMessage(message, {
+        streaming: false,
+        collapseTimeline,
+      });
+      enhanceCodeBlocks(bubble);
+      bubble.querySelectorAll('.think-body, .agent-timeline-fold-inner').forEach((el) => {
+        enhanceCodeBlocks(el);
+      });
+      if (animateCollapse && !isDesktopTraceLayout()) {
+        const fold = bubble.querySelector('.agent-timeline-fold');
+        if (fold) {
+          fold.classList.remove('is-collapsed');
+          const toggle = fold.querySelector('.agent-timeline-fold-toggle');
+          if (toggle) toggle.setAttribute('aria-expanded', 'true');
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              fold.classList.add('is-collapsed');
+              if (toggle) toggle.setAttribute('aria-expanded', 'false');
+            });
+          });
+        }
+      }
+    }
+
+    function syncTraceSelectionClasses() {
+      if (!chatThread) return;
+      chatThread.querySelectorAll('.msg-role-assistant').forEach((row) => {
+        const idx = Number(row.dataset.msgIndex);
+        row.classList.toggle(
+          'is-trace-selected',
+          selectedTraceMsgIndex != null && idx === selectedTraceMsgIndex
+        );
+      });
+    }
+
+    function isTraceSidebarNearBottom() {
+      if (!traceSidebarBody) return true;
+      const gap = traceSidebarBody.scrollHeight - traceSidebarBody.scrollTop - traceSidebarBody.clientHeight;
+      return gap <= 48;
+    }
+
+    function scrollTraceSidebarToBottom({ force = false } = {}) {
+      if (!traceSidebarBody) return;
+      if (!force && !stickTraceSidebar) return;
+      traceSidebarBody.scrollTop = traceSidebarBody.scrollHeight;
+      scrollThinkStreams(traceSidebarBody);
+    }
+
+    function paintTraceSidebarContent(message, { live = false } = {}) {
+      if (!traceSidebarBody) return;
+      const wasNearBottom = isTraceSidebarNearBottom();
+      const title = traceSidebarTitle;
+      if (!message) {
+        if (title) title.textContent = 'Activity';
+        traceSidebarBody.innerHTML =
+          '<p class="trace-sidebar-empty">Select an assistant reply to inspect reasoning and tool steps.</p>';
+        traceSidebar?.classList.add('is-empty');
+        return;
+      }
+      let timelineHtml = '';
+      let stepCount = 0;
+      if (live && Array.isArray(message.parts)) {
+        timelineHtml = renderCommittedParts(message.parts);
+        stepCount = timelinePartCount(message.parts);
+        if (message.content) {
+          for (const segment of parseThinkSegments(message.content)) {
+            if (segment.type !== 'think' || !String(segment.content || '').trim()) continue;
+            timelineHtml += renderThinkBlock(segment.content, {
+              open: !!segment.open,
+              streaming: true,
+            });
+            stepCount += 1;
+          }
+        }
+      } else {
+        const collected = collectTimelineAndAnswer(message);
+        timelineHtml = renderCommittedParts(collected.timelineParts);
+        stepCount = collected.stepCount;
+      }
+      if (title) {
+        title.textContent = live
+          ? 'Activity · live'
+          : (stepCount ? ('Activity · ' + stepCount) : 'Activity');
+      }
+      if (!timelineHtml.trim()) {
+        traceSidebarBody.innerHTML =
+          '<p class="trace-sidebar-empty">This reply has no reasoning or tool activity.</p>';
+        traceSidebar?.classList.add('is-empty');
+        return;
+      }
+      traceSidebar?.classList.remove('is-empty');
+      traceSidebarBody.innerHTML = timelineHtml;
+      enhanceCodeBlocks(traceSidebarBody);
+      traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
+      // Replacing innerHTML resets scrollTop — only re-pin if we were following.
+      if (stickTraceSidebar || wasNearBottom) {
+        stickTraceSidebar = true;
+        scrollTraceSidebarToBottom({ force: true });
+      }
+    }
+
+    function refreshTraceSidebar({ animate = false } = {}) {
+      if (!isDesktopTraceLayout() || !traceSidebarBody) return;
+      const convo = conversations.find((item) => item.id === activeId);
+      let message = null;
+      let live = false;
+      if (convo && selectedTraceMsgIndex != null) {
+        const stream = activeStreams.get(convo.id);
+        const streamingThis =
+          stream
+          && Number(stream.dom?.row?.dataset?.msgIndex) === selectedTraceMsgIndex;
+        if (streamingThis) {
+          live = true;
+          message = {
+            parts: stream.timeline,
+            content: stream.partial || '',
+          };
+        } else {
+          message = convo.messages[selectedTraceMsgIndex] || null;
+          if (!message || message.role !== 'assistant') message = null;
+        }
+      }
+      const paint = () => paintTraceSidebarContent(message, { live });
+      if (!animate) {
+        paint();
+        return;
+      }
+      traceSidebarBody.classList.add('is-swap');
+      window.clearTimeout(traceSidebarSwapTimer);
+      traceSidebarSwapTimer = window.setTimeout(() => {
+        paint();
+        requestAnimationFrame(() => {
+          traceSidebarBody.classList.remove('is-swap');
+        });
+      }, 140);
+    }
+
+    function selectTraceMessage(index, { animate = true, ensureOpen = false } = {}) {
+      const next = Number.isFinite(index) ? Number(index) : null;
+      const changed = selectedTraceMsgIndex !== next;
+      selectedTraceMsgIndex = next;
+      syncTraceSelectionClasses();
+      if (changed) stickTraceSidebar = true;
+      if (ensureOpen && isDesktopTraceLayout() && messageHasActivity(
+        conversations.find((item) => item.id === activeId)?.messages?.[next]
+      )) {
+        maybeAutoOpenTraceSidebar(activeId);
+      }
+      refreshTraceSidebar({ animate: animate && changed });
+    }
+
+    function setTraceSidebarOpen(open, { fromUser = false } = {}) {
+      if (!chatShell) return;
+      if (fromUser) {
+        traceUserCollapsed = !open;
+        if (open) traceAutoOpenedForStream = activeId;
+      }
+      chatShell.classList.toggle('trace-collapsed', !open);
+      if (btnToggleTrace) {
+        btnToggleTrace.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btnToggleTrace.setAttribute('aria-label', open ? 'Hide activity sidebar' : 'Show activity sidebar');
+        btnToggleTrace.title = open ? 'Hide activity' : 'Show activity';
+      }
+      if (btnExpandTrace) {
+        btnExpandTrace.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (open && stickTraceSidebar) {
+        requestAnimationFrame(() => scrollTraceSidebarToBottom({ force: true }));
+      }
+    }
+
+    function maybeAutoOpenTraceSidebar(convoId) {
+      if (!isDesktopTraceLayout() || !convoId) return;
+      if (traceUserCollapsed) return;
+      if (traceAutoOpenedForStream === convoId) return;
+      if (!chatShell.classList.contains('trace-collapsed')) {
+        traceAutoOpenedForStream = convoId;
+        return;
+      }
+      traceAutoOpenedForStream = convoId;
+      stickTraceSidebar = true;
+      setTraceSidebarOpen(true);
+    }
+
+    function resetTraceAutoOpenState() {
+      traceAutoOpenedForStream = null;
+      traceUserCollapsed = false;
+      stickTraceSidebar = true;
+    }
+
+    function initTraceSidebarPreferred() {
+      // Always start closed; open only when reasoning / tool activity begins.
+      setTraceSidebarOpen(false);
     }
 
     function scrollThinkStreams(root) {
@@ -6294,6 +6961,11 @@
         return;
       }
       if (!serverReady) return;
+      // Keep recent attachment warnings visible; pollState would otherwise wipe them.
+      if (Date.now() < attachHintUntil && composerHint.classList.contains('is-warn')) {
+        return;
+      }
+      attachHintUntil = 0;
       composerHint.classList.remove('is-warn');
       const sendHint = settings.enterSends
         ? 'Shift+Enter for a new line'
@@ -7173,6 +7845,16 @@
       convo.messages.forEach((message, index) => {
         chatThread.appendChild(buildBubble(message.role, message.content, index, message));
       });
+      let pick = null;
+      for (let i = convo.messages.length - 1; i >= 0; i -= 1) {
+        if (convo.messages[i]?.role === 'assistant') {
+          pick = i;
+          if (messageHasActivity(convo.messages[i])) break;
+        }
+      }
+      selectedTraceMsgIndex = pick;
+      syncTraceSelectionClasses();
+      refreshTraceSidebar({ animate: false });
       scrollToBottom({ force: stickToBottom });
     }
 
@@ -7253,6 +7935,8 @@
       stickToBottom = stickByConvo.has(id) ? stickByConvo.get(id) : true;
       userScrollOverride = !stickToBottom;
       resumeBottomIntent = false;
+      selectedTraceMsgIndex = null;
+      resetTraceAutoOpenState();
       showChatView();
       renderSidebar();
       showThread(convo);
@@ -7262,6 +7946,10 @@
         // Reattach live streaming UI for this conversation.
         stream.dom = null;
         paintStreamIntoView(convo, stream, stream.partial || '', true);
+        selectTraceMessage(Number(stream.dom?.row?.dataset?.msgIndex), {
+          animate: false,
+          ensureOpen: false,
+        });
       }
       syncComposerStreamUi();
       closeMobileSidebar();
@@ -7276,10 +7964,14 @@
       stickToBottom = true;
       userScrollOverride = false;
       resumeBottomIntent = false;
+      selectedTraceMsgIndex = null;
+      resetTraceAutoOpenState();
       showChatView();
       renderSidebar();
       showEmptyState();
       syncComposerStreamUi();
+      refreshTraceSidebar({ animate: false });
+      setTraceSidebarOpen(false);
       closeMobileSidebar();
       composerInput.focus();
     }
@@ -7440,13 +8132,125 @@
       return chatModelMenu && !chatModelMenu.classList.contains('is-hidden');
     }
 
+    function modelSearchEnabled() {
+      return modelMenuOptions.length >= MODEL_SEARCH_MIN_OPTIONS;
+    }
+
+    function modelFilterTerms() {
+      return modelMenuFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    }
+
+    /**
+     * Every term must appear somewhere in "<label> <provider>". Ranked so
+     * label-prefix hits float above mid-string ones; ties keep provider order.
+     */
+    function computeModelMatches() {
+      const terms = modelFilterTerms();
+      if (!terms.length) {
+        modelMenuMatches = modelMenuOptions.slice();
+        return;
+      }
+      const scored = [];
+      modelMenuOptions.forEach((option, index) => {
+        const label = String(option.label || '').toLowerCase();
+        const haystack = (label + ' ' + String(option.provider || '')).toLowerCase();
+        if (!terms.every((term) => haystack.includes(term))) return;
+        let rank = 2;
+        if (label.startsWith(terms[0])) rank = 0;
+        else if (label.includes(terms[0])) rank = 1;
+        scored.push({ option, rank, index });
+      });
+      scored.sort((a, b) => (a.rank - b.rank) || (a.index - b.index));
+      modelMenuMatches = scored.map((entry) => entry.option);
+    }
+
+    /** Escape, then wrap matched runs in <mark>. Overlapping terms merge. */
+    function highlightModelText(value, terms) {
+      const raw = String(value || '');
+      if (!terms.length || !raw) return escapeModelText(raw);
+      const lower = raw.toLowerCase();
+      const hit = new Array(raw.length).fill(false);
+      terms.forEach((term) => {
+        if (!term) return;
+        let from = 0;
+        for (;;) {
+          const at = lower.indexOf(term, from);
+          if (at === -1) break;
+          for (let i = at; i < at + term.length; i += 1) hit[i] = true;
+          from = at + 1;
+        }
+      });
+      let out = '';
+      let i = 0;
+      while (i < raw.length) {
+        const on = hit[i];
+        let j = i;
+        while (j < raw.length && hit[j] === on) j += 1;
+        const chunk = escapeModelText(raw.slice(i, j));
+        out += on ? '<mark class="chat-model-mark">' + chunk + '</mark>' : chunk;
+        i = j;
+      }
+      return out;
+    }
+
+    function renderModelMenuList() {
+      const terms = modelFilterTerms();
+      chatModelList.innerHTML = modelMenuMatches.map((option, index) => {
+        const isSelected = option.value === selectedChatModel;
+        const badge = option.provider
+          ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(option.provider) + '">'
+            + highlightModelText(option.provider, terms) + '</span>'
+          : '';
+        return '<button type="button" class="chat-model-option' + (isSelected ? ' is-selected' : '')
+          + '" role="option" id="chat-model-option-' + index + '"'
+          + ' data-value="' + escapeModelAttr(option.value) + '"'
+          + ' title="' + escapeModelAttr(option.provider ? option.label + ' · ' + option.provider : option.label) + '"'
+          + ' aria-selected="' + (isSelected ? 'true' : 'false') + '">'
+          + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
+          + badge
+          + '</button>';
+      }).join('');
+
+      const empty = !modelMenuMatches.length;
+      chatModelEmpty.classList.toggle('is-hidden', !empty);
+      chatModelList.classList.toggle('is-hidden', empty);
+      if (empty) {
+        chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
+      }
+      if (chatModelSearchCount) {
+        chatModelSearchCount.textContent = terms.length
+          ? modelMenuMatches.length + '/' + modelMenuOptions.length
+          : String(modelMenuOptions.length);
+      }
+    }
+
+    /** Re-filter and repaint the open menu after the query changed. */
+    function applyModelFilter({ keepActive = false } = {}) {
+      const previous = keepActive && modelMenuActiveIndex >= 0
+        ? modelMenuMatches[modelMenuActiveIndex]
+        : null;
+      computeModelMatches();
+      renderModelMenuList();
+      const restored = previous
+        ? modelMenuMatches.findIndex((option) => option.value === previous.value)
+        : -1;
+      if (restored >= 0) modelMenuActiveIndex = restored;
+      else {
+        const selected = modelMenuMatches.findIndex((option) => option.value === selectedChatModel);
+        modelMenuActiveIndex = modelMenuMatches.length ? Math.max(0, selected) : -1;
+      }
+      paintModelMenuActive();
+      if (modelMenuIsOpen()) positionModelMenu();
+    }
+
     function positionModelMenu() {
       if (!chatModelMenu || !chatModelSelectWrap) return;
       const rect = chatModelSelectWrap.getBoundingClientRect();
-      const menuWidth = Math.max(rect.width, 224);
+      const preferred = rect.width;
+      // Never wider than the window can hold, or the menu hangs off the edge.
+      const menuWidth = Math.min(preferred, window.innerWidth - 16);
       const maxLeft = window.innerWidth - menuWidth - 8;
-      // Left-aligned with the trigger — the picker anchors the topbar's leading
-      // edge, so centering would push the menu off the left of the window.
+      // Align to the centered trigger, clamping only near viewport edges.
       const left = Math.min(Math.max(8, rect.left), maxLeft);
       chatModelMenu.style.top = Math.round(rect.bottom + 6) + 'px';
       chatModelMenu.style.left = Math.round(left) + 'px';
@@ -7454,12 +8258,16 @@
       chatModelMenu.style.right = 'auto';
     }
 
-    function closeModelMenu() {
+    function closeModelMenu({ restoreFocus = false } = {}) {
       if (!chatModelMenu || chatModelMenu.classList.contains('is-hidden')) return;
       chatModelMenu.classList.remove('is-open');
       chatModelSelectWrap.classList.remove('is-open');
       chatModelSelect.setAttribute('aria-expanded', 'false');
       modelMenuActiveIndex = -1;
+      // Drop the query so the next open starts from the full list.
+      modelMenuFilter = '';
+      if (chatModelSearch) chatModelSearch.value = '';
+      if (restoreFocus) chatModelSelect.focus();
       const finish = () => {
         chatModelMenu.classList.add('is-hidden');
         if (chatModelMenu.parentElement !== chatModelSelectWrap) {
@@ -7474,11 +8282,16 @@
     }
 
     function paintModelMenuActive() {
-      chatModelMenu.querySelectorAll('.chat-model-option').forEach((btn, index) => {
+      const options = chatModelList.querySelectorAll('.chat-model-option');
+      options.forEach((btn, index) => {
         btn.classList.toggle('is-active', index === modelMenuActiveIndex);
       });
-      const active = chatModelMenu.querySelector('.chat-model-option.is-active');
+      const active = options[modelMenuActiveIndex];
       if (active) active.scrollIntoView({ block: 'nearest' });
+      if (chatModelSearch) {
+        if (active) chatModelSearch.setAttribute('aria-activedescendant', active.id);
+        else chatModelSearch.removeAttribute('aria-activedescendant');
+      }
     }
 
     function openModelMenu() {
@@ -7486,19 +8299,28 @@
       if (chatModelMenu.parentElement !== document.body) {
         document.body.appendChild(chatModelMenu);
       }
+      const searchable = modelSearchEnabled();
+      chatModelSearchWrap.classList.toggle('is-hidden', !searchable);
+      modelMenuFilter = '';
+      if (chatModelSearch) chatModelSearch.value = '';
       chatModelMenu.classList.remove('is-hidden');
       chatModelSelectWrap.classList.add('is-open');
       chatModelSelect.setAttribute('aria-expanded', 'true');
-      modelMenuActiveIndex = Math.max(0, modelMenuOptions.findIndex((o) => o.value === selectedChatModel));
+      computeModelMatches();
+      renderModelMenuList();
+      modelMenuActiveIndex = Math.max(0, modelMenuMatches.findIndex((o) => o.value === selectedChatModel));
       positionModelMenu();
       paintModelMenuActive();
+      // Typing filters immediately when the field is there; otherwise the
+      // trigger keeps focus and its own arrow-key handler stays in charge.
+      if (searchable) chatModelSearch.focus();
       void chatModelMenu.offsetWidth;
       requestAnimationFrame(() => chatModelMenu.classList.add('is-open'));
     }
 
     function chooseModelOption(value) {
       if (!value) {
-        closeModelMenu();
+        closeModelMenu({ restoreFocus: true });
         return;
       }
       if (value !== selectedChatModel) {
@@ -7512,13 +8334,13 @@
           ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
           : '';
         syncModelOriginPill(true, selected && selected.provider);
-        chatModelMenu.querySelectorAll('.chat-model-option').forEach((btn) => {
+        chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
           const isSelected = btn.getAttribute('data-value') === selectedChatModel;
           btn.classList.toggle('is-selected', isSelected);
           btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         });
       }
-      closeModelMenu();
+      closeModelMenu({ restoreFocus: true });
       if (latestState) updateServerChip(latestState);
     }
 
@@ -7537,6 +8359,36 @@
       return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;');
+    }
+
+    const modelWidthCanvas = document.createElement('canvas');
+
+    function measuredTextWidth(element, value) {
+      const context = modelWidthCanvas.getContext('2d');
+      if (!context || !element) return String(value || '').length * 8;
+      const style = getComputedStyle(element);
+      context.font = style.font;
+      const text = String(value || '');
+      const spacing = Number.parseFloat(style.letterSpacing) || 0;
+      return context.measureText(text).width + Math.max(0, text.length - 1) * spacing;
+    }
+
+    /** Size the closed picker from the longest model name, with room for its
+     * provider badge and caret. CSS applies the final min/max constraints. */
+    function syncModelSelectorWidth(options) {
+      const longestModel = options.reduce(
+        (width, option) => Math.max(width, measuredTextWidth(chatModelSelect, option.label)),
+        0
+      );
+      const longestProvider = options.reduce(
+        (width, option) => Math.max(width, measuredTextWidth(chatModelOriginPill, option.provider)),
+        0
+      );
+      // Provider badge is capped at 7rem by CSS. The remaining 3.8rem covers
+      // capsule/button padding, flex gaps, border, and the caret.
+      const providerRoom = longestProvider ? Math.min(longestProvider + 18, 112) : 0;
+      const preferred = Math.ceil(longestModel + providerRoom + 61);
+      chatModelSelectWrap.style.setProperty('--model-picker-width', preferred + 'px');
     }
 
     function syncModelSelector(data) {
@@ -7565,6 +8417,7 @@
         thinking: !!m.thinking_supported,
       }));
       modelMenuOptions = remoteOptions;
+      syncModelSelectorWidth(remoteOptions);
 
       const allValues = remoteOptions.map((o) => o.value);
       if (!allValues.includes(selectedChatModel)) {
@@ -7592,19 +8445,10 @@
       // (state poll runs every 2s and was cancelling clicks).
       if (!menuOpen && chatModelMenu.dataset.signature !== signature) {
         chatModelMenu.dataset.signature = signature;
-        chatModelMenu.innerHTML = remoteOptions.map((o) => {
-          const badge = o.provider
-            ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(o.provider) + '">'
-              + escapeModelText(o.provider) + '</span>'
-            : '';
-          return '<button type="button" class="chat-model-option'
-            + (o.value === selectedChatModel ? ' is-selected' : '')
-            + '" role="option" data-value="' + escapeModelAttr(o.value) + '"'
-            + ' aria-selected="' + (o.value === selectedChatModel ? 'true' : 'false') + '">'
-            + '<span class="chat-model-option-name">' + escapeModelText(o.label) + '</span>'
-            + badge
-            + '</button>';
-        }).join('');
+        // Menu is closed, so there is no live filter to preserve.
+        modelMenuFilter = '';
+        computeModelMatches();
+        renderModelMenuList();
       }
       const selected = remoteOptions.find((o) => o.value === selectedChatModel);
       if (!menuOpen) {
@@ -7668,8 +8512,7 @@
           : ('Chatting with ' + modelName + viaSuffix);
         updateComposerHint();
       }
-      const thinking = !!(remoteSelected?.thinking_supported || data.thinking_supported);
-      syncComposerThinkVisibility(thinking);
+      syncComposerThinkVisibility(remoteSelected);
       syncAttachButton();
       updateSendEnabled();
     }
@@ -7695,6 +8538,7 @@
       let prepared;
       try {
         if (queued.length) {
+          attachHintUntil = 0;
           composerHint.textContent = 'Preparing attachments…';
           composerHint.classList.remove('is-warn');
           prepared = await prepareAttachmentsForSend(queued);
@@ -7702,8 +8546,7 @@
           prepared = [];
         }
       } catch (error) {
-        composerHint.textContent = error?.message || 'Attachment prep failed';
-        composerHint.classList.add('is-warn');
+        showAttachHint(error?.message || 'Attachment prep failed');
         return;
       }
 
@@ -7861,6 +8704,22 @@
       }).join('\n');
     }
 
+    function streamingAnswerText(text) {
+      if (!text) return '';
+      let out = '';
+      for (const segment of parseThinkSegments(text)) {
+        if (segment.type === 'think') continue;
+        out += segment.content || '';
+      }
+      return out;
+    }
+
+    function renderStreamingAnswerHtml(text) {
+      const answer = streamingAnswerText(text);
+      if (!answer.trim()) return '';
+      return '<div class="agent-final-answer">' + renderMarkdown(answer) + '</div>';
+    }
+
     function paintStreamIntoView(convo, stream, replyText, streaming) {
       stream.partial = replyText;
       const { cleaned, memory } = applyMemoryUpdateProtocol(replyText, { streaming });
@@ -7874,17 +8733,38 @@
       const dom = ensureStreamDom(convo, stream);
       if (!dom) return;
       const { row, statusEl, thinkingLabel, traceEl, answerEl, thinkingOrb } = dom;
-      // Tools now live in the chronological answer timeline, not a separate strip.
       if (traceEl) {
         traceEl.innerHTML = '';
         traceEl.classList.add('is-hidden');
       }
-      const committedHtml = renderCommittedParts(stream.timeline);
-      const committedSig = timelineSignature(stream.timeline);
       const thinkingOpen = streaming && isThinkingOpen(cleaned);
       const hasTimeline = stream.timeline.length > 0;
+      const desktop = isDesktopTraceLayout();
+      const answerHtml = desktop
+        ? renderStreamingAnswerHtml(cleaned)
+        : '';
+      const hasVisibleAnswer = desktop
+        ? !!answerHtml
+        : !!(cleaned && streamingAnswerText(cleaned).trim());
 
-      if (cleaned || hasTimeline) {
+      if (desktop) {
+        // Desktop: activity lives only in the right sidebar — never duplicate it
+        // into the chat bubble while streaming.
+        if (answerHtml) {
+          answerEl.innerHTML = answerHtml;
+          if (!streaming) enhanceCodeBlocks(answerEl);
+        } else if (!streaming) {
+          answerEl.innerHTML = '';
+        } else if (!hasTimeline && !thinkingOpen) {
+          answerEl.innerHTML = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
+        } else {
+          answerEl.innerHTML = '';
+        }
+        delete answerEl.dataset.committedSig;
+        stream.enteredSteps = 0;
+      } else if (cleaned || hasTimeline) {
+        const committedHtml = renderCommittedParts(stream.timeline);
+        const committedSig = timelineSignature(stream.timeline);
         const liveOnly =
           streaming &&
           thinkingOpen &&
@@ -7923,15 +8803,20 @@
       }
 
       const toolLive = stream.timeline.some((part) => part.type === 'tool' && part.live);
-      if (stream.useAgent) {
+      if (toolLive || thinkingOpen || (streaming && stream.useAgent && !hasVisibleAnswer)) {
         statusEl.classList.remove('is-hidden');
         thinkingOrb.play();
-        if (thinkingOpen && !toolLive) thinkingLabel.textContent = 'Reasoning…';
-      } else if (thinkingOpen || (streaming && !cleaned && !hasTimeline)) {
+        if (toolLive) {
+          // Label is set by the tool_call agent event.
+        } else if (thinkingOpen) {
+          thinkingLabel.textContent = 'Reasoning…';
+        } else if (stream.useAgent) {
+          thinkingLabel.textContent = thinkingLabel.textContent || 'Processing…';
+        }
+      } else if (streaming && !cleaned && !hasTimeline) {
         statusEl.classList.remove('is-hidden');
-        thinkingLabel.textContent = thinkingOpen ? 'Reasoning…' : thinkingLabel.textContent;
         thinkingOrb.play();
-      } else if (cleaned || hasTimeline) {
+      } else if (hasVisibleAnswer || (!streaming && (cleaned || hasTimeline))) {
         statusEl.classList.add('is-hidden');
         // Pause only — stop() is irreversible and a brief think/answer flicker
         // would leave a dead orb while the label shimmer keeps running.
@@ -7940,11 +8825,22 @@
       row.dataset.raw = cleaned;
       // Never force — respect user scroll-away while tokens arrive.
       scrollToBottom();
+      if (desktop) {
+        const idx = Number(row.dataset.msgIndex);
+        const hasActivity = hasTimeline || thinkingOpen;
+        if (selectedTraceMsgIndex !== idx) {
+          selectTraceMessage(idx, { animate: false, ensureOpen: false });
+        } else {
+          refreshTraceSidebar({ animate: false });
+        }
+        if (hasActivity) maybeAutoOpenTraceSidebar(convo.id);
+      }
     }
 
     /** Stream an assistant reply; safe to leave the conversation while it runs. */
     async function runAssistantTurn(convo, { useAgent, text, skills }) {
       if (!serverReady || activeStreams.has(convo.id)) return;
+      resetTraceAutoOpenState();
 
       const turnSkills = skills || {
         web_search: !!settings.skillWebSearch,
@@ -8057,6 +8953,12 @@
           }
         } else if (payload.phase === 'status' && payload.message) {
           if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
+        } else if (payload.phase === 'notice' && payload.message) {
+          const text = String(payload.message).trim();
+          if (text && !stream.timeline.some((part) => part.type === 'notice' && part.content === text)) {
+            stream.timeline.push({ type: 'notice', content: text });
+          }
+          if (stream.dom) stream.dom.thinkingLabel.textContent = text || stream.dom.thinkingLabel.textContent;
         }
         paintStreamIntoView(convo, stream, typer.shown, true);
       };
@@ -8083,7 +8985,9 @@
         messages: apiMessages,
         agent: useAgent,
         skills: turnSkills,
-        ...(thinkingSupported ? reasoningRequestFields(settings.thinkingEffort) : {}),
+        ...(thinkingSupported && activeThinkingEffort !== 'auto'
+          ? { thinking_effort: activeThinkingEffort }
+          : {}),
       };
       const remote = selectedRemoteModel(latestState);
       if (remote) {
@@ -8197,9 +9101,10 @@
 
       if (viewing && dom) {
         if (stream.errorMessage && !assistantText) {
-          dom.answerEl.innerHTML =
-            renderCommittedParts(stream.timeline) +
-            '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>';
+          const errHtml = '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>';
+          dom.answerEl.innerHTML = isDesktopTraceLayout()
+            ? errHtml
+            : (renderCommittedParts(stream.timeline) + errHtml);
         } else if (stream.errorMessage) {
           paintStreamIntoView(convo, stream, assistantText, false);
           dom = stream.dom;
@@ -8210,10 +9115,16 @@
             );
           }
         } else if (!assistantText) {
-          const committed = renderCommittedParts(stream.timeline);
-          dom.answerEl.innerHTML = committed
-            ? committed
-            : '<span class="msg-error">No response.</span>';
+          if (isDesktopTraceLayout()) {
+            dom.answerEl.innerHTML = stream.timeline.length
+              ? ''
+              : '<span class="msg-error">No response.</span>';
+          } else {
+            const committed = renderCommittedParts(stream.timeline);
+            dom.answerEl.innerHTML = committed
+              ? committed
+              : '<span class="msg-error">No response.</span>';
+          }
         } else {
           paintStreamIntoView(convo, stream, assistantText, false);
           dom = stream.dom;
@@ -8232,9 +9143,11 @@
         };
         if (persistedParts) message.parts = persistedParts;
         convo.messages.push(message);
+        const msgIndex = convo.messages.length - 1;
         if (dom && dom.row.isConnected) {
-          dom.row.dataset.msgIndex = String(convo.messages.length - 1);
+          dom.row.dataset.msgIndex = String(msgIndex);
           dom.row.dataset.raw = assistantText || '';
+          settleAssistantRow(dom.row, message, { animateCollapse: true });
         }
         convo.updatedAt = Date.now();
         if (convo.projectId) {
@@ -8242,6 +9155,13 @@
           if (project) project.updatedAt = Date.now();
         }
         saveConversations();
+        if (activeId === convo.id) {
+          selectTraceMessage(msgIndex, {
+            animate: true,
+            ensureOpen: false,
+          });
+          if (messageHasActivity(message)) maybeAutoOpenTraceSidebar(convo.id);
+        }
       } else if (!viewing && stream.errorMessage) {
         // Persist a short error so returning to the chat is not blank after a failed background turn.
         convo.messages.push({
@@ -8270,10 +9190,29 @@
     }
 
     chatThread.addEventListener('click', (event) => {
+      const foldToggle = event.target.closest('.agent-timeline-fold-toggle');
+      if (foldToggle && chatThread.contains(foldToggle)) {
+        event.preventDefault();
+        const fold = foldToggle.closest('.agent-timeline-fold');
+        if (!fold) return;
+        const collapsed = fold.classList.toggle('is-collapsed');
+        foldToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        return;
+      }
       const btn = event.target.closest('.md-code-copy');
-      if (!btn || !chatThread.contains(btn)) return;
-      event.preventDefault();
-      copyCodeBlock(btn);
+      if (btn && chatThread.contains(btn)) {
+        event.preventDefault();
+        copyCodeBlock(btn);
+        return;
+      }
+      if (event.target.closest('.msg-action, a, button, summary, details, input, textarea')) {
+        return;
+      }
+      const row = event.target.closest('.msg-role-assistant');
+      if (!row || !chatThread.contains(row)) return;
+      const index = Number(row.dataset.msgIndex);
+      if (!Number.isFinite(index)) return;
+      selectTraceMessage(index, { animate: true, ensureOpen: false });
     });
 
     btnSend.addEventListener('click', sendMessage);
@@ -8355,7 +9294,7 @@
       setThinkingEffort(event.target.value, true);
     });
     syncThinkingEffortControls(settings.thinkingEffort);
-    syncComposerThinkVisibility(false);
+    syncComposerThinkVisibility(null);
     syncAttachButton();
     syncAttachmentFallbackControls();
     document.getElementById('btnNewChat').addEventListener('click', () => {
@@ -8369,6 +9308,41 @@
     const btnToggleSidebar = document.getElementById('btnToggleSidebar');
     const btnExpandSidebar = document.getElementById('btnExpandSidebar');
     const sidebarMobileMq = window.matchMedia('(max-width: 820px)');
+
+    initTraceSidebarPreferred();
+    btnToggleTrace?.addEventListener('click', () => {
+      const open = chatShell.classList.contains('trace-collapsed');
+      setTraceSidebarOpen(open, { fromUser: true });
+    });
+    btnExpandTrace?.addEventListener('click', () => {
+      stickTraceSidebar = true;
+      setTraceSidebarOpen(true, { fromUser: true });
+      scrollTraceSidebarToBottom({ force: true });
+    });
+    if (traceSidebarBody) {
+      let lastTraceScrollTop = 0;
+      traceSidebarBody.addEventListener('scroll', () => {
+        const top = traceSidebarBody.scrollTop;
+        const goingUp = top < lastTraceScrollTop - 1;
+        lastTraceScrollTop = top;
+        if (goingUp && !isTraceSidebarNearBottom()) {
+          stickTraceSidebar = false;
+        } else if (isTraceSidebarNearBottom()) {
+          stickTraceSidebar = true;
+        }
+      }, { passive: true });
+    }
+    TRACE_DESKTOP_MQ.addEventListener('change', () => {
+      const convo = conversations.find((item) => item.id === activeId);
+      if (convo && !threadWrap.classList.contains('is-hidden')) {
+        // Re-render so bubbles pick the desktop/mobile activity layout.
+        const keep = selectedTraceMsgIndex;
+        renderThread(convo);
+        if (keep != null) selectTraceMessage(keep, { animate: false });
+      } else {
+        refreshTraceSidebar({ animate: false });
+      }
+    });
 
     function sidebarIsMobileDrawer() {
       return sidebarMobileMq.matches;
@@ -8795,15 +9769,11 @@
     document.querySelectorAll('#fontScaleToggle [data-font-scale]').forEach((btn) => {
       btn.addEventListener('click', () => patchAppearance({ font_scale: btn.dataset.fontScale }));
     });
-    ['settingFontBody', 'settingFontDisplay', 'settingFontMono'].forEach((id) => {
+    ['settingFontBody', 'settingFontDisplay'].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('change', () => {
-        const key = id === 'settingFontBody'
-          ? 'font_body'
-          : id === 'settingFontDisplay'
-            ? 'font_display'
-            : 'font_mono';
+        const key = id === 'settingFontBody' ? 'font_body' : 'font_display';
         patchAppearance({ [key]: el.value });
       });
     });
@@ -8846,7 +9816,7 @@
           return;
         }
         if (!chatModelMenu.classList.contains('is-hidden')) {
-          closeModelMenu();
+          closeModelMenu({ restoreFocus: true });
           return;
         }
         closeConvoMenu();
@@ -8857,11 +9827,18 @@
       if (event.target.closest('.chat-model-menu')) return;
       event.preventDefault();
       event.stopPropagation();
-      if (modelMenuIsOpen()) closeModelMenu();
-      else openModelMenu();
-      chatModelSelect.focus();
+      if (modelMenuIsOpen()) {
+        closeModelMenu({ restoreFocus: true });
+        return;
+      }
+      openModelMenu();
+      // openModelMenu() puts focus in the filter field when it is shown;
+      // don't yank it back to the trigger.
+      if (!modelSearchEnabled()) chatModelSelect.focus();
     });
-    chatModelSelect.addEventListener('keydown', (event) => {
+
+    /** Shared arrow/Enter/Escape handling for the trigger and the filter field. */
+    function handleModelMenuKeydown(event) {
       const open = modelMenuIsOpen();
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -8869,26 +9846,53 @@
           openModelMenu();
           return;
         }
-        const delta = event.key === 'ArrowDown' ? 1 : -1;
-        const count = modelMenuOptions.length;
+        const count = modelMenuMatches.length;
         if (!count) return;
-        modelMenuActiveIndex = (modelMenuActiveIndex + delta + count) % count;
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        const from = modelMenuActiveIndex < 0 ? (delta > 0 ? -1 : 0) : modelMenuActiveIndex;
+        modelMenuActiveIndex = (from + delta + count) % count;
         paintModelMenuActive();
-      } else if (event.key === 'Enter' || event.key === ' ') {
+      } else if (event.key === 'Home' || event.key === 'End') {
+        if (!open || !modelMenuMatches.length) return;
+        event.preventDefault();
+        modelMenuActiveIndex = event.key === 'Home' ? 0 : modelMenuMatches.length - 1;
+        paintModelMenuActive();
+      } else if (event.key === 'Enter') {
         event.preventDefault();
         if (!open) {
           openModelMenu();
           return;
         }
-        const choice = modelMenuOptions[modelMenuActiveIndex];
+        const choice = modelMenuMatches[modelMenuActiveIndex];
         if (choice) chooseModelOption(choice.value);
+      } else if (event.key === ' ' && event.target === chatModelSelect) {
+        // Space only toggles from the button; inside the field it is a query character.
+        event.preventDefault();
+        if (!open) openModelMenu();
       } else if (event.key === 'Escape' && open) {
         event.preventDefault();
+        event.stopPropagation();
+        closeModelMenu({ restoreFocus: true });
+      } else if (event.key === 'Tab' && open) {
         closeModelMenu();
       }
+    }
+
+    chatModelSelect.addEventListener('keydown', handleModelMenuKeydown);
+    chatModelSearch.addEventListener('keydown', handleModelMenuKeydown);
+    chatModelSearch.addEventListener('input', () => {
+      modelMenuFilter = chatModelSearch.value;
+      applyModelFilter();
+    });
+    // Clicking the field must not fall through to the wrap's toggle handler.
+    chatModelSearchWrap.addEventListener('click', (event) => {
+      event.stopPropagation();
+      chatModelSearch.focus();
     });
     // pointerdown so selection wins before the document "outside click" closer.
     chatModelMenu.addEventListener('pointerdown', (event) => {
+      // Let the filter field take the caret normally.
+      if (event.target.closest('.chat-model-search')) return;
       const btn = event.target.closest('.chat-model-option');
       if (!btn) return;
       event.preventDefault();

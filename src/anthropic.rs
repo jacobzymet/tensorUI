@@ -79,7 +79,7 @@ pub fn openai_to_anthropic_messages(payload: &Value) -> Result<Value, String> {
     let mut out = json!({
         "model": model,
         "max_tokens": max_tokens,
-        "stream": true,
+        "stream": payload.get("stream").and_then(|v| v.as_bool()).unwrap_or(true),
         "messages": messages,
     });
     if let Some(object) = out.as_object_mut() {

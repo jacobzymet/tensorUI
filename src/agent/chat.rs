@@ -238,7 +238,7 @@ pub(crate) async fn send_sse(
     }
 }
 
-const TITLE_TIMEOUT: Duration = Duration::from_secs(60);
+const TITLE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Ask the active provider for a short session title from the first user message.
 pub async fn generate_chat_title(
@@ -249,55 +249,43 @@ pub async fn generate_chat_title(
     user_message: &str,
 ) -> Result<String, String> {
     let api_base = api_base.trim_end_matches('/');
-    let snippet: String = user_message.chars().take(500).collect();
+    let snippet: String = user_message.chars().take(240).collect();
     if snippet.trim().is_empty() {
         return Err("message is empty".into());
     }
-    // Force thinking off — reasoning models otherwise burn the whole budget
-    // on `<think>` and return empty content (title stays as the first message).
-    let payload = serde_json::json!({
-        "model": model.map(str::trim).filter(|m| !m.is_empty()).unwrap_or("local"),
+    let model_name = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("local");
+    // Tiny completion only — never invite reasoning. Title failure must not
+    // affect the main chat; prefer keeping the provisional slug over a CoT leak.
+    let mut payload = serde_json::json!({
+        "model": model_name,
         "stream": false,
-        "max_tokens": 64,
+        "max_tokens": 24,
         "temperature": 0.2,
-        "reasoning_effort": "none",
-        "thinking_budget_tokens": 0,
-        "chat_template_kwargs": {
-            "enable_thinking": false,
-            "reasoning_effort": "none"
-        },
         "messages": [
             {
                 "role": "system",
-                "content": "You invent a short chat title. Reply with ONLY the title — no quotes, no markdown, no trailing punctuation, no explanation. At most 6 words."
+                "content": "Reply with a chat title only. Maximum 6 words. No quotes, markdown, punctuation, or explanation."
             },
             {
                 "role": "user",
-                "content": format!("Write a title for a chat that starts with:\n\n{snippet}")
+                "content": format!("Title this chat:\n\n{snippet}")
             }
         ]
     });
-
-    let client = http::llm_client(api_base, TITLE_TIMEOUT);
-    let (url, body) = match style {
-        ApiStyle::Openai => (format!("{api_base}/chat/completions"), payload),
-        ApiStyle::Anthropic => (
-            format!("{api_base}/messages"),
-            anthropic::openai_to_anthropic_messages(&payload)?,
-        ),
-    };
-
-    let mut request = client.post(&url).json(&body);
-    for (name, value) in providers::provider_auth_headers(style, token) {
-        request = request.header(name, value);
+    // OpenAI-compat / local templates: ask the host to skip thinking. Anthropic
+    // conversion ignores these and simply omits a thinking block for "none".
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("reasoning_effort".into(), serde_json::json!("none"));
+        object.insert(
+            "chat_template_kwargs".into(),
+            serde_json::json!({ "enable_thinking": false }),
+        );
     }
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        return Err(format!("title request failed ({status}): {text}"));
-    }
-    let value: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+
+    let value = post_title_completion(api_base, token, style, &payload).await?;
     let raw = match style {
         ApiStyle::Openai => extract_openai_title_text(&value),
         ApiStyle::Anthropic => extract_anthropic_text(&value),
@@ -308,6 +296,59 @@ pub async fn generate_chat_title(
             truncate_for_error(&raw)
         )
     })
+}
+
+async fn post_title_completion(
+    api_base: &str,
+    token: &str,
+    style: ApiStyle,
+    payload: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let client = http::llm_client(api_base, TITLE_TIMEOUT);
+    let (url, body) = match style {
+        ApiStyle::Openai => (format!("{api_base}/chat/completions"), payload.clone()),
+        ApiStyle::Anthropic => (
+            format!("{api_base}/messages"),
+            anthropic::openai_to_anthropic_messages(payload)?,
+        ),
+    };
+
+    let send = |body: serde_json::Value| {
+        let client = client.clone();
+        let url = url.clone();
+        let token = token.to_string();
+        async move {
+            let mut request = client.post(&url).json(&body);
+            for (name, value) in providers::provider_auth_headers(style, &token) {
+                request = request.header(name, value);
+            }
+            request.send().await.map_err(|error| error.to_string())
+        }
+    };
+
+    let response = send(body.clone()).await?;
+    let response = if style == ApiStyle::Openai
+        && response.status().as_u16() == 400
+        && payload.get("reasoning_effort").is_some()
+    {
+        // Some strict OpenAI-compat hosts reject unknown reasoning fields —
+        // retry the same tiny request without them rather than failing the title.
+        let mut bare = payload.clone();
+        if let Some(object) = bare.as_object_mut() {
+            object.remove("reasoning_effort");
+            object.remove("chat_template_kwargs");
+        }
+        send(bare).await?
+    } else {
+        response
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("title request failed ({status}): {text}"));
+    }
+    response.json().await.map_err(|error| error.to_string())
 }
 
 fn truncate_for_error(raw: &str) -> String {
@@ -324,24 +365,8 @@ fn extract_openai_title_text(value: &serde_json::Value) -> String {
     let mut text = message
         .map(|msg| json_content_to_text(msg.get("content").unwrap_or(&serde_json::Value::Null)))
         .unwrap_or_default();
-    if text.trim().is_empty() {
-        // Some local servers put the only output in reasoning fields.
-        if let Some(message) = message {
-            for key in [
-                "reasoning_content",
-                "reasoning",
-                "thinking",
-                "reasoning_text",
-            ] {
-                let extra =
-                    json_content_to_text(message.get(key).unwrap_or(&serde_json::Value::Null));
-                if !extra.trim().is_empty() {
-                    text = extra;
-                    break;
-                }
-            }
-        }
-    }
+    // Never fall back to reasoning/thinking fields — those paraphrase the title
+    // prompt ("The user wants a short chat title…") and leak into the sidebar.
     if text.trim().is_empty()
         && let Some(legacy) = value.pointer("/choices/0/text").and_then(|v| v.as_str())
     {
@@ -418,32 +443,61 @@ fn strip_think_blocks(raw: &str) -> String {
 
 fn sanitize_chat_title(raw: &str) -> Option<String> {
     let cleaned = strip_think_blocks(raw);
-    let mut title = cleaned
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with('<'))?
-        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#' | '“' | '”' | '‘' | '’'))
-        .trim()
-        .to_string();
-    for prefix in ["Title:", "title:", "Chat title:", "CHAT TITLE:"] {
-        if let Some(rest) = title.strip_prefix(prefix) {
-            title = rest.trim().to_string();
+    let mut candidates = Vec::new();
+    for line in cleaned.lines() {
+        let mut title = line.trim().to_string();
+        if title.is_empty() || title.starts_with('<') {
+            continue;
         }
+        title = title
+            .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#' | '“' | '”' | '‘' | '’'))
+            .trim()
+            .to_string();
+        for prefix in ["Title:", "title:", "Chat title:", "CHAT TITLE:"] {
+            if let Some(rest) = title.strip_prefix(prefix) {
+                title = rest.trim().to_string();
+            }
+        }
+        title = title
+            .trim_end_matches(['.', '!', '?', ':', ';'])
+            .trim()
+            .to_string();
+        if title.is_empty() || title_looks_like_prompt_echo(&title) {
+            continue;
+        }
+        // Titles are ≤6 words by contract; allow a little slack, reject prose.
+        if title.split_whitespace().count() > 8 {
+            continue;
+        }
+        candidates.push(title);
     }
-    title = title
-        .trim_end_matches(['.', '!', '?', ':', ';'])
-        .trim()
-        .to_string();
-    // Reject titles that are just the raw user greeting when the model echoed it.
-    if title.is_empty() {
-        return None;
-    }
+    // Prefer the last short line — models often put the title after leftover prose.
+    let title = candidates.pop()?;
     let truncated: String = title.chars().take(60).collect();
     Some(if truncated.chars().count() < title.chars().count() {
         format!("{}…", truncated.trim_end())
     } else {
         truncated
     })
+}
+
+fn title_looks_like_prompt_echo(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "short chat title",
+        "at most 6",
+        "at most six",
+        "no quotes",
+        "no markdown",
+        "no explanation",
+        "the user wants",
+        "write a title",
+        "title this chat",
+        "reply with",
+        "only the title",
+        "maximum 6",
+    ];
+    MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
 #[cfg(test)]
@@ -468,6 +522,37 @@ mod title_tests {
         assert_eq!(
             sanitize_chat_title("<think>plan</think>\nMorning greeting").as_deref(),
             Some("Morning greeting")
+        );
+    }
+
+    #[test]
+    fn rejects_reasoning_prompt_echo_as_title() {
+        assert_eq!(
+            sanitize_chat_title(
+                "The user wants a short chat title, at most 6 words, no explanation"
+            ),
+            None
+        );
+        let value = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "The user wants a short chat title, at most 6 words"
+                }
+            }]
+        });
+        assert_eq!(
+            sanitize_chat_title(&extract_openai_title_text(&value)),
+            None
+        );
+    }
+
+    #[test]
+    fn prefers_title_line_after_prose() {
+        assert_eq!(
+            sanitize_chat_title("Sure, here you go\nRust async tips").as_deref(),
+            Some("Rust async tips")
         );
     }
 

@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DM+Sans:wght@400;500;600&family=Fira+Code:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Sans:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Literata:opsz,wght@7..72,400;500;600&family=Source+Code+Pro:wght@400;500;600&family=Source+Sans+3:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DM+Sans:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Sans:wght@500;600&family=Inter:wght@400;500;600&family=Literata:opsz,wght@7..72,400;500;600&family=Source+Sans+3:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet">
   <style>
     /* Token set is kept identical to chat.html so both surfaces stay in step. */
     :root {
@@ -44,7 +44,7 @@
       --font-display: "Space Grotesk", system-ui, sans-serif;
       --font-logo: "Syne", var(--font-display);
       --font-body: "Inter", system-ui, sans-serif;
-      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+      --font-mono: var(--font-body);
 
       --space-3xs: 0.2rem;
       --space-2xs: 0.4rem;
@@ -306,7 +306,6 @@
       border-radius: var(--radius-pill);
       background: currentColor;
       flex: 0 0 auto;
-      box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 18%, transparent);
     }
     .status-ready {
       color: var(--color-ok);
@@ -602,9 +601,11 @@
       padding: 0.85rem 1rem;
       display: grid;
       gap: 0.55rem;
-      transition: border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out), transform var(--dur-enter) var(--ease-settle), box-shadow var(--dur-short) var(--ease-out);
+      transition: border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out), padding-left var(--dur-short) var(--ease-out), transform var(--dur-enter) var(--ease-settle), box-shadow var(--dur-short) var(--ease-out);
     }
     .manager-card.is-active {
+      /* Room for the accent bar so it doesn't crowd the title/text. */
+      padding-left: 1.4rem;
       border-color: var(--accent-edge);
       background: color-mix(in oklch, var(--color-accent) 7%, var(--color-paper));
     }
@@ -612,7 +613,7 @@
     .manager-card.is-active::before {
       content: "";
       position: absolute;
-      left: 0.5rem;
+      left: 0.55rem;
       top: 1rem;
       bottom: 1rem;
       width: 3px;
@@ -655,13 +656,35 @@
       background: var(--color-paper-2);
       outline: none;
     }
-    .manager-card-meta span {
+    .manager-card-base {
       display: block;
       margin-top: 0.3rem;
       font-size: 0.68rem;
       font-family: var(--font-mono);
       color: var(--color-muted);
       word-break: break-all;
+    }
+    /* Facts as discrete pills — scannable, unlike the old mono run-on line. */
+    .manager-card-facts {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .fact-pill {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.03em;
+      color: var(--color-muted);
+      padding: 0.24rem 0.6rem;
+      border-radius: var(--radius-pill);
+      background: color-mix(in oklch, var(--color-ink) 6%, transparent);
+      white-space: nowrap;
+    }
+    .fact-pill.is-default {
+      color: var(--color-accent);
+      background: color-mix(in oklch, var(--color-accent) 14%, transparent);
+      font-weight: 600;
     }
     .manager-card-actions {
       display: flex;
@@ -1011,7 +1034,7 @@
       </div>
       <div class="sidebar-footer">
         <div class="sidebar-footer-row">
-          <span>Active</span>
+          <span>Default</span>
           <span id="activeChip" class="status-chip status-failed">none</span>
         </div>
         <div class="mode-switch" role="navigation" aria-label="Mode">
@@ -1041,7 +1064,7 @@
             <div class="section-head">
               <div>
                 <h2>Providers</h2>
-                <p class="section-lede">Linked LLM APIs (OpenAI-compatible or Anthropic Messages). Chat lists models from every saved provider; Activate marks the default when a request has no model selected.</p>
+                <p class="section-lede">Add as many as you like — Chat's model picker lists every model from every provider at once. The <strong>default</strong> only decides which provider handles a request that doesn't name a model.</p>
               </div>
             </div>
             <div class="panel">
@@ -1115,7 +1138,6 @@
       let currentFonts = {
         font_body: 'inter',
         font_display: 'space-grotesk',
-        font_mono: 'jetbrains-mono',
         font_scale: 'default',
       };
       let latestState = null;
@@ -1138,12 +1160,6 @@
         'dm-sans': '"DM Sans", system-ui, sans-serif',
         'instrument-sans': '"Instrument Sans", system-ui, sans-serif',
         fraunces: '"Fraunces", Georgia, serif',
-      };
-      const FONT_MONO_STACKS = {
-        'jetbrains-mono': '"JetBrains Mono", ui-monospace, monospace',
-        'ibm-plex-mono': '"IBM Plex Mono", ui-monospace, monospace',
-        'source-code-pro': '"Source Code Pro", ui-monospace, monospace',
-        'fira-code': '"Fira Code", ui-monospace, monospace',
       };
 
       const shell = document.getElementById('shell');
@@ -1251,17 +1267,14 @@
         const display = FONT_DISPLAY_STACKS[appearance.font_display]
           ? appearance.font_display
           : 'space-grotesk';
-        const mono = FONT_MONO_STACKS[appearance.font_mono]
-          ? appearance.font_mono
-          : 'jetbrains-mono';
         const scale = ['compact', 'default', 'large'].includes(appearance.font_scale)
           ? appearance.font_scale
           : 'default';
-        currentFonts = { font_body: body, font_display: display, font_mono: mono, font_scale: scale };
+        currentFonts = { font_body: body, font_display: display, font_scale: scale };
         const root = document.documentElement;
         root.style.setProperty('--font-body', FONT_BODY_STACKS[body]);
         root.style.setProperty('--font-display', FONT_DISPLAY_STACKS[display]);
-        root.style.setProperty('--font-mono', FONT_MONO_STACKS[mono]);
+        root.style.setProperty('--font-mono', FONT_BODY_STACKS[body]);
         root.style.setProperty('--font-logo', '"Syne", ' + FONT_DISPLAY_STACKS[display]);
         if (scale === 'default') delete root.dataset.fontScale;
         else root.dataset.fontScale = scale;
@@ -1273,7 +1286,6 @@
         applyFonts({
           font_body: data.font_body || currentFonts.font_body,
           font_display: data.font_display || currentFonts.font_display,
-          font_mono: data.font_mono || currentFonts.font_mono,
           font_scale: data.font_scale || currentFonts.font_scale,
         });
       }
@@ -1328,13 +1340,15 @@
                 .join(' · '),
             };
           }
-          const model = health.model || 'model list ok';
+          // Report how many models are on offer, not a sample model name.
+          const count = Number(result?.models) || 0;
+          const models = count
+            ? count + (count === 1 ? ' model available' : ' models available')
+            : 'Model list ok';
           return {
             state: 'ok',
             title: 'Connection successful',
-            detail: [styleBit, 'Reachable · ' + model + (health.status ? ' · ' + health.status : '')]
-              .filter(Boolean)
-              .join(' · '),
+            detail: [styleBit, models].filter(Boolean).join(' · '),
           };
         }
         if (kind === 'auth') {
@@ -1366,6 +1380,13 @@
         if (style === 'anthropic') return 'Anthropic Messages';
         if (style === 'openai') return 'OpenAI-compatible';
         return 'Auto-detect';
+      }
+
+      /** Compact form for the card's fact pill, where the row is already busy. */
+      function apiStyleShort(style) {
+        if (style === 'anthropic') return 'Anthropic';
+        if (style === 'openai') return 'OpenAI';
+        return 'Auto';
       }
 
       function syncProviderStyleHints() {
@@ -1433,35 +1454,26 @@
         return [];
       }
 
+      /**
+       * Reachability only — one short verdict. Auth and API style are their own
+       * pills, and the model list belongs in Chat's picker, not here.
+       */
       function healthLabel(provider) {
-        const checking = !!provider.token_set && !provider.health;
         const health = provider.health || {};
-        const kind = health.kind || (health.ok ? 'ready' : (checking ? 'checking' : (provider.token_set ? 'error' : 'none')));
-        if (!provider.token_set && !provider.token_masked) {
-          return { text: 'Open endpoint', chip: 'open', kind };
-        }
-        if (checking) return { text: 'Checking…', chip: 'checking', kind: 'checking' };
-        if (kind === 'ready' || health.ok) {
-          return {
-            text: 'Reachable · ' + (health.model || 'model') + (health.status ? ' · ' + health.status : ''),
-            chip: 'ready',
-            kind: 'ready',
-          };
-        }
-        if (kind === 'waiting') {
-          return { text: 'Waiting · start a model on the host', chip: 'warn', kind };
-        }
-        if (kind === 'empty') {
-          return { text: 'Reachable · no models listed yet', chip: 'warn', kind };
-        }
-        if (kind === 'auth') {
-          return { text: 'Auth failed · check API token', chip: 'failed', kind };
-        }
-        return {
-          text: 'Can’t reach host · ' + (health.error || 'check URL'),
-          chip: 'failed',
-          kind: 'error',
-        };
+        if (!provider.health) return { text: 'Checking…', chip: 'checking', kind: 'checking' };
+        const kind = health.kind || (health.ok ? 'ready' : 'error');
+        if (kind === 'ready' || health.ok) return { text: 'Ready', chip: 'ready', kind: 'ready' };
+        if (kind === 'checking') return { text: 'Checking…', chip: 'checking', kind };
+        if (kind === 'waiting') return { text: 'No model running', chip: 'warn', kind, hint: 'Start a model on the host.' };
+        if (kind === 'empty') return { text: 'No models listed', chip: 'warn', kind, hint: 'Reachable, but the endpoint returned an empty model list.' };
+        if (kind === 'auth') return { text: 'Auth failed', chip: 'failed', kind, hint: 'Check the API token.' };
+        return { text: 'Unreachable', chip: 'failed', kind: 'error', hint: health.error || 'Check the base URL.' };
+      }
+
+      /** Models this provider actually contributes to Chat's picker. */
+      function providerModelCount(providerId) {
+        const models = latestState?.network?.remote_models || [];
+        return models.filter((m) => m.provider_id === providerId).length;
       }
 
       function chipClass(chip) {
@@ -1491,21 +1503,28 @@
         activeChip.className = chipClass(health.chip);
       }
 
-      function providerMetaLine(provider, health) {
-        const parts = [apiStyleLabel(provider.api_style)];
-        if (provider.token_masked) parts.push('token ' + provider.token_masked);
-        else if (provider.token_set) parts.push('token set');
-        else parts.push('no token');
-        if (health.text) parts.push(health.text);
-        if (provider.active) parts.push('active');
-        return parts.join(' · ');
+      function providerFactPills(provider, health) {
+        const pills = [];
+        if (provider.active) {
+          pills.push('<span class="fact-pill is-default" title="Used when a request does not name a model">Default</span>');
+        }
+        const count = providerModelCount(provider.id);
+        if (count) {
+          pills.push('<span class="fact-pill">' + count + (count === 1 ? ' model' : ' models') + '</span>');
+        }
+        pills.push('<span class="fact-pill" title="' + escapeHtml(apiStyleLabel(provider.api_style)) + '">'
+          + escapeHtml(apiStyleShort(provider.api_style)) + '</span>');
+        pills.push('<span class="fact-pill">'
+          + (provider.token_set || provider.token_masked ? 'Token set' : 'No token')
+          + '</span>');
+        return pills.join('');
       }
 
       function renderProviders() {
         providerEmpty.classList.toggle('is-hidden', providers.length > 0);
         const signature = JSON.stringify(providers.map((p) => [
           p.id, p.name, p.base, p.api_style, p.active, p.token_set, p.token_masked,
-          p.health?.ok, p.health?.kind, p.health?.model, p.health?.error, p.health?.status,
+          p.health?.ok, p.health?.kind, p.health?.error, providerModelCount(p.id),
         ]));
         const focusId = document.activeElement && providerList.contains(document.activeElement)
           ? document.activeElement.getAttribute('data-provider-name')
@@ -1517,22 +1536,27 @@
         lastProviderSignature = signature;
         providerList.innerHTML = providers.map((provider) => {
           const health = healthLabel(provider);
-          const canActivate = !provider.active && (health.kind === 'ready' || health.kind === 'waiting' || health.kind === 'empty' || health.kind === 'checking' || health.kind === 'none' || health.chip === 'open');
-          const useLabel = provider.active ? 'Active' : 'Activate';
-          const meta = providerMetaLine(provider, health);
+          // "Default" is a status, not an action — so the active card shows a
+          // pill instead of a permanently disabled button.
+          const defaultBtn = provider.active
+            ? ''
+            : `<button type="button" class="btn btn-outline" data-provider-activate="${escapeHtml(provider.id)}" title="Use this provider when a request does not name a model">Make default</button>`;
           return `
             <li class="manager-card${provider.active ? ' is-active' : ''}" data-provider-id="${escapeHtml(provider.id)}">
               <div class="manager-card-head">
                 <div class="manager-card-meta">
                   <input class="manager-name-input" data-provider-name="${escapeHtml(provider.id)}" value="${escapeHtml(provider.name || '')}" maxlength="64" aria-label="Provider name">
-                  <span>${escapeHtml(provider.base || '')}</span>
-                  <span>${escapeHtml(meta)}</span>
+                  <span class="manager-card-base">${escapeHtml(provider.base || '')}</span>
                 </div>
                 <div class="manager-card-actions">
-                  <button type="button" class="btn btn-primary" data-provider-activate="${escapeHtml(provider.id)}" ${provider.active || !canActivate ? 'disabled' : ''}>${useLabel}</button>
+                  ${defaultBtn}
                   <button type="button" class="btn btn-outline" data-provider-edit="${escapeHtml(provider.id)}">Edit</button>
                   <button type="button" class="btn btn-outline" data-provider-delete="${escapeHtml(provider.id)}">Remove</button>
                 </div>
+              </div>
+              <div class="manager-card-facts">
+                <span class="${chipClass(health.chip)}"${health.hint ? ` title="${escapeHtml(health.hint)}"` : ''}>${escapeHtml(health.text)}</span>
+                ${providerFactPills(provider, health)}
               </div>
             </li>`;
         }).join('');
@@ -1546,11 +1570,7 @@
         }
         syncActiveChip();
         if (!providerFormHint.dataset.sticky) {
-          setFormHint(
-            providers.length
-              ? 'Saved providers appear above. Models from all of them show in Chat; Activate sets the default fallback.'
-              : 'Base URL should end in /v1. API style is auto-detected on save.'
-          );
+          setFormHint('Base URL should end in /v1. API style is auto-detected on save.');
         }
       }
 
@@ -1652,12 +1672,18 @@
         const network = state.network || {};
         const active = activeProvider();
         const count = providers.length;
+        // Models are the thing Chat actually consumes, and every provider feeds
+        // them — so lead with the combined total rather than the default alone.
+        const modelCount = (network.remote_models || []).length;
         topbarMeta.textContent = count
           ? (count + ' provider' + (count === 1 ? '' : 's')
-            + (active ? ' · active ' + (active.name || active.id) : ''))
+            + ' · ' + modelCount + ' model' + (modelCount === 1 ? '' : 's'))
           : 'No providers';
-        statusDetail.textContent = network.remote_status
-          || (active ? (healthLabel(active).text) : 'Add a provider to get started');
+        statusDetail.textContent = count
+          ? (active
+            ? 'Default: ' + (active.name || active.id) + ' · ' + healthLabel(active).text
+            : 'No default provider set')
+          : 'Add a provider to get started';
         statusVersion.textContent = state.version ? ('v' + state.version) : '';
       }
 
@@ -1680,7 +1706,7 @@
           pendingRemoveId = id;
           document.getElementById('removeProviderBody').textContent =
             'Remove “' + (name || 'this provider') + '” from tensorUI? The API host is unchanged.'
-            + (activeProvider()?.id === id ? ' Chat will need another active provider.' : '');
+            + (activeProvider()?.id === id ? ' Its models leave Chat\u2019s picker, and another provider becomes the default.' : '');
           openBackdrop(document.getElementById('removeProviderModal'));
         },
         hide() {

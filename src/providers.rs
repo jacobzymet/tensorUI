@@ -360,6 +360,15 @@ pub struct RemoteModelOption {
     pub ready: bool,
     pub label: String,
     pub thinking_supported: bool,
+    /// Advertised request dialect for controllable reasoning. Absent means
+    /// reasoning may exist, but tensorUI cannot safely control its intensity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_control: Option<String>,
+    /// Exact effort values accepted by this model, normalized to the UI set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_efforts: Vec<String>,
+    #[serde(default)]
+    pub thinking_can_disable: bool,
     /// Native multimodal / vision attachments (images) when known from host metadata.
     #[serde(default)]
     pub attachments_supported: bool,
@@ -370,6 +379,79 @@ pub struct RemoteModelOption {
     pub provider_id: String,
     #[serde(default)]
     pub provider_name: String,
+}
+
+/// Translate tensorUI's canonical effort into the one request dialect this
+/// model explicitly advertised. Unsupported values deliberately become Auto
+/// (no field) instead of being guessed or rounded.
+pub fn apply_thinking_control(body: &mut serde_json::Value, model: Option<&RemoteModelOption>) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    let Some(requested) = object
+        .remove("thinking_effort")
+        .and_then(|value| value.as_str().map(str::to_string))
+    else {
+        return;
+    };
+    let Some(model) = model else { return };
+    let effort = match requested.as_str() {
+        "off" if model.thinking_can_disable => "none",
+        "low" | "medium" | "high" | "max"
+            if model
+                .thinking_efforts
+                .iter()
+                .any(|value| value == &requested) =>
+        {
+            requested.as_str()
+        }
+        _ => return,
+    };
+    match model.thinking_control.as_deref() {
+        Some("reasoning") => {
+            object.insert("reasoning".into(), serde_json::json!({ "effort": effort }));
+        }
+        Some("reasoning_effort") => {
+            object.insert("reasoning_effort".into(), serde_json::json!(effort));
+        }
+        Some("chat_template") => {
+            let kwargs = object
+                .entry("chat_template_kwargs")
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(kwargs) = kwargs.as_object_mut() {
+                kwargs.insert(
+                    "enable_thinking".into(),
+                    serde_json::json!(effort != "none"),
+                );
+                if effort != "none" {
+                    kwargs.insert("reasoning_effort".into(), serde_json::json!(effort));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ThinkingCapabilities {
+    supported: bool,
+    control: Option<String>,
+    efforts: Vec<String>,
+    can_disable: bool,
+}
+
+fn merge_thinking_capabilities(
+    target: &mut HashMap<String, ThinkingCapabilities>,
+    model: &str,
+    incoming: ThinkingCapabilities,
+) {
+    let current = target.entry(model.to_string()).or_default();
+    current.supported |= incoming.supported;
+    if current.control.is_none() && incoming.control.is_some() {
+        current.control = incoming.control;
+        current.efforts = incoming.efforts;
+        current.can_disable = incoming.can_disable;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -461,13 +543,14 @@ impl CatalogCache {
         base: &str,
         token: &str,
         extra_ports: &[u16],
+        other_provider_ports: &[u16],
     ) -> Vec<RemoteModelOption> {
         if self.is_fresh(style, base, token)
             && let Some(catalog) = self.peek(style, base, token)
         {
             return catalog;
         }
-        let catalog = probe_provider_catalog(base, token, style, extra_ports);
+        let catalog = probe_provider_catalog(base, token, style, extra_ports, other_provider_ports);
         self.put(style, base, token, catalog.clone());
         self.peek(style, base, token).unwrap_or(catalog)
     }
@@ -731,25 +814,20 @@ fn fetch_remote_models(base: &str, token: &str, style: ApiStyle) -> Result<Vec<S
 /// 2. llama-server `GET {root}/props` (chat template caps)
 /// 3. Ollama `POST {root}/api/show` → `capabilities` includes `"thinking"`
 /// 4. LM Studio `GET {root}/api/v1/models` → `capabilities.reasoning`
-/// 5. Anthropic Messages style: API exposes a thinking parameter (protocol-level)
+///
+/// Anthropic Messages can translate `reasoning_effort`, but the models list does
+/// not say which Claude variants accept extended thinking — so we never invent
+/// a control dialect from ApiStyle alone (unlike image attachments).
 fn fetch_remote_thinking_support(
     api_base: &str,
     token: &str,
     style: ApiStyle,
     models: &[String],
     timeout: Duration,
-) -> HashMap<String, bool> {
-    let mut out: HashMap<String, bool> = HashMap::new();
+) -> HashMap<String, ThinkingCapabilities> {
+    let mut out: HashMap<String, ThinkingCapabilities> = HashMap::new();
     if models.is_empty() {
         return out;
-    }
-
-    // Anthropic Messages API has a first-class thinking control; enable unless a
-    // later probe explicitly marks a model unsupported.
-    if style == ApiStyle::Anthropic {
-        for model in models {
-            out.insert(model.clone(), true);
-        }
     }
 
     if let Some(from_list) = thinking_from_models_endpoint(api_base, token, style, timeout) {
@@ -761,28 +839,41 @@ fn fetch_remote_thinking_support(
     let Some(root) = props_root_from_openai_base(api_base) else {
         return out;
     };
+    // Everything below probes local-inference-server routes. A cloud provider
+    // has none of them, and the per-model loops would fire one request per
+    // model — hundreds of them, serially, for a catalog like OpenRouter's.
+    // Its `/models` payload already carried the capability data above.
+    if !base_is_local(api_base) {
+        return out;
+    }
 
-    // llama-server /props (only meaningful when the route exists).
-    if style == ApiStyle::Openai {
+    let probe_timeout = timeout.min(Duration::from_millis(800));
+
+    // llama-server /props. Confirm the route exists once before asking per
+    // model, otherwise a server without it costs one request per model.
+    if style == ApiStyle::Openai && root_has_get_path(&root, token, "/props", probe_timeout) {
         if models.len() == 1 {
             if let Some(body) = fetch_remote_props_body(&root, token, None, timeout) {
-                out.insert(models[0].clone(), thinking_support_from_props(&body));
+                merge_thinking_capabilities(
+                    &mut out,
+                    &models[0],
+                    thinking_capabilities_from_props(&body),
+                );
             }
         } else {
             let shared = fetch_remote_props_body(&root, token, None, timeout)
-                .map(|body| thinking_support_from_props(&body));
+                .map(|body| thinking_capabilities_from_props(&body));
             for model in models {
-                if let Some(supported) = fetch_remote_props_body(&root, token, Some(model), timeout)
-                    .map(|body| thinking_support_from_props(&body))
-                    .or(shared)
+                if let Some(capabilities) =
+                    fetch_remote_props_body(&root, token, Some(model), timeout)
+                        .map(|body| thinking_capabilities_from_props(&body))
+                        .or_else(|| shared.clone())
                 {
-                    out.insert(model.clone(), supported);
+                    merge_thinking_capabilities(&mut out, model, capabilities);
                 }
             }
         }
     }
-
-    let probe_timeout = timeout.min(Duration::from_millis(800));
 
     // Ollama native show API (skip entirely when /api/tags is absent).
     if root_has_get_path(&root, token, "/api/tags", probe_timeout) {
@@ -790,7 +881,7 @@ fn fetch_remote_thinking_support(
             if let Some(supported) =
                 fetch_ollama_thinking_capability(&root, token, model, probe_timeout)
             {
-                out.insert(model.clone(), supported);
+                out.entry(model.clone()).or_default().supported |= supported;
             }
         }
     }
@@ -798,16 +889,16 @@ fn fetch_remote_thinking_support(
     // LM Studio native models API (reasoning options object).
     if let Some(from_lms) = fetch_lmstudio_thinking_map(&root, token, probe_timeout) {
         for model in models {
-            if let Some(supported) = from_lms.get(model).copied() {
-                out.insert(model.clone(), supported);
+            if let Some(capabilities) = from_lms.get(model).cloned() {
+                merge_thinking_capabilities(&mut out, model, capabilities);
             } else {
                 // LM Studio keys sometimes omit publisher prefix.
                 let leaf = model.rsplit('/').next().unwrap_or(model);
-                if let Some((_, supported)) = from_lms
+                if let Some((_, capabilities)) = from_lms
                     .iter()
                     .find(|(key, _)| key.as_str() == leaf || key.ends_with(&format!("/{leaf}")))
                 {
-                    out.insert(model.clone(), *supported);
+                    merge_thinking_capabilities(&mut out, model, capabilities.clone());
                 }
             }
         }
@@ -835,7 +926,7 @@ fn thinking_from_models_endpoint(
     token: &str,
     style: ApiStyle,
     timeout: Duration,
-) -> Option<HashMap<String, bool>> {
+) -> Option<HashMap<String, ThinkingCapabilities>> {
     let base = normalize_provider_base(api_base, style)?;
     let url = format!("{base}/models");
     let client = http::llm_blocking_client(&base, timeout);
@@ -854,56 +945,112 @@ fn thinking_from_models_endpoint(
         let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
             continue;
         };
-        if let Some(supported) = thinking_hint_from_model_object(entry) {
-            out.insert(id.to_string(), supported);
+        if let Some(capabilities) = thinking_capabilities_from_model_object(entry) {
+            out.insert(id.to_string(), capabilities);
         }
     }
     if out.is_empty() { None } else { Some(out) }
 }
 
-fn thinking_hint_from_model_object(entry: &serde_json::Value) -> Option<bool> {
-    // OpenRouter: top-level `reasoning` object.
+fn thinking_capabilities_from_model_object(
+    entry: &serde_json::Value,
+) -> Option<ThinkingCapabilities> {
+    // A structured reasoning descriptor is the safest source: it can advertise
+    // exact accepted efforts and whether disabling is legal without identifying
+    // the provider that produced it.
     if let Some(reasoning) = entry.get("reasoning") {
-        if reasoning.is_object() {
-            return Some(true);
+        if let Some(object) = reasoning.as_object() {
+            // Only trust an explicit boolean. Missing `mandatory` must not unlock Off.
+            let can_disable = object.get("mandatory").and_then(|v| v.as_bool()) == Some(false);
+            let efforts = match object.get("supported_efforts") {
+                Some(serde_json::Value::Array(values)) => normalize_thinking_efforts(values),
+                // null = "host accepts its full set" — we only expose the shared UI
+                // subset that every such host is known to accept (never invent `max`).
+                Some(serde_json::Value::Null) => standard_thinking_efforts(),
+                _ => Vec::new(),
+            };
+            return Some(ThinkingCapabilities {
+                supported: true,
+                control: (!efforts.is_empty() || can_disable).then(|| "reasoning".to_string()),
+                efforts,
+                can_disable,
+            });
         }
         if let Some(flag) = reasoning.as_bool() {
-            return Some(flag);
+            return Some(ThinkingCapabilities {
+                supported: flag,
+                ..Default::default()
+            });
         }
     }
-    // OpenRouter / others: supported_parameters includes reasoning knobs.
+    // A parameter name proves reasoning exists, but does not prove which effort
+    // values are legal. Keep it informational unless richer metadata follows.
     if let Some(params) = entry.get("supported_parameters").and_then(|v| v.as_array()) {
-        let hit = params.iter().any(|p| {
-            p.as_str().is_some_and(|s| {
-                matches!(
-                    s,
-                    "reasoning"
-                        | "reasoning_effort"
-                        | "include_reasoning"
-                        | "thinking"
-                        | "thinking_budget"
-                )
-            })
-        });
-        if hit {
-            return Some(true);
+        let has = |name: &str| params.iter().any(|p| p.as_str() == Some(name));
+        if has("reasoning_effort") {
+            return Some(ThinkingCapabilities {
+                supported: true,
+                ..Default::default()
+            });
+        }
+        if has("reasoning") || has("include_reasoning") || has("thinking") || has("thinking_budget")
+        {
+            return Some(ThinkingCapabilities {
+                supported: true,
+                ..Default::default()
+            });
         }
     }
     // Nested capabilities.reasoning / capabilities.thinking.
     if let Some(caps) = entry.get("capabilities") {
         if let Some(reasoning) = caps.get("reasoning") {
-            if reasoning.is_object() {
-                return Some(true);
+            if let Some(object) = reasoning.as_object() {
+                let options = object.get("allowed_options").and_then(|v| v.as_array());
+                let efforts = options
+                    .map(|values| normalize_thinking_efforts(values))
+                    .unwrap_or_default();
+                let can_disable = options.is_some_and(|values| {
+                    values.iter().any(|value| value.as_str() == Some("none"))
+                });
+                return Some(ThinkingCapabilities {
+                    supported: true,
+                    control: (!efforts.is_empty() || can_disable)
+                        .then(|| "reasoning_effort".into()),
+                    efforts,
+                    can_disable,
+                });
             }
             if let Some(flag) = reasoning.as_bool() {
-                return Some(flag);
+                return Some(ThinkingCapabilities {
+                    supported: flag,
+                    ..Default::default()
+                });
             }
         }
         if caps.get("thinking").and_then(|v| v.as_bool()) == Some(true) {
-            return Some(true);
+            return Some(ThinkingCapabilities {
+                supported: true,
+                ..Default::default()
+            });
         }
     }
     None
+}
+
+fn normalize_thinking_efforts(values: &[serde_json::Value]) -> Vec<String> {
+    const UI_EFFORTS: &[&str] = &["low", "medium", "high", "max"];
+    UI_EFFORTS
+        .iter()
+        .filter(|effort| values.iter().any(|value| value.as_str() == Some(**effort)))
+        .map(|effort| (*effort).to_string())
+        .collect()
+}
+
+fn standard_thinking_efforts() -> Vec<String> {
+    ["low", "medium", "high"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 fn fetch_ollama_thinking_capability(
@@ -975,6 +1122,10 @@ fn fetch_remote_attachments_support(
     let Some(root) = props_root_from_openai_base(api_base) else {
         return out;
     };
+    // Local-inference-server routes only; see `base_is_local`.
+    if !base_is_local(api_base) {
+        return out;
+    }
     let probe_timeout = timeout.min(Duration::from_millis(800));
 
     if root_has_get_path(&root, token, "/api/tags", probe_timeout) {
@@ -1242,7 +1393,7 @@ fn fetch_lmstudio_thinking_map(
     root: &str,
     token: &str,
     timeout: Duration,
-) -> Option<HashMap<String, bool>> {
+) -> Option<HashMap<String, ThinkingCapabilities>> {
     let root = root.trim_end_matches('/');
     let url = format!("{root}/api/v1/models");
     let client = http::llm_blocking_client(root, timeout);
@@ -1266,32 +1417,25 @@ fn fetch_lmstudio_thinking_map(
             .or_else(|| entry.get("id"))
             .or_else(|| entry.get("name"))
             .and_then(|v| v.as_str())?;
-        let caps = entry.get("capabilities");
-        let supported = match caps {
-            Some(caps) => {
-                if let Some(reasoning) = caps.get("reasoning") {
-                    if let Some(obj) = reasoning.as_object() {
-                        // Present reasoning config ⇒ model can think.
-                        // If allowed_options is only empty, treat as unsupported.
-                        if let Some(opts) = obj.get("allowed_options").and_then(|v| v.as_array()) {
-                            !opts.is_empty()
-                        } else {
-                            true
-                        }
-                    } else {
-                        reasoning.as_bool().unwrap_or(false)
-                    }
-                } else {
-                    caps.get("thinking")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                }
-            }
-            None => continue,
+        let Some(capabilities) = thinking_capabilities_from_model_object(entry) else {
+            continue;
         };
-        out.insert(id.to_string(), supported);
+        out.insert(id.to_string(), capabilities);
     }
     if out.is_empty() { None } else { Some(out) }
+}
+
+/// True when a provider looks like a local inference server (llama.cpp,
+/// Ollama, LM Studio). Their capability routes — `/props`, `/api/tags`,
+/// `/api/v1/models` — exist nowhere else, so probing them against a cloud API
+/// is pure latency. At one request per model that is also a large enough burst
+/// to get rate-limited or blocked, which takes the real requests down with it.
+fn base_is_local(api_base: &str) -> bool {
+    // Reuse the app's private/lab-host classification so inference servers on
+    // a LAN keep their Ollama/LM Studio capability detection too. The explicit
+    // host check also covers bracketed IPv6 loopback URLs.
+    http::url_allows_insecure_tls(api_base)
+        || split_openai_base(api_base).is_some_and(|(_, host, _)| host_is_local(&host))
 }
 
 fn props_root_from_openai_base(base: &str) -> Option<String> {
@@ -1381,28 +1525,44 @@ fn fetch_remote_models_with_timeout(
     }
 }
 
-pub fn probe_provider_catalog(
-    base: &str,
-    token: &str,
+/// True for hosts that can plausibly be "a dev server on the port next door" —
+/// loopback and the common local hostnames. A cloud API's hostname is never
+/// this, no matter how the user reaches it.
+fn host_is_local(host: &str) -> bool {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Ports to probe for one provider's catalog.
+///
+/// Sibling scanning is a convenience for the single-provider local-server case
+/// ("I typed 8080 but llama-server came up on 8081"). It only makes sense
+/// against localhost: probing a cloud host like openrouter.ai on a dozen
+/// unrelated ports adds seconds of latency and risks the host's WAF flagging
+/// the burst of connections and blocking the *real* request too — which reads
+/// to the user as "the provider just doesn't show its models." Sibling
+/// scanning is also switched off once a second provider exists, since the
+/// user has then said exactly where their endpoints live — otherwise two
+/// providers on neighbouring ports each absorb the other's catalog and every
+/// model appears twice under the wrong badge.
+fn catalog_scan_ports(
+    primary_port: u16,
+    host: &str,
     style: ApiStyle,
     extra_ports: &[u16],
-) -> Vec<RemoteModelOption> {
-    let Some(primary) = normalize_provider_base(base, style) else {
-        return Vec::new();
-    };
-    let Some((scheme, host, primary_port)) = split_openai_base(&primary) else {
-        return Vec::new();
-    };
-
-    let mut ports = Vec::new();
-    ports.push(primary_port);
-    if style == ApiStyle::Openai {
-        for port in extra_ports {
-            ports.push(*port);
-        }
-        for port in SCAN_PORTS {
-            ports.push(*port);
-        }
+    other_provider_ports: &[u16],
+) -> Vec<u16> {
+    let scan_siblings =
+        style == ApiStyle::Openai && other_provider_ports.is_empty() && host_is_local(host);
+    let mut ports = vec![primary_port];
+    if scan_siblings {
+        ports.extend_from_slice(extra_ports);
+        ports.extend_from_slice(SCAN_PORTS);
         for delta in 1..=4u16 {
             ports.push(primary_port.saturating_add(delta));
             if primary_port > delta {
@@ -1412,12 +1572,59 @@ pub fn probe_provider_catalog(
     }
     ports.sort_unstable();
     ports.dedup();
+    // Belt and braces: never claim a port another provider owns.
+    ports.retain(|port| *port == primary_port || !other_provider_ports.contains(port));
+    ports
+}
+
+/// Keep the configured base byte-for-byte (after normalization) for the
+/// primary probe. Cloud providers often use a prefix before `/v1` — notably
+/// OpenRouter's `/api/v1` — so rebuilding every URL as `host:port/v1` silently
+/// points the catalog request at the wrong route. Only locally discovered
+/// sibling ports use the conventional `/v1` path.
+fn catalog_candidate_base(
+    primary: &str,
+    scheme: &str,
+    host: &str,
+    primary_port: u16,
+    port: u16,
+) -> String {
+    if port == primary_port {
+        primary.to_string()
+    } else {
+        format!("{scheme}://{host}:{port}/v1")
+    }
+}
+
+/// `other_provider_ports` carries the primary ports of every *other* configured
+/// provider; see [`catalog_scan_ports`].
+pub fn probe_provider_catalog(
+    base: &str,
+    token: &str,
+    style: ApiStyle,
+    extra_ports: &[u16],
+    other_provider_ports: &[u16],
+) -> Vec<RemoteModelOption> {
+    let Some(primary) = normalize_provider_base(base, style) else {
+        return Vec::new();
+    };
+    let Some((scheme, host, primary_port)) = split_openai_base(&primary) else {
+        return Vec::new();
+    };
+
+    let ports = catalog_scan_ports(
+        primary_port,
+        &host,
+        style,
+        extra_ports,
+        other_provider_ports,
+    );
 
     let sibling_timeout = Duration::from_millis(450);
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for port in ports {
-        let candidate = format!("{scheme}://{host}:{port}/v1");
+        let candidate = catalog_candidate_base(&primary, &scheme, &host, primary_port, port);
         let timeout = if port == primary_port {
             Duration::from_secs(2)
         } else {
@@ -1435,7 +1642,7 @@ pub fn probe_provider_catalog(
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let thinking_supported = thinking.get(&model).copied().unwrap_or(false);
+            let thinking = thinking.get(&model).cloned().unwrap_or_default();
             let attachments_supported = attachments.get(&model).copied().unwrap_or(false);
             let context_length = contexts
                 .get(&model)
@@ -1448,7 +1655,10 @@ pub fn probe_provider_catalog(
                 port,
                 ready: true,
                 label: model,
-                thinking_supported,
+                thinking_supported: thinking.supported,
+                thinking_control: thinking.control,
+                thinking_efforts: thinking.efforts,
+                thinking_can_disable: thinking.can_disable,
                 attachments_supported,
                 context_length,
                 provider_id: String::new(),
@@ -1523,27 +1733,45 @@ pub fn find_provider_for_base<'a>(
 }
 
 pub fn thinking_support_from_props(body: &str) -> bool {
+    thinking_capabilities_from_props(body).supported
+}
+
+fn thinking_capabilities_from_props(body: &str) -> ThinkingCapabilities {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
-        return false;
+        return ThinkingCapabilities::default();
     };
-    if let Some(caps) = value.get("chat_template_caps").and_then(|v| v.as_object()) {
-        const FLAGS: &[&str] = &[
-            "supports_thinking",
-            "supports_enable_thinking",
-            "supports_reasoning_effort",
-            "supports_preserve_reasoning",
-        ];
-        if FLAGS
-            .iter()
-            .any(|key| caps.get(*key).and_then(|v| v.as_bool()) == Some(true))
-        {
-            return true;
-        }
-    }
-    value
+    let template = value
         .get("chat_template")
         .and_then(|v| v.as_str())
-        .is_some_and(template_suggests_thinking)
+        .unwrap_or("");
+    let mut supports_effort = jinja_mentions_ident(template, "reasoning_effort");
+    let mut can_disable = jinja_mentions_ident(template, "enable_thinking");
+    let mut reports_thinking = false;
+    if let Some(caps) = value.get("chat_template_caps").and_then(|v| v.as_object()) {
+        supports_effort |= caps
+            .get("supports_reasoning_effort")
+            .and_then(|v| v.as_bool())
+            == Some(true);
+        can_disable |= caps
+            .get("supports_enable_thinking")
+            .and_then(|v| v.as_bool())
+            == Some(true);
+        reports_thinking = ["supports_thinking", "supports_preserve_reasoning"]
+            .iter()
+            .any(|key| caps.get(*key).and_then(|v| v.as_bool()) == Some(true));
+    }
+    let supported =
+        supports_effort || can_disable || reports_thinking || template_suggests_thinking(template);
+    ThinkingCapabilities {
+        supported,
+        control: (supports_effort || can_disable).then(|| "chat_template".into()),
+        efforts: if supports_effort {
+            vec!["low".into(), "medium".into(), "high".into()]
+        } else {
+            Vec::new()
+        },
+        can_disable,
+    }
 }
 
 fn template_suggests_thinking(template: &str) -> bool {
@@ -1615,20 +1843,230 @@ fn jinja_mentions_ident(template: &str, ident: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn reasoning_model(
+        control: Option<&str>,
+        efforts: &[&str],
+        can_disable: bool,
+    ) -> RemoteModelOption {
+        RemoteModelOption {
+            id: "remote|test|model".into(),
+            model: "model".into(),
+            base: "https://example.com/v1".into(),
+            port: 443,
+            ready: true,
+            label: "model".into(),
+            thinking_supported: true,
+            thinking_control: control.map(str::to_string),
+            thinking_efforts: efforts.iter().map(|value| (*value).into()).collect(),
+            thinking_can_disable: can_disable,
+            attachments_supported: false,
+            context_length: None,
+            provider_id: String::new(),
+            provider_name: String::new(),
+        }
+    }
+
+    #[test]
+    fn lone_local_openai_provider_scans_sibling_ports() {
+        let ports = catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[], &[]);
+        assert!(ports.contains(&8099), "primary port is always probed");
+        assert!(ports.contains(&8098), "neighbouring ports are discovered");
+        assert!(ports.contains(&11434), "well-known ports are discovered");
+    }
+
+    #[test]
+    fn localhost_hostname_and_loopback_ipv6_also_scan() {
+        for host in ["localhost", "::1", "LOCALHOST"] {
+            let ports = catalog_scan_ports(8099, host, ApiStyle::Openai, &[], &[]);
+            assert!(ports.len() > 1, "{host} should be treated as local");
+        }
+    }
+
+    #[test]
+    fn cloud_host_never_port_scans() {
+        // A cloud API (e.g. openrouter.ai) is never "a dev server on the port
+        // next door" — scanning it risks the host's WAF blocking the burst of
+        // connections, which can take the real request down with it.
+        let ports = catalog_scan_ports(443, "openrouter.ai", ApiStyle::Openai, &[], &[]);
+        assert_eq!(ports, vec![443]);
+    }
+
+    #[test]
+    fn primary_catalog_candidate_preserves_provider_path_prefix() {
+        let candidate = catalog_candidate_base(
+            "https://openrouter.ai/api/v1",
+            "https",
+            "openrouter.ai",
+            443,
+            443,
+        );
+        assert_eq!(candidate, "https://openrouter.ai/api/v1");
+    }
+
+    #[test]
+    fn sibling_catalog_candidate_uses_local_openai_route() {
+        let candidate = catalog_candidate_base(
+            "http://127.0.0.1:8099/custom/v1",
+            "http",
+            "127.0.0.1",
+            8099,
+            8100,
+        );
+        assert_eq!(candidate, "http://127.0.0.1:8100/v1");
+    }
+
+    #[test]
+    fn second_provider_disables_sibling_scanning() {
+        // 8098 belongs to another provider: probing it here would let this
+        // provider claim the other's models under its own badge.
+        let ports = catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[], &[8098]);
+        assert_eq!(ports, vec![8099]);
+    }
+
+    #[test]
+    fn scan_never_claims_a_port_another_provider_owns() {
+        let ports =
+            catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[8098], &[8098, 11434]);
+        assert!(!ports.contains(&8098));
+        assert!(!ports.contains(&11434));
+        assert!(ports.contains(&8099));
+    }
+
+    #[test]
+    fn local_bases_allow_inference_server_probes() {
+        for base in [
+            "http://127.0.0.1:8099/v1",
+            "http://localhost:11434/v1",
+            "http://[::1]:8080/v1",
+            "http://192.168.1.20:11434/v1",
+            "http://inference-box.local:1234/v1",
+        ] {
+            assert!(base_is_local(base), "{base} should be treated as local");
+        }
+    }
+
+    #[test]
+    fn cloud_bases_skip_inference_server_probes() {
+        // These would otherwise cost one /props request per model — hundreds
+        // of serial requests against a catalog the size of OpenRouter's.
+        for base in [
+            "https://openrouter.ai/api/v1",
+            "https://api.openai.com/v1",
+            "https://example.internal:8080/v1",
+        ] {
+            assert!(!base_is_local(base), "{base} should not be probed locally");
+        }
+    }
+
+    #[test]
+    fn anthropic_never_port_scans() {
+        assert_eq!(
+            catalog_scan_ports(443, "api.anthropic.com", ApiStyle::Anthropic, &[], &[]),
+            vec![443]
+        );
+    }
+
     #[test]
     fn thinking_hint_from_openrouter_style_object() {
         let entry = serde_json::json!({
             "id": "openai/o4-mini",
             "reasoning": { "supported_efforts": ["high", "medium", "low"] }
         });
-        assert_eq!(thinking_hint_from_model_object(&entry), Some(true));
+        assert!(
+            thinking_capabilities_from_model_object(&entry)
+                .unwrap()
+                .supported
+        );
         let params = serde_json::json!({
             "id": "x",
             "supported_parameters": ["temperature", "reasoning_effort"]
         });
-        assert_eq!(thinking_hint_from_model_object(&params), Some(true));
+        let caps = thinking_capabilities_from_model_object(&params).unwrap();
+        assert!(caps.supported);
+        assert!(caps.control.is_none());
         let plain = serde_json::json!({ "id": "gpt-4o", "supported_parameters": ["temperature"] });
-        assert_eq!(thinking_hint_from_model_object(&plain), None);
+        assert!(thinking_capabilities_from_model_object(&plain).is_none());
+    }
+
+    #[test]
+    fn structured_reasoning_metadata_preserves_exact_controls() {
+        let entry = serde_json::json!({
+            "reasoning": {
+                "supported_efforts": ["high", "low"],
+                "mandatory": true
+            }
+        });
+        let caps = thinking_capabilities_from_model_object(&entry).unwrap();
+        assert_eq!(caps.control.as_deref(), Some("reasoning"));
+        assert_eq!(caps.efforts, ["low", "high"]);
+        assert!(!caps.can_disable);
+
+        let optional = serde_json::json!({
+            "reasoning": {
+                "supported_efforts": ["medium"],
+                "mandatory": false
+            }
+        });
+        let caps = thinking_capabilities_from_model_object(&optional).unwrap();
+        assert!(caps.can_disable);
+        assert_eq!(caps.efforts, ["medium"]);
+
+        // Missing mandatory must not unlock Off; null efforts never invent `max`.
+        let open = serde_json::json!({ "reasoning": { "supported_efforts": null } });
+        let caps = thinking_capabilities_from_model_object(&open).unwrap();
+        assert_eq!(caps.control.as_deref(), Some("reasoning"));
+        assert_eq!(caps.efforts, ["low", "medium", "high"]);
+        assert!(!caps.can_disable);
+    }
+
+    #[test]
+    fn canonical_effort_emits_only_advertised_wire_shape() {
+        let unified = reasoning_model(Some("reasoning"), &["low", "high", "max"], true);
+        let mut body = serde_json::json!({ "thinking_effort": "max" });
+        apply_thinking_control(&mut body, Some(&unified));
+        assert_eq!(
+            body,
+            serde_json::json!({ "reasoning": { "effort": "max" } })
+        );
+
+        let legacy = reasoning_model(Some("reasoning_effort"), &["low", "high"], false);
+        let mut body = serde_json::json!({ "thinking_effort": "high" });
+        apply_thinking_control(&mut body, Some(&legacy));
+        assert_eq!(body, serde_json::json!({ "reasoning_effort": "high" }));
+
+        let disableable = reasoning_model(Some("reasoning_effort"), &["low", "high"], true);
+        let mut body = serde_json::json!({ "thinking_effort": "off" });
+        apply_thinking_control(&mut body, Some(&disableable));
+        assert_eq!(body, serde_json::json!({ "reasoning_effort": "none" }));
+    }
+
+    #[test]
+    fn unsupported_or_mandatory_off_effort_is_safely_omitted() {
+        let mandatory = reasoning_model(Some("reasoning"), &["low", "high"], false);
+        for effort in ["off", "max", "invalid"] {
+            let mut body = serde_json::json!({ "thinking_effort": effort });
+            apply_thinking_control(&mut body, Some(&mandatory));
+            assert_eq!(body, serde_json::json!({}), "{effort} must be omitted");
+        }
+        let mut unknown = serde_json::json!({ "thinking_effort": "high" });
+        apply_thinking_control(&mut unknown, None);
+        assert_eq!(unknown, serde_json::json!({}));
+    }
+
+    #[test]
+    fn local_template_control_stays_inside_template_kwargs() {
+        let local = reasoning_model(Some("chat_template"), &["low", "medium", "high"], true);
+        let mut body = serde_json::json!({ "thinking_effort": "medium" });
+        apply_thinking_control(&mut body, Some(&local));
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "chat_template_kwargs": {
+                    "enable_thinking": true,
+                    "reasoning_effort": "medium"
+                }
+            })
+        );
     }
 
     #[test]
