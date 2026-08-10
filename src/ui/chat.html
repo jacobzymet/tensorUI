@@ -2355,6 +2355,12 @@
       color: var(--color-ink);
       margin-bottom: 0.15rem;
     }
+    .agent-step-note {
+      font-size: var(--text-xs);
+      color: var(--color-muted);
+      line-height: 1.35;
+      margin: -0.05rem 0 0.2rem;
+    }
     .agent-step-detail {
       font-size: var(--text-sm);
       color: var(--color-ink-2);
@@ -3997,7 +4003,7 @@
      *   timeline: Array<
      *     | {type:'think', content:string}
      *     | {type:'text', content:string}
-     *     | {type:'tool', name:string, detail:string, result:string, live:boolean}
+     *     | {type:'tool', name:string, detail:string, result:string, note?:string, live:boolean}
      *   >,
      *   errorMessage: string|null,
      *   dom: null|{row:HTMLElement,statusEl:HTMLElement,thinkingLabel:HTMLElement,traceEl:HTMLElement,answerEl:HTMLElement,thinkingOrb:any},
@@ -5648,10 +5654,13 @@
       );
     }
 
-    function agentStepHtml({ name, detail, result, live }) {
+    function agentStepHtml({ name, detail, result, note, live }) {
       return wrapTimelineStep(
         '<div class="agent-step-card">' +
           '<div class="agent-step-kind">' + escapeHtml(skillLabel(name)) + '</div>' +
+          (note
+            ? '<div class="agent-step-note">' + escapeHtml(note) + '</div>'
+            : '') +
           (detail
             ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em> · ' + escapeHtml(detail) + '</div>'
             : '') +
@@ -7291,7 +7300,7 @@
       return (timeline || []).map((part) => {
         if (!part) return '';
         if (part.type === 'tool') {
-          return ['tool', part.name, part.detail, part.result, part.live ? '1' : '0'].join('\0');
+          return ['tool', part.name, part.detail, part.result, part.note || '', part.live ? '1' : '0'].join('\0');
         }
         return [part.type, part.content || ''].join('\0');
       }).join('\n');
@@ -7446,6 +7455,7 @@
             name: payload.name || 'skill',
             detail,
             result: '',
+            note: '',
             live: true,
           });
           if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name) + '…';
@@ -7457,19 +7467,26 @@
             : payload.preview
               ? String(payload.preview).trim()
               : 'Done';
+          const note = payload.note ? String(payload.note).trim() : '';
           if (last && last.name === (payload.name || last.name)) {
             last.live = false;
             last.result = resultText;
+            if (note) last.note = note;
           } else {
             stream.timeline.push({
               type: 'tool',
               name: payload.name || 'skill',
               detail: '',
               result: resultText,
+              note,
               live: false,
             });
           }
-          if (stream.dom) stream.dom.thinkingLabel.textContent = 'Reading results';
+          if (stream.dom) {
+            stream.dom.thinkingLabel.textContent = note
+              ? skillLabel(payload.name) + ' · ' + note
+              : 'Reading results';
+          }
         } else if (payload.phase === 'status' && payload.message) {
           if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
         }
@@ -7598,7 +7615,14 @@
       const persistedParts = stream.timeline.length
         ? stream.timeline.map((part) => (
           part.type === 'tool'
-            ? { type: 'tool', name: part.name, detail: part.detail, result: part.result, live: false }
+            ? {
+              type: 'tool',
+              name: part.name,
+              detail: part.detail,
+              result: part.result,
+              ...(part.note ? { note: part.note } : {}),
+              live: false,
+            }
             : { type: part.type, content: part.content }
         ))
         : null;

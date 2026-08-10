@@ -6,11 +6,33 @@ use std::{net::IpAddr, sync::OnceLock, time::Duration};
 use reqwest::{Client, Url};
 
 const APP_UA: &str = concat!("tensorui/", env!("CARGO_PKG_VERSION"));
-/// Browser-like UA for public page fetches. Some CDNs return 403/406 to library UAs.
-const SEARCH_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-    (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/// Desktop Chrome identity for public fetches (search / page scrape).
+/// Keep the major version in sync across UA + Sec-CH-UA.
+const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+    (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+const BROWSER_SEC_CH_UA: &str =
+    "\"Not;A=Brand\";v=\"99\", \"Google Chrome\";v=\"139\", \"Chromium\";v=\"139\"";
+const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,\
+    image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+const BROWSER_ACCEPT_LANG: &str = "en-US,en;q=0.9";
 
 static PUBLIC_CLIENT: OnceLock<Client> = OnceLock::new();
+
+/// Attach Chrome-like navigation headers so page fetches look like a normal document load.
+pub fn apply_browser_navigation_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    req.header("Accept", BROWSER_ACCEPT)
+        .header("Accept-Language", BROWSER_ACCEPT_LANG)
+        .header("Upgrade-Insecure-Requests", "1")
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "none")
+        .header("Sec-Fetch-User", "?1")
+        .header("Sec-CH-UA", BROWSER_SEC_CH_UA)
+        .header("Sec-CH-UA-Mobile", "?0")
+        .header("Sec-CH-UA-Platform", "\"Windows\"")
+        .header("Cache-Control", "max-age=0")
+}
 
 /// True when the URL targets a loopback / private / lab host where self-signed
 /// certs are common. Public internet hosts keep certificate verification on.
@@ -74,7 +96,7 @@ pub fn public_client() -> Client {
         .get_or_init(|| {
             Client::builder()
                 .timeout(Duration::from_secs(60))
-                .user_agent(SEARCH_UA)
+                .user_agent(BROWSER_UA)
                 // Cookie jar helps sites that set a device/geo cookie before serving HTML.
                 .cookie_store(true)
                 // Prefer HTTP/1.1 — some news CDNs fingerprint HTTP/2 stacks and answer 406.

@@ -233,25 +233,25 @@ async fn run_agent_loop(
             )
             .await?;
 
-            let result = execute_tool(&call, &request.skills, user_skills)
+            let outcome = execute_tool(&call, &request.skills, user_skills)
                 .await
                 .map_err(StreamFail::Other)?;
-            let preview = result.chars().take(240).collect::<String>();
+            let preview = outcome.text.chars().take(240).collect::<String>();
             // Cap the UI payload; the model still receives the full `result` below.
-            let ui_result: String = result.chars().take(32_000).collect();
-            send_sse(
-                tx,
-                sse_agent(json!({
-                    "phase": "tool_result",
-                    "name": call.name,
-                    "ok": true,
-                    "preview": preview,
-                    "result": ui_result,
-                })),
-            )
-            .await?;
+            let ui_result: String = outcome.text.chars().take(32_000).collect();
+            let mut payload = json!({
+                "phase": "tool_result",
+                "name": call.name,
+                "ok": true,
+                "preview": preview,
+                "result": ui_result,
+            });
+            if let Some(note) = &outcome.note {
+                payload["note"] = json!(note);
+            }
+            send_sse(tx, sse_agent(payload)).await?;
 
-            append_openai_tool_exchange(&mut request.messages, &turn, &call, &result);
+            append_openai_tool_exchange(&mut request.messages, &turn, &call, &outcome.text);
             continue;
         }
 
@@ -870,11 +870,33 @@ fn extract_tool_call(text: &str) -> Option<ToolCall> {
     })
 }
 
+struct ToolOutcome {
+    text: String,
+    /// Short UI-facing note (e.g. search backend fallback).
+    note: Option<String>,
+}
+
+impl ToolOutcome {
+    fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            note: None,
+        }
+    }
+
+    fn with_note(text: impl Into<String>, note: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            note: Some(note.into()),
+        }
+    }
+}
+
 async fn execute_tool(
     call: &ToolCall,
     skills: &AgentSkills,
     user_skills: &[UserSkill],
-) -> Result<String, String> {
+) -> Result<ToolOutcome, String> {
     match call.name.as_str() {
         "web_search" => {
             let query = call
@@ -884,13 +906,13 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let mut result = duckduckgo_search(query, skills.web_search_depth).await?;
+            let (mut result, note) = duckduckgo_search(query, skills.web_search_depth).await?;
             if skills.fetch_url {
                 result.push_str(
                     "\n\nNote: fetch_url is available. If a result URL looks useful and you need more detail than the snippets/excerpts above, call fetch_url on that URL before answering.",
                 );
             }
-            Ok(result)
+            Ok(ToolOutcome::with_note(result, note))
         }
         "fetch_url" => {
             let url = call
@@ -900,7 +922,7 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "fetch_url requires a non-empty \"url\" string.".to_string())?;
-            fetch_single_url(url).await
+            Ok(ToolOutcome::text(fetch_single_url(url).await?))
         }
         "activate_skill" | "read_skill" => {
             let key = call
@@ -916,7 +938,7 @@ async fn execute_tool(
             let skill = crate::skills::find_skill(user_skills, key).ok_or_else(|| {
                 format!("Unknown skill '{key}'. Use a name or id from the available skills list.")
             })?;
-            Ok(skill.full_instructions())
+            Ok(ToolOutcome::text(skill.full_instructions()))
         }
         other => Err(format!("Unknown capability '{other}'.")),
     }
@@ -945,50 +967,90 @@ struct SearchHit {
     snippet: String,
 }
 
-async fn duckduckgo_search(query: &str, depth: WebSearchDepth) -> Result<String, String> {
-    let client = http::public_client();
-    let response = match apply_browser_page_headers(
-        client
-            .post("https://html.duckduckgo.com/html/")
-            .timeout(SEARCH_TIMEOUT),
-    )
-    .form(&[("q", query), ("b", "")])
-    .send()
-    .await
-    {
-        Ok(response) => response,
-        Err(_) => apply_browser_page_headers(
-            client
-                .get("https://html.duckduckgo.com/html/")
-                .timeout(SEARCH_TIMEOUT)
-                .query(&[("q", query)]),
-        )
-        .send()
-        .await
-        .map_err(|error| format!("DuckDuckGo request failed: {error}"))?,
-    };
+#[derive(Debug, Clone, Copy)]
+enum SearchBackend {
+    Lite,
+    Html,
+    InstantAnswer { html_blocked: bool },
+}
 
-    let status = response.status().as_u16();
-    if status != 200 && status != 202 {
-        return Err(format!("DuckDuckGo returned HTTP {status}"));
+impl SearchBackend {
+    fn ui_note(self) -> &'static str {
+        match self {
+            Self::Lite => "via DuckDuckGo Lite",
+            Self::Html => "via DuckDuckGo",
+            Self::InstantAnswer { html_blocked: true } => {
+                "fell back to Instant Answer (HTML search blocked)"
+            }
+            Self::InstantAnswer {
+                html_blocked: false,
+            } => "fell back to Instant Answer (no HTML results)",
+        }
     }
 
-    let html = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read DuckDuckGo body: {error}"))?;
+    fn result_label(self) -> &'static str {
+        match self {
+            Self::Lite => "DuckDuckGo Lite",
+            Self::Html => "DuckDuckGo",
+            Self::InstantAnswer { html_blocked: true } => {
+                "DuckDuckGo Instant Answer — HTML search blocked"
+            }
+            Self::InstantAnswer {
+                html_blocked: false,
+            } => "DuckDuckGo Instant Answer — no HTML results",
+        }
+    }
+}
 
-    if html.contains("anomaly.js") || html.contains("Please complete the captcha") {
-        return Err("DuckDuckGo blocked the search request (captcha / bot check).".into());
+async fn duckduckgo_search(
+    query: &str,
+    depth: WebSearchDepth,
+) -> Result<(String, String), String> {
+    // Prefer HTML results, but never try to defeat DDG captchas — fall through to
+    // Instant Answer (official keyless JSON API) when the HTML endpoints challenge us.
+    let mut blocked = false;
+    let mut hits = Vec::new();
+    let mut backend = SearchBackend::Lite;
+
+    match duckduckgo_html_hits(query, "https://lite.duckduckgo.com/lite/", true).await {
+        Ok(parsed) if !parsed.is_empty() => {
+            hits = parsed;
+            backend = SearchBackend::Lite;
+        }
+        Ok(_) => {}
+        Err(DuckHtmlError::Blocked) => blocked = true,
+        Err(DuckHtmlError::Other) => {}
     }
 
-    let hits = parse_ddg_html(&html);
     if hits.is_empty() {
-        // Fallback: Instant Answer API (sparser, but keyless and structured).
-        return duckduckgo_instant_answer(query, depth).await;
+        match duckduckgo_html_hits(query, "https://html.duckduckgo.com/html/", false).await {
+            Ok(parsed) if !parsed.is_empty() => {
+                hits = parsed;
+                backend = SearchBackend::Html;
+            }
+            Ok(_) => {}
+            Err(DuckHtmlError::Blocked) => blocked = true,
+            Err(DuckHtmlError::Other) => {}
+        }
     }
 
-    let mut out = format!("Web search results for {query:?} (DuckDuckGo):\n");
+    if hits.is_empty() {
+        backend = SearchBackend::InstantAnswer {
+            html_blocked: blocked,
+        };
+        return match duckduckgo_instant_answer(query, depth, backend).await {
+            Ok(out) => Ok((out, backend.ui_note().to_string())),
+            Err(ia_err) if blocked => Err(format!(
+                "DuckDuckGo challenged the HTML search (captcha/bot check) and Instant Answer also failed: {ia_err}"
+            )),
+            Err(ia_err) => Err(ia_err),
+        };
+    }
+
+    let mut out = format!(
+        "Web search results for {query:?} ({}):\n",
+        backend.result_label()
+    );
     for (index, hit) in hits.iter().take(MAX_SEARCH_RESULTS).enumerate() {
         out.push_str(&format!(
             "\n{}. {}\n   URL: {}\n   {}\n",
@@ -999,10 +1061,78 @@ async fn duckduckgo_search(query: &str, depth: WebSearchDepth) -> Result<String,
         ));
     }
     append_scraped_pages(&mut out, &hits, depth).await;
-    Ok(out)
+    Ok((out, backend.ui_note().to_string()))
 }
 
-async fn duckduckgo_instant_answer(query: &str, depth: WebSearchDepth) -> Result<String, String> {
+#[derive(Debug)]
+enum DuckHtmlError {
+    Blocked,
+    Other,
+}
+
+async fn duckduckgo_html_hits(
+    query: &str,
+    endpoint: &str,
+    lite: bool,
+) -> Result<Vec<SearchHit>, DuckHtmlError> {
+    let client = http::public_client();
+    let response = if lite {
+        apply_browser_page_headers(
+            client
+                .get(endpoint)
+                .timeout(SEARCH_TIMEOUT)
+                .query(&[("q", query)]),
+        )
+        .send()
+        .await
+        .map_err(|_| DuckHtmlError::Other)?
+    } else {
+        match apply_browser_page_headers(
+            client
+                .post(endpoint)
+                .timeout(SEARCH_TIMEOUT),
+        )
+        .form(&[("q", query), ("b", "")])
+        .send()
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => apply_browser_page_headers(
+                client
+                    .get(endpoint)
+                    .timeout(SEARCH_TIMEOUT)
+                    .query(&[("q", query)]),
+            )
+            .send()
+            .await
+            .map_err(|_| DuckHtmlError::Other)?,
+        }
+    };
+
+    let status = response.status().as_u16();
+    if status != 200 && status != 202 {
+        return Err(DuckHtmlError::Other);
+    }
+
+    let html = response.text().await.map_err(|_| DuckHtmlError::Other)?;
+
+    if html.contains("anomaly.js") || html.contains("Please complete the captcha") {
+        return Err(DuckHtmlError::Blocked);
+    }
+
+    let hits = if lite {
+        parse_ddg_lite_html(&html)
+    } else {
+        parse_ddg_html(&html)
+    };
+    Ok(hits)
+}
+
+async fn duckduckgo_instant_answer(
+    query: &str,
+    depth: WebSearchDepth,
+    backend: SearchBackend,
+) -> Result<String, String> {
     let client = http::public_client();
     let response = client
         .get("https://api.duckduckgo.com/")
@@ -1023,7 +1153,8 @@ async fn duckduckgo_instant_answer(query: &str, depth: WebSearchDepth) -> Result
         .map_err(|error| format!("Invalid Instant Answer JSON: {error}"))?;
 
     let mut lines = vec![format!(
-        "Web search results for {query:?} (DuckDuckGo Instant Answer):"
+        "Web search results for {query:?} ({}):",
+        backend.result_label()
     )];
     let mut hits = Vec::new();
     if let Some(text) = body.get("AbstractText").and_then(|v| v.as_str())
@@ -1158,19 +1289,8 @@ fn scrapeable_url(url: &str) -> bool {
 }
 
 /// Chrome-like Accept / navigation headers. Sparse Accept values get 406 from some CDNs.
-const PAGE_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,\
-    image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
-const PAGE_ACCEPT_LANG: &str = "en-US,en;q=0.9";
-
 fn apply_browser_page_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    req.header("Accept", PAGE_ACCEPT)
-        .header("Accept-Language", PAGE_ACCEPT_LANG)
-        .header("Upgrade-Insecure-Requests", "1")
-        .header("Sec-Fetch-Dest", "document")
-        .header("Sec-Fetch-Mode", "navigate")
-        .header("Sec-Fetch-Site", "none")
-        .header("Sec-Fetch-User", "?1")
-        .header("Cache-Control", "max-age=0")
+    http::apply_browser_navigation_headers(req)
 }
 
 async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
@@ -1183,12 +1303,8 @@ async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> 
     let mut status = response.status().as_u16();
     // Negotiate again with a looser Accept — Akamai/news stacks sometimes 406 the first try.
     if matches!(status, 406 | 403) {
-        response = client
-            .get(url)
-            .timeout(PAGE_TIMEOUT)
+        response = apply_browser_page_headers(client.get(url).timeout(PAGE_TIMEOUT))
             .header("Accept", "*/*")
-            .header("Accept-Language", PAGE_ACCEPT_LANG)
-            .header("Upgrade-Insecure-Requests", "1")
             .send()
             .await
             .map_err(|error| format!("{error}"))?;
@@ -1378,6 +1494,62 @@ fn parse_ddg_html(html: &str) -> Vec<SearchHit> {
             break;
         }
         rest = &rest[1..];
+    }
+    hits
+}
+
+/// Lite results use plain result-link anchors rather than `result__a`.
+fn parse_ddg_lite_html(html: &str) -> Vec<SearchHit> {
+    let mut hits = Vec::new();
+    let mut rest = html;
+    while let Some(idx) = rest.find("class=\"result-link\"") {
+        let window_start = rest[..idx].rfind('<').unwrap_or(idx);
+        rest = &rest[window_start..];
+        let href = match attr_after(rest, "href=\"") {
+            Some(v) => v,
+            None => {
+                rest = &rest[1..];
+                continue;
+            }
+        };
+        let title_html = match between(rest, ">", "</a>") {
+            Some(v) => v,
+            None => {
+                rest = &rest[1..];
+                continue;
+            }
+        };
+        let title = collapse_ws(&strip_tags(title_html));
+        let url = decode_ddg_href(href);
+        let snippet = rest
+            .find("class=\"result-snippet\"")
+            .and_then(|s| {
+                let slice = &rest[s..];
+                let window = &slice[..slice.len().min(1200)];
+                between(window, ">", "</td>")
+                    .or_else(|| between(window, ">", "</"))
+                    .map(strip_tags)
+                    .map(|s| collapse_ws(&s))
+            })
+            .unwrap_or_default();
+        if !title.is_empty()
+            && !url.is_empty()
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            hits.push(SearchHit {
+                title,
+                url,
+                snippet,
+            });
+        }
+        if hits.len() >= MAX_SEARCH_RESULTS {
+            break;
+        }
+        rest = &rest[1..];
+    }
+    if hits.is_empty() {
+        // Older lite markup sometimes omits result-link class.
+        return parse_ddg_html(html);
     }
     hits
 }
