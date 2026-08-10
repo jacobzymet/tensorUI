@@ -47,8 +47,14 @@
       --text-display: clamp(1.5rem, 1.5vw + 1rem, 2rem);
 
       --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
+      --ease-press: linear;
+      --ease-release: cubic-bezier(0.34, 1.35, 0.64, 1);
+      --dur-press: 70ms;
       --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-      --dur-short: 180ms;
+      --dur-short: 160ms;
+      --dur-enter: 220ms;
+      --dur-theme: 320ms;
       --radius-input: 6px;
       --radius-panel: 8px;
 
@@ -90,6 +96,7 @@
       font-size: var(--text-md);
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
     h1, h2 {
       font-family: var(--font-display);
@@ -201,6 +208,10 @@
         box-shadow var(--dur-short) var(--ease-settle);
     }
     .btn:hover { border-color: var(--color-accent); }
+    .btn:hover:not(:disabled) {
+      box-shadow: 0 5px 14px color-mix(in oklch, var(--color-graphite) 38%, transparent);
+      transform: translateY(-1px);
+    }
     .btn:active:not(:disabled) {
       transform: scale(0.96);
       transition-duration: var(--dur-press);
@@ -250,7 +261,8 @@
       flex: 0 0 var(--sidebar-w);
       width: var(--sidebar-w);
       min-width: 0;
-      background: var(--color-graphite);
+      background:
+        linear-gradient(180deg, color-mix(in oklch, var(--color-graphite-2) 70%, var(--color-graphite)), var(--color-graphite) 38%);
       border-right: 1px solid var(--color-rule);
       display: flex;
       flex-direction: column;
@@ -386,12 +398,13 @@
       transition: background var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out);
     }
     .sidebar-link:hover {
-      background: var(--color-paper-2);
+      background: color-mix(in oklch, var(--color-paper-2) 92%, transparent);
       color: var(--color-ink);
     }
     .sidebar-link.is-active {
       background: color-mix(in oklch, var(--color-accent) 14%, var(--color-paper-2));
       color: var(--color-ink);
+      box-shadow: inset 1px 0 0 color-mix(in oklch, var(--color-accent) 68%, transparent), 0 2px 8px oklch(0% 0 0 / 0.12);
     }
     .chat-shell.is-in-project .chat-sidebar {
       box-shadow: inset 2px 0 0 var(--color-accent);
@@ -473,6 +486,7 @@
     .convo-item.is-active {
       background: color-mix(in oklch, var(--color-accent) 14%, var(--color-paper-2));
       color: var(--color-ink);
+      box-shadow: inset 1px 0 0 color-mix(in oklch, var(--color-accent) 68%, transparent);
     }
     .convo-item.is-streaming .convo-title {
       color: var(--color-accent);
@@ -611,7 +625,9 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      background: var(--color-paper);
+      background:
+        radial-gradient(75% 52% at 58% -12%, color-mix(in oklch, var(--color-accent) 9%, transparent), transparent 65%),
+        var(--color-paper);
       overflow: hidden;
     }
     .chat-starfield {
@@ -641,10 +657,15 @@
       height: var(--chat-topbar-h);
       padding: 0 var(--space-md);
       border-bottom: 1px solid transparent;
+      background: color-mix(in oklch, var(--color-paper) 88%, transparent);
+      backdrop-filter: blur(12px) saturate(1.08);
       transition: border-color var(--dur-short) var(--ease-out);
       overflow: visible;
     }
-    .chat-topbar.has-thread { border-bottom-color: var(--color-rule); }
+    .chat-topbar.has-thread {
+      border-bottom-color: color-mix(in oklch, var(--color-rule) 88%, transparent);
+      box-shadow: 0 1px 0 color-mix(in oklch, white 4%, transparent);
+    }
     .chat-topbar-leading {
       display: flex;
       align-items: center;
@@ -886,6 +907,11 @@
       gap: var(--space-xs);
       /* optical centering — sit a little above true middle */
       padding-bottom: clamp(1rem, 8vh, 4.5rem);
+      animation: empty-state-settle 480ms var(--ease-settle) both;
+    }
+    @keyframes empty-state-settle {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
     }
     .empty-eyebrow {
       margin: 0;
@@ -941,6 +967,7 @@
       font-size: var(--text-md);
       line-height: 1.62;
       overflow-wrap: anywhere;
+      box-shadow: 0 1px 0 color-mix(in oklch, white 4%, transparent), 0 8px 22px oklch(0% 0 0 / 0.08);
     }
     .msg-role-user .msg-bubble {
       max-width: 85%;
@@ -948,6 +975,7 @@
       border: 1px solid color-mix(in oklch, var(--color-accent) 28%, var(--color-rule));
       color: var(--color-ink);
       border-bottom-right-radius: 5px;
+      background-image: linear-gradient(145deg, color-mix(in oklch, var(--color-accent) 22%, var(--color-paper-2)), color-mix(in oklch, var(--color-accent) 12%, var(--color-paper-2)));
     }
     .msg-role-assistant .msg-bubble {
       width: 100%;
@@ -955,6 +983,7 @@
       border: 1px solid var(--color-rule);
       color: var(--color-ink-2);
       border-bottom-left-radius: 5px;
+      background-image: linear-gradient(145deg, color-mix(in oklch, var(--color-paper-2) 98%, white), var(--color-paper-2));
     }
     .msg-bubble > :first-child { margin-top: 0; }
     .msg-bubble > :last-child { margin-bottom: 0; }
@@ -1962,18 +1991,20 @@
       position: relative;
       width: 100%;
       max-width: var(--composer-max);
-      background: var(--color-paper-2);
+      background: linear-gradient(145deg, color-mix(in oklch, var(--color-paper-2) 96%, white), var(--color-paper-2));
       border: 1px solid var(--color-rule-2);
       border-radius: 14px;
       padding: 0.7rem 0.7rem 0.55rem 0.9rem;
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
-      transition: border-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out);
+      box-shadow: 0 10px 26px oklch(0% 0 0 / 0.14), 0 1px 0 color-mix(in oklch, white 5%, transparent) inset;
+      transition: border-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out), transform var(--dur-enter) var(--ease-settle);
     }
     .composer-card:focus-within {
       border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule-2));
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 16%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 16%, transparent), 0 14px 32px oklch(0% 0 0 / 0.18);
+      transform: translateY(-1px);
     }
     .composer-textarea {
       width: 100%;

@@ -236,9 +236,9 @@ async fn run_agent_loop(
             let outcome = execute_tool(&call, &request.skills, user_skills)
                 .await
                 .map_err(StreamFail::Other)?;
-            let preview = outcome.text.chars().take(240).collect::<String>();
+            let preview = outcome.ui_text.chars().take(240).collect::<String>();
             // Cap the UI payload; the model still receives the full `result` below.
-            let ui_result: String = outcome.text.chars().take(32_000).collect();
+            let ui_result: String = outcome.ui_text.chars().take(32_000).collect();
             let mut payload = json!({
                 "phase": "tool_result",
                 "name": call.name,
@@ -871,22 +871,32 @@ fn extract_tool_call(text: &str) -> Option<ToolCall> {
 }
 
 struct ToolOutcome {
+    /// Full result passed back to the model, including any operational guidance.
     text: String,
+    /// User-visible result. This deliberately excludes model-only instructions.
+    ui_text: String,
     /// Short UI-facing note (e.g. search backend fallback).
     note: Option<String>,
 }
 
 impl ToolOutcome {
     fn text(text: impl Into<String>) -> Self {
+        let text = text.into();
         Self {
-            text: text.into(),
+            ui_text: text.clone(),
+            text,
             note: None,
         }
     }
 
-    fn with_note(text: impl Into<String>, note: impl Into<String>) -> Self {
+    fn with_ui_text(
+        text: impl Into<String>,
+        ui_text: impl Into<String>,
+        note: impl Into<String>,
+    ) -> Self {
         Self {
             text: text.into(),
+            ui_text: ui_text.into(),
             note: Some(note.into()),
         }
     }
@@ -906,13 +916,15 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let (mut result, note) = duckduckgo_search(query, skills.web_search_depth).await?;
+            let (result, note) = duckduckgo_search(query, skills.web_search_depth).await?;
+            let ui_result = result.clone();
+            let mut model_result = result;
             if skills.fetch_url {
-                result.push_str(
+                model_result.push_str(
                     "\n\nNote: fetch_url is available. If a result URL looks useful and you need more detail than the snippets/excerpts above, call fetch_url on that URL before answering.",
                 );
             }
-            Ok(ToolOutcome::with_note(result, note))
+            Ok(ToolOutcome::with_ui_text(model_result, ui_result, note))
         }
         "fetch_url" => {
             let url = call
