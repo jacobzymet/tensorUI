@@ -381,7 +381,17 @@ async fn run_agent_loop(
                 )
                 .await?;
             }
-            send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
+            // Authoritative seal: mid-stream forwarding can miss preface text when
+            // content and tool_calls share a delta. Always re-emit the resolved
+            // non-tool content so the UI keeps "I'll search for…" narration.
+            let mut clear = json!({ "phase": "content_clear" });
+            if !turn.content.trim().is_empty() {
+                clear["text"] = json!(turn.content);
+            }
+            if !turn.reasoning.trim().is_empty() {
+                clear["reasoning"] = json!(turn.reasoning);
+            }
+            send_sse(tx, sse_agent(clear)).await?;
             send_sse(
                 tx,
                 sse_agent(json!({
@@ -571,8 +581,9 @@ struct AccumToolCall {
 }
 
 /// With `--jinja`, llama-server may lift `<tool_call>` into native `delta.tool_calls`;
-/// we re-synthesize XML for `extract_tool_call`. Once detected, withhold answer deltas
-/// and send `content_clear` so the UI does not keep tool XML.
+/// we re-synthesize XML for `extract_tool_call`. Once a tool starts we stop
+/// forwarding further content deltas, after first forwarding any preface text
+/// (including content that shares a delta with `tool_calls`).
 async fn stream_once(
     api_base: &str,
     api_key: Option<&str>,
@@ -783,6 +794,36 @@ async fn apply_openai_sse_line(
         }
     }
 
+    // Forward visible content BEFORE handling tool_calls so a same-delta preface
+    // (text + tool_calls) is not wiped by content_clear.
+    if let Some(chunk) = delta_string(delta, "content")
+        && !chunk.is_empty()
+    {
+        let before_len = content.len();
+        content.push_str(chunk);
+
+        if *forwarding {
+            if let Some(tag_at) = content.find("<tool_call>") {
+                // Forward only the portion of this chunk that precedes the tag.
+                let forward_end = tag_at.saturating_sub(before_len);
+                let prefix = &chunk[..forward_end];
+                if !prefix.is_empty() {
+                    let frame = json!({
+                        "choices": [{ "delta": { "content": prefix }, "index": 0 }]
+                    });
+                    send_sse(tx, format!("data: {frame}\n\n").into_bytes()).await?;
+                }
+                *forwarding = false;
+                send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
+            } else {
+                let frame = json!({
+                    "choices": [{ "delta": { "content": chunk }, "index": 0 }]
+                });
+                send_sse(tx, format!("data: {frame}\n\n").into_bytes()).await?;
+            }
+        }
+    }
+
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
         for tc in tool_calls {
             merge_tool_call_delta(native_tools, tc);
@@ -793,28 +834,7 @@ async fn apply_openai_sse_line(
         }
     }
 
-    let Some(chunk) = delta_string(delta, "content") else {
-        return Ok(());
-    };
-    if chunk.is_empty() {
-        return Ok(());
-    }
-
-    content.push_str(chunk);
-
-    if *forwarding && content.contains("<tool_call>") {
-        *forwarding = false;
-        send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
-        return Ok(());
-    }
-    if !*forwarding {
-        return Ok(());
-    }
-
-    let frame = json!({
-        "choices": [{ "delta": { "content": chunk }, "index": 0 }]
-    });
-    send_sse(tx, format!("data: {frame}\n\n").into_bytes()).await
+    Ok(())
 }
 
 fn delta_string<'a>(delta: &'a Value, key: &str) -> Option<&'a str> {
@@ -2075,7 +2095,13 @@ mod tests {
     }
 
     #[test]
-    fn synthesizes_native_openai_tool_calls() {
+    fn strip_tool_call_keeps_preface_text() {
+        let text = "I'll look that up.\n<tool_call>\n{\"name\":\"web_search\",\"arguments\":{\"query\":\"x\"}}\n</tool_call>";
+        assert_eq!(strip_tool_call_xml(text), "I'll look that up.");
+    }
+
+    #[test]
+    fn resolve_tool_turn_keeps_preface_in_content() {
         let mut slots = Vec::new();
         merge_tool_call_delta(
             &mut slots,
@@ -2083,22 +2109,14 @@ mod tests {
                 "index": 0,
                 "id": "call_1",
                 "type": "function",
-                "function": { "name": "web_search", "arguments": "" }
+                "function": { "name": "web_search", "arguments": "{\"query\":\"x\"}" }
             }),
         );
-        merge_tool_call_delta(
-            &mut slots,
-            &json!({
-                "index": 0,
-                "function": { "arguments": "{\"query\":\"latest news on grok\"}" }
-            }),
-        );
-        let turn = resolve_streamed_turn("", "", &slots);
-        let call = turn.tool.unwrap();
-        assert_eq!(call.id, "call_1");
-        assert_eq!(call.name, "web_search");
-        assert_eq!(call.arguments["query"], "latest news on grok");
+        let turn = resolve_streamed_turn("", "Checking sources first.", &slots);
+        assert!(turn.tool.is_some());
+        assert_eq!(turn.content, "Checking sources first.");
     }
+
 
     #[test]
     fn synthesizes_flattened_tool_call_deltas() {

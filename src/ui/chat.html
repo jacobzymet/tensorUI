@@ -6767,12 +6767,51 @@
                 escapeHtml(text) +
               '</div></div>' +
             '</div>';
-        } else if (part.type === 'text') {
-          if (!String(part.content || '').trim()) continue;
-          html += renderMarkdown(part.content);
         }
+        // Mid-turn narration (`type: 'text'`) is rendered in the answer area,
+        // not as an activity-rail step.
       }
       return html;
+    }
+
+    /** Visible answer so far: sealed mid-turn text parts + optional live tail. */
+    function renderSealedAnswerHtml(parts) {
+      let text = '';
+      for (const part of parts || []) {
+        if (!part || part.type !== 'text') continue;
+        const chunk = String(part.content || '');
+        if (!chunk.trim()) continue;
+        if (text) text += '\n\n';
+        text += chunk;
+      }
+      if (!text.trim()) return '';
+      return '<div class="agent-final-answer">' + renderMarkdown(text) + '</div>';
+    }
+
+    function ensureSealedTimelineText(stream, text) {
+      const sealed = String(text || '').trim();
+      if (!sealed) return;
+      const texts = stream.timeline.filter((part) => part && part.type === 'text');
+      const last = texts[texts.length - 1];
+      if (last && String(last.content || '').trim() === sealed) return;
+      if (last && sealed.startsWith(String(last.content || '').trim())) {
+        last.content = sealed;
+        return;
+      }
+      stream.timeline.push({ type: 'text', content: sealed });
+    }
+
+    function ensureSealedTimelineThink(stream, reasoning) {
+      const sealed = String(reasoning || '').trim();
+      if (!sealed) return;
+      const thinks = stream.timeline.filter((part) => part && part.type === 'think');
+      const last = thinks[thinks.length - 1];
+      if (last && String(last.content || '').trim() === sealed) return;
+      if (last && sealed.startsWith(String(last.content || '').trim())) {
+        last.content = sealed;
+        return;
+      }
+      stream.timeline.push({ type: 'think', content: sealed });
     }
 
     /** Move the current typer buffer into stream.timeline, then clear the buffer. */
@@ -6809,28 +6848,32 @@
       return parts.reduce((count, part) => {
         if (!part) return count;
         if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') return count + 1;
-        if (part.type === 'text' && String(part.content || '').trim()) return count + 1;
         return count;
       }, 0);
     }
 
     /**
-     * Split an assistant turn into activity (reasoning / tools / sealed mid-turn
-     * text) vs the final visible answer.
+     * Split an assistant turn into activity (reasoning / tools / notices) vs the
+     * visible answer. Mid-turn narration (`parts` text sealed before a tool) is
+     * part of the answer — not only the final post-tool content.
      */
     function collectTimelineAndAnswer(message) {
       const timelineParts = [];
+      let answerText = '';
+      const pushAnswer = (chunk) => {
+        const text = String(chunk || '');
+        if (!text.trim()) return;
+        if (answerText) answerText += '\n\n';
+        answerText += text;
+      };
       for (const part of message?.parts || []) {
         if (!part) continue;
         if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') {
           timelineParts.push(part);
           continue;
         }
-        if (part.type === 'text' && String(part.content || '').trim()) {
-          timelineParts.push(part);
-        }
+        if (part.type === 'text') pushAnswer(part.content);
       }
-      let answerText = '';
       const content = typeof message?.content === 'string' ? message.content : '';
       if (content) {
         for (const segment of parseThinkSegments(content)) {
@@ -6838,8 +6881,8 @@
             if (String(segment.content || '').trim()) {
               timelineParts.push({ type: 'think', content: segment.content });
             }
-          } else if (String(segment.content || '').trim()) {
-            answerText += segment.content;
+          } else {
+            pushAnswer(segment.content);
           }
         }
       }
@@ -6876,10 +6919,11 @@
     function renderAssistantMessage(message, { streaming = false, collapseTimeline = null } = {}) {
       if (streaming) {
         const partsHtml = renderCommittedParts(message.parts);
+        const sealedHtml = renderSealedAnswerHtml(message.parts);
         const bodyHtml = message.content
           ? renderAssistantHtml(message.content, { streaming: true })
           : '';
-        return partsHtml + bodyHtml;
+        return partsHtml + sealedHtml + bodyHtml;
       }
 
       const { timelineParts, answerHtml, stepCount } = collectTimelineAndAnswer(message);
@@ -9130,16 +9174,16 @@
       const thinkingOpen = streaming && isThinkingOpen(cleaned);
       const hasTimeline = stream.timeline.length > 0;
       const desktop = isDesktopTraceLayout();
-      const answerHtml = desktop
-        ? renderStreamingAnswerHtml(cleaned)
-        : '';
+      const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline);
+      const liveAnswerHtml = renderStreamingAnswerHtml(cleaned);
+      const answerHtml = desktop ? (sealedAnswerHtml + liveAnswerHtml) : '';
       const hasVisibleAnswer = desktop
         ? !!answerHtml
-        : !!(cleaned && streamingAnswerText(cleaned).trim());
+        : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
 
       if (desktop) {
-        // Desktop: activity lives only in the right sidebar — never duplicate it
-        // into the chat bubble while streaming.
+        // Tools/reasoning stay in the sidebar; sealed mid-turn narration + live
+        // answer stay in the chat bubble.
         if (answerHtml) {
           answerEl.innerHTML = answerHtml;
           if (!streaming) enhanceCodeBlocks(answerEl);
@@ -9148,24 +9192,25 @@
         } else if (!hasTimeline && !thinkingOpen) {
           answerEl.innerHTML = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
         } else {
-          answerEl.innerHTML = '';
+          answerEl.innerHTML = sealedAnswerHtml || '';
         }
         delete answerEl.dataset.committedSig;
         stream.enteredSteps = 0;
-      } else if (cleaned || hasTimeline) {
+      } else if (cleaned || hasTimeline || sealedAnswerHtml) {
         const committedHtml = renderCommittedParts(stream.timeline);
-        const committedSig = timelineSignature(stream.timeline);
+        const committedSig = timelineSignature(stream.timeline) + '\0' + sealedAnswerHtml;
         const liveOnly =
           streaming &&
           thinkingOpen &&
           !hasTimeline &&
+          !sealedAnswerHtml &&
           paintLiveThinkOnly(answerEl, cleaned);
 
         if (!liveOnly) {
           let liveRoot = answerEl.querySelector(':scope > .agent-live');
-          if (hasTimeline && streaming && cleaned) {
+          if ((hasTimeline || sealedAnswerHtml) && streaming && cleaned) {
             if (answerEl.dataset.committedSig !== committedSig || !liveRoot) {
-              answerEl.innerHTML = committedHtml + '<div class="agent-live"></div>';
+              answerEl.innerHTML = committedHtml + sealedAnswerHtml + '<div class="agent-live"></div>';
               answerEl.dataset.committedSig = committedSig;
               liveRoot = answerEl.querySelector(':scope > .agent-live');
             }
@@ -9173,7 +9218,7 @@
               liveRoot.innerHTML = renderAssistantHtml(cleaned, { streaming: true });
             }
           } else {
-            answerEl.innerHTML = committedHtml + (cleaned ? renderAssistantHtml(cleaned, { streaming }) : '');
+            answerEl.innerHTML = committedHtml + sealedAnswerHtml + (cleaned ? renderAssistantHtml(cleaned, { streaming }) : '');
             answerEl.dataset.committedSig = committedSig;
           }
           answerEl.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
@@ -9285,9 +9330,15 @@
       });
       const onAgentEvent = (payload) => {
         if (payload.phase === 'content_clear') {
-          // Keep prior think/tool cards — only seal the live buffer for the next round.
+          // Keep prior think/tool cards — seal the live buffer, then apply any
+          // authoritative preface the server resolved for this tool round.
           commitStreamBuffer(stream, typer);
+          if (payload.reasoning != null) ensureSealedTimelineThink(stream, payload.reasoning);
+          if (payload.text != null) ensureSealedTimelineText(stream, payload.text);
           if (stream.dom) stream.dom.row.dataset.raw = '';
+          if (activeId === convo.id && stream.dom) {
+            paintStreamIntoView(convo, stream, typer.shown || '', true);
+          }
         } else if (payload.phase === 'tool_call') {
           commitStreamBuffer(stream, typer);
           if (stream.dom) stream.dom.row.dataset.raw = '';
