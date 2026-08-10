@@ -3749,6 +3749,15 @@
               <div class="settings-row-stack">
                 <label class="field-label" for="settingInstructions">Custom instructions</label>
                 <textarea class="field-textarea" id="settingInstructions" placeholder="How should the assistant behave?"></textarea>
+                <p class="field-hint">Inside a project, project instructions override these when set.</p>
+              </div>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Long-term memory</h3>
+              <div class="settings-row-stack">
+                <label class="field-label" for="settingMemory">Shared memory</label>
+                <textarea class="field-textarea" id="settingMemory" style="min-height:9rem" placeholder="Durable facts the model should remember across all chats and projects…"></textarea>
+                <p class="field-hint">Shared across every chat and project (unless a project is set to project-only). The model may replace this via a &lt;global_memory_update&gt; block.</p>
               </div>
             </div>
           </section>
@@ -4159,7 +4168,7 @@
       <div class="project-dialog-main">
         <div class="settings-scroll">
           <h2 class="settings-pane-title" id="projectModalTitle">Project</h2>
-          <p class="settings-pane-lede">Shared instructions and memory for every chat in this project.</p>
+          <p class="settings-pane-lede">Shared instructions, memory, and sibling-chat context for every chat in this project.</p>
           <div class="settings-section">
             <div class="settings-row">
               <label class="field-label" for="projectName">Name</label>
@@ -4168,11 +4177,20 @@
             <div class="settings-row-stack">
               <label class="field-label" for="projectInstructions">Instructions</label>
               <textarea class="field-textarea" id="projectInstructions" placeholder="How the model should behave in this project…"></textarea>
+              <p class="field-hint">When set, these override your global custom instructions inside this project.</p>
             </div>
             <div class="settings-row-stack">
-              <label class="field-label" for="projectMemory">Memory</label>
-              <textarea class="field-textarea" id="projectMemory" style="min-height:9rem" placeholder="Durable notes the model can update. Editable anytime."></textarea>
-              <p class="field-hint">Shown to the model on every turn. The model may replace this via a &lt;memory_update&gt; block.</p>
+              <label class="field-label">Memory scope</label>
+              <div class="segmented" id="projectMemoryModeToggle" role="tablist" aria-label="Project memory scope">
+                <button type="button" data-memory-mode="default" class="is-active" role="tab" aria-selected="true">Default</button>
+                <button type="button" data-memory-mode="project_only" role="tab" aria-selected="false">Project-only</button>
+              </div>
+              <p class="field-hint" id="projectMemoryModeHint">Default uses long-term memory plus other chats in this project. Project-only keeps context inside the project.</p>
+            </div>
+            <div class="settings-row-stack">
+              <label class="field-label" for="projectMemory">Project memory</label>
+              <textarea class="field-textarea" id="projectMemory" style="min-height:9rem" placeholder="Durable notes for this project. Editable anytime."></textarea>
+              <p class="field-hint">Shared by every chat in this project. The model may replace this via a &lt;memory_update&gt; block. Chats also receive recent excerpts from sibling chats for continuity.</p>
             </div>
           </div>
         </div>
@@ -4203,10 +4221,16 @@
     const ATTACHMENT_MIN_CONTEXT = 16384;
     const ATTACHMENT_MAX_FILES = 6;
     const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+    const PROJECT_MEMORY_MODES = ['default', 'project_only'];
+    const SIBLING_CHAT_MAX = 8;
+    const SIBLING_CHAT_BUDGET = 10000;
+    const SIBLING_MSG_CHARS = 420;
+    const SIBLING_MSGS_PER_CHAT = 4;
     const DEFAULT_SETTINGS = {
       name: '',
       about: '',
       instructions: '',
+      memory: '',
       thinking: 'collapsed', // collapsed | hidden | visible
       thinkingEffort: 'auto', // auto | off | low | medium | high | max
       enterSends: true,
@@ -4522,6 +4546,9 @@
           : 'Untitled project',
         instructions: typeof project.instructions === 'string' ? project.instructions : '',
         memory: typeof project.memory === 'string' ? project.memory : '',
+        memoryMode: PROJECT_MEMORY_MODES.includes(project.memoryMode)
+          ? project.memoryMode
+          : 'default',
         createdAt: typeof project.createdAt === 'number' ? project.createdAt : Date.now(),
         updatedAt: typeof project.updatedAt === 'number' ? project.updatedAt : Date.now(),
       };
@@ -4770,8 +4797,12 @@
           '.convo-item[data-convo-id="' + CSS.escape(convo.id) + '"] .convo-title'
         );
       }
-      if (sidebarEl) typeTitleInto(sidebarEl, sidebarLabel);
-      else renderSidebar();
+      if (sidebarEl) {
+        sidebarEl.title = title;
+        const row = sidebarEl.closest('.convo-item');
+        if (row) row.title = title;
+        typeTitleInto(sidebarEl, sidebarLabel);
+      } else renderSidebar();
       if (activeId === convo.id && convoTitleEl) typeTitleInto(convoTitleEl, title);
     }
 
@@ -4840,6 +4871,7 @@
         name: typeof parsed.name === 'string' ? parsed.name : '',
         about: typeof parsed.about === 'string' ? parsed.about : '',
         instructions: typeof parsed.instructions === 'string' ? parsed.instructions : '',
+        memory: typeof parsed.memory === 'string' ? parsed.memory : '',
         thinking: ['collapsed', 'hidden', 'visible'].includes(parsed.thinking)
           ? parsed.thinking
           : 'collapsed',
@@ -4930,6 +4962,7 @@
       return !value.name
         && !value.about
         && !value.instructions
+        && !value.memory
         && value.thinking === DEFAULT_SETTINGS.thinking
         && value.thinkingEffort === DEFAULT_SETTINGS.thinkingEffort
         && value.enterSends === DEFAULT_SETTINGS.enterSends
@@ -5281,56 +5314,177 @@
       return activeProjectId;
     }
 
-    function buildSystemPrompt(projectIdOverride) {
+    function buildSystemPrompt(projectIdOverride, { excludeConvoId = null } = {}) {
       const parts = [];
       const name = settings.name.trim();
       const about = settings.about.trim();
       const instructions = settings.instructions.trim();
-      if (name) parts.push('The user\'s name is ' + name + '.');
-      if (about) parts.push('About the user:\n' + about);
-      if (instructions) parts.push('Follow these instructions:\n' + instructions);
+      const globalMemory = typeof settings.memory === 'string' ? settings.memory.trim() : '';
 
       const project = getProject(
         projectIdOverride !== undefined ? projectIdOverride : currentProjectId()
       );
+      const projectOnly = !!(project && project.memoryMode === 'project_only');
+
+      if (name) parts.push('The user\'s name is ' + name + '.');
+      if (about) parts.push('About the user:\n' + about);
+
+      // ChatGPT-style: project instructions override global custom instructions.
       if (project) {
         const projectInstructions = project.instructions.trim();
         if (projectInstructions) {
-          parts.push('Project "' + project.name + '" instructions:\n' + projectInstructions);
+          parts.push(
+            'Project "' + project.name + '" instructions (override global custom instructions for this project):\n' +
+            projectInstructions
+          );
+        } else if (instructions) {
+          parts.push('Follow these instructions:\n' + instructions);
         }
+      } else if (instructions) {
+        parts.push('Follow these instructions:\n' + instructions);
+      }
+
+      if (!projectOnly) {
+        parts.push(
+          'Long-term memory — durable facts shared across all chats and projects.\n' +
+          'When you learn a lasting personal fact, preference, or identity detail that should apply everywhere (not just one project), emit a FULL replacement using exactly this form (and do not mention the tag to the user):\n' +
+          '<global_memory_update>\n…updated memory text…\n</global_memory_update>\n' +
+          'If nothing new belongs in long-term memory, do not emit that tag.\n' +
+          'Keep concise durable notes. Skip ephemeral task details.\n' +
+          'Current long-term memory:\n' + (globalMemory || '(empty)')
+        );
+      }
+
+      if (project) {
         const memory = project.memory.trim();
         parts.push(
-          'Project memory for "' + project.name + '" — durable notes shared by every chat in this project.\n' +
-          'When you learn a lasting fact worth remembering later, emit a FULL replacement of the memory using exactly this form (and do not mention the tag to the user):\n' +
+          'Project memory for "' + project.name + '" — durable notes shared by every chat in this project only.\n' +
+          'When you learn a lasting fact specific to THIS project, emit a FULL replacement using exactly this form (and do not mention the tag to the user):\n' +
           '<memory_update>\n…updated memory text…\n</memory_update>\n' +
-          'If nothing new belongs in memory, do not emit that tag.\n' +
-          'Current memory:\n' + (memory || '(empty)')
+          'If nothing new belongs in project memory, do not emit that tag.\n' +
+          (projectOnly
+            ? 'This project is project-only: do not rely on or write long-term (global) memory.\n'
+            : 'Do not put personal/global facts here — use long-term memory for those.\n') +
+          'Current project memory:\n' + (memory || '(empty)')
         );
+
+        const continuity = buildProjectContinuityDigest(project.id, excludeConvoId);
+        if (continuity) parts.push(continuity);
       }
 
       if (parts.length === 0) return null;
       return 'You are a helpful assistant.\n\n' + parts.join('\n\n');
     }
 
+    function messagePlainExcerpt(message, maxChars) {
+      if (!message) return '';
+      let content = typeof message.content === 'string' ? message.content : '';
+      if (!content && Array.isArray(message.content)) {
+        content = message.content
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part.text === 'string') return part.text;
+            return '';
+          })
+          .filter(Boolean)
+          .join(' ');
+      }
+      if (message.role === 'assistant') {
+        content = stripThinkingTags(content);
+      }
+      content = String(content || '')
+        .replace(/<\/?(?:global_)?memory_update>/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!content) return '';
+      if (content.length > maxChars) return content.slice(0, Math.max(0, maxChars - 1)) + '…';
+      return content;
+    }
+
+    /** Recent sibling-chat excerpts so project chats share continuity (minus file sources). */
+    function buildProjectContinuityDigest(projectId, excludeConvoId) {
+      if (!projectId) return null;
+      const siblings = conversations
+        .filter((convo) => convo.projectId === projectId && convo.id !== excludeConvoId)
+        .filter((convo) => Array.isArray(convo.messages) && convo.messages.some((m) => (
+          m && (m.role === 'user' || m.role === 'assistant') && messagePlainExcerpt(m, SIBLING_MSG_CHARS)
+        )))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, SIBLING_CHAT_MAX);
+      if (!siblings.length) return null;
+
+      let remaining = SIBLING_CHAT_BUDGET;
+      const blocks = [];
+      for (const convo of siblings) {
+        if (remaining < 180) break;
+        const title = (convo.title || 'Untitled').trim() || 'Untitled';
+        const lines = ['### Chat: "' + title + '"'];
+        const msgs = (convo.messages || [])
+          .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+          .slice(-SIBLING_MSGS_PER_CHAT);
+        for (const message of msgs) {
+          const text = messagePlainExcerpt(message, SIBLING_MSG_CHARS);
+          if (!text) continue;
+          lines.push((message.role === 'user' ? 'User' : 'Assistant') + ': ' + text);
+        }
+        if (lines.length < 2) continue;
+        let block = lines.join('\n');
+        if (block.length > remaining) {
+          block = block.slice(0, Math.max(0, remaining - 1)) + '…';
+          blocks.push(block);
+          break;
+        }
+        blocks.push(block);
+        remaining -= block.length + 2;
+      }
+      if (!blocks.length) return null;
+      return (
+        'Other chats in this project (for multi-chat continuity — prior context from sibling chats, not the current conversation):\n' +
+        'Use these when the user refers to earlier work in the project. Do not invent details that are not present.\n\n' +
+        blocks.join('\n\n')
+      );
+    }
+
     /**
-     * Pull <memory_update> blocks out of assistant text.
+     * Pull memory update blocks out of assistant text.
      * While streaming, hide an unclosed opener so the XML never flashes in the UI.
      */
     function applyMemoryUpdateProtocol(text, { streaming = false } = {}) {
       let cleaned = text || '';
       let memory = null;
-      const re = /<memory_update>\s*([\s\S]*?)\s*<\/memory_update>/gi;
-      cleaned = cleaned.replace(re, (_, body) => {
+      let globalMemory = null;
+      cleaned = cleaned.replace(/<global_memory_update>\s*([\s\S]*?)\s*<\/global_memory_update>/gi, (_, body) => {
+        globalMemory = String(body || '').trim();
+        return '';
+      });
+      cleaned = cleaned.replace(/<memory_update>\s*([\s\S]*?)\s*<\/memory_update>/gi, (_, body) => {
         memory = String(body || '').trim();
         return '';
       });
       if (streaming) {
         const lower = cleaned.toLowerCase();
-        const open = lower.lastIndexOf('<memory_update>');
+        const globalOpen = lower.lastIndexOf('<global_memory_update>');
+        const projectOpen = lower.lastIndexOf('<memory_update>');
+        const open = Math.max(globalOpen, projectOpen);
         if (open !== -1) cleaned = cleaned.slice(0, open);
       }
       cleaned = cleaned.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trimEnd();
-      return { cleaned, memory };
+      return { cleaned, memory, globalMemory };
+    }
+
+    function projectIsProjectOnly(projectId) {
+      const project = getProject(projectId);
+      return !!(project && project.memoryMode === 'project_only');
+    }
+
+    function persistGlobalMemory(memoryText) {
+      const next = String(memoryText || '');
+      if ((settings.memory || '') === next) return;
+      saveSettings({ ...settings, memory: next });
+      const el = document.getElementById('settingMemory');
+      if (el && settingsModal && !settingsModal.classList.contains('is-hidden')) {
+        el.value = next;
+      }
     }
 
     function persistProjectMemory(projectId, memoryText) {
@@ -5343,6 +5497,26 @@
         document.getElementById('projectMemory').value = memoryText;
       }
       if (mainView === 'projects') renderProjectsPage();
+    }
+
+    function applyExtractedMemories(convo, extracted) {
+      if (!extracted) return;
+      if (extracted.memory != null && convo.projectId) {
+        persistProjectMemory(convo.projectId, extracted.memory);
+      }
+      if (extracted.globalMemory != null && !projectIsProjectOnly(convo.projectId)) {
+        persistGlobalMemory(extracted.globalMemory);
+      }
+    }
+
+    function memoryOnlyAssistantFallback(extracted) {
+      if (!extracted) return '';
+      const projectHit = extracted.memory != null;
+      const globalHit = extracted.globalMemory != null;
+      if (projectHit && globalHit) return 'Updated memory.';
+      if (projectHit) return 'Updated project memory.';
+      if (globalHit) return 'Updated long-term memory.';
+      return '';
     }
 
     function mentionOptionById(id) {
@@ -6024,6 +6198,7 @@
       document.getElementById('settingName').value = settings.name;
       document.getElementById('settingAbout').value = settings.about;
       document.getElementById('settingInstructions').value = settings.instructions;
+      document.getElementById('settingMemory').value = settings.memory || '';
       document.getElementById('settingThinking').value = settings.thinking;
       document.getElementById('settingThinkingEffort').value = settings.thinkingEffort;
       document.getElementById('settingEnterSends').checked = settings.enterSends;
@@ -6309,6 +6484,7 @@
         name: document.getElementById('settingName').value.trim(),
         about: document.getElementById('settingAbout').value,
         instructions: document.getElementById('settingInstructions').value,
+        memory: document.getElementById('settingMemory').value,
         thinking: document.getElementById('settingThinking').value,
         thinkingEffort: document.getElementById('settingThinkingEffort').value,
         enterSends: document.getElementById('settingEnterSends').checked,
@@ -6401,12 +6577,13 @@
       );
     }
 
-    function renderThinkBlock(content, { open, streaming }) {
+    function renderThinkBlock(content, { open, streaming, forceOpen = false } = {}) {
       const mode = settings.thinking;
       if (mode === 'hidden') return '';
       const live = streaming && open;
       const md = renderThinkMarkdown(content);
-      if (live && mode !== 'visible') {
+      // Live ticker stays chrome-less unless the sidebar forces a details shell.
+      if (live && mode !== 'visible' && !forceOpen) {
         return wrapTimelineStep(
           '<div class="think-live" aria-label="Reasoning progress">' +
             '<div class="think-stream">' + md + '</div>' +
@@ -6414,7 +6591,8 @@
           { think: true, live: true }
         );
       }
-      const detailsOpen = mode === 'visible' || (mode === 'collapsed' && live);
+      // Sidebar prefers expanded reasoning; main bubble still respects collapse setting.
+      const detailsOpen = forceOpen || mode === 'visible' || (mode === 'collapsed' && live);
       const summary = live
         ? '<span class="think-summary-label thinking-label">Reasoning</span>' + THINK_CHEVRON
         : '<span class="think-summary-label">Reasoning</span>' + THINK_CHEVRON;
@@ -6430,14 +6608,18 @@
       return wrapTimelineStep(details, { think: true, live });
     }
 
-    function renderCommittedParts(parts) {
+    function renderCommittedParts(parts, { forceOpenThinking = false } = {}) {
       if (!parts || !parts.length) return '';
       let html = '';
       for (const part of parts) {
         if (!part) continue;
         if (part.type === 'think') {
           if (!String(part.content || '').trim()) continue;
-          html += renderThinkBlock(part.content, { open: false, streaming: false });
+          html += renderThinkBlock(part.content, {
+            open: false,
+            streaming: false,
+            forceOpen: forceOpenThinking,
+          });
         } else if (part.type === 'tool') {
           html += agentStepHtml(part);
         } else if (part.type === 'notice') {
@@ -6656,7 +6838,7 @@
       let timelineHtml = '';
       let stepCount = 0;
       if (live && Array.isArray(message.parts)) {
-        timelineHtml = renderCommittedParts(message.parts);
+        timelineHtml = renderCommittedParts(message.parts, { forceOpenThinking: true });
         stepCount = timelinePartCount(message.parts);
         if (message.content) {
           for (const segment of parseThinkSegments(message.content)) {
@@ -6664,13 +6846,14 @@
             timelineHtml += renderThinkBlock(segment.content, {
               open: !!segment.open,
               streaming: true,
+              forceOpen: true,
             });
             stepCount += 1;
           }
         }
       } else {
         const collected = collectTimelineAndAnswer(message);
-        timelineHtml = renderCommittedParts(collected.timelineParts);
+        timelineHtml = renderCommittedParts(collected.timelineParts, { forceOpenThinking: true });
         stepCount = collected.stepCount;
       }
       if (title) {
@@ -7098,13 +7281,14 @@
       const item = document.createElement('div');
       item.className = 'convo-item' + (convo.id === activeId ? ' is-active' : '');
       item.dataset.convoId = convo.id;
-      item.title = 'Drag to reorder';
       if (nested) item.classList.add('is-nested');
       if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
+      const fullTitle = convo.title || 'New chat';
       const title = document.createElement('span');
       title.className = 'convo-title';
-      title.textContent = (isConvoBusy(convo.id) ? '◉ ' : '') + (convo.title || 'New chat');
-      const move = document.createElement('button');
+      title.textContent = (isConvoBusy(convo.id) ? '◉ ' : '') + fullTitle;
+      title.title = fullTitle;
+      item.title = fullTitle;      const move = document.createElement('button');
       move.type = 'button';
       move.className = 'convo-move';
       move.setAttribute('aria-label', 'Move conversation');
@@ -7311,6 +7495,7 @@
         name: 'New project',
         instructions: '',
         memory: '',
+        memoryMode: 'default',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
@@ -7320,6 +7505,30 @@
       openProjectSettings(project.id);
     }
 
+    function syncProjectMemoryModeControls(mode) {
+      const value = PROJECT_MEMORY_MODES.includes(mode) ? mode : 'default';
+      const toggle = document.getElementById('projectMemoryModeToggle');
+      if (toggle) {
+        toggle.querySelectorAll('[data-memory-mode]').forEach((btn) => {
+          const active = btn.getAttribute('data-memory-mode') === value;
+          btn.classList.toggle('is-active', active);
+          btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+      const hint = document.getElementById('projectMemoryModeHint');
+      if (hint) {
+        hint.textContent = value === 'project_only'
+          ? 'Project-only blocks long-term (global) memory. Sibling chats in this project still provide continuity.'
+          : 'Default uses long-term memory plus other chats in this project. Project-only keeps context inside the project.';
+      }
+    }
+
+    function selectedProjectMemoryMode() {
+      const active = document.querySelector('#projectMemoryModeToggle [data-memory-mode].is-active');
+      const mode = active && active.getAttribute('data-memory-mode');
+      return PROJECT_MEMORY_MODES.includes(mode) ? mode : 'default';
+    }
+
     function openProjectSettings(projectId) {
       const project = getProject(projectId);
       if (!project) return;
@@ -7327,6 +7536,7 @@
       document.getElementById('projectName').value = project.name;
       document.getElementById('projectInstructions').value = project.instructions;
       document.getElementById('projectMemory').value = project.memory;
+      syncProjectMemoryModeControls(project.memoryMode || 'default');
       openBackdrop(projectModal);
       document.getElementById('projectName').focus();
     }
@@ -7344,6 +7554,7 @@
       project.name = name;
       project.instructions = document.getElementById('projectInstructions').value;
       project.memory = document.getElementById('projectMemory').value;
+      project.memoryMode = selectedProjectMemoryMode();
       project.updatedAt = Date.now();
       saveStore();
       closeProjectSettings();
@@ -8722,10 +8933,9 @@
 
     function paintStreamIntoView(convo, stream, replyText, streaming) {
       stream.partial = replyText;
-      const { cleaned, memory } = applyMemoryUpdateProtocol(replyText, { streaming });
-      if (memory != null && convo.projectId) {
-        persistProjectMemory(convo.projectId, memory);
-      }
+      const extracted = applyMemoryUpdateProtocol(replyText, { streaming });
+      const { cleaned } = extracted;
+      applyExtractedMemories(convo, extracted);
       if (activeId !== convo.id) {
         // Background stream — keep state only; sidebar shows the live marker.
         return;
@@ -8976,7 +9186,7 @@
         const last = apiMessages[apiMessages.length - 1];
         if (last.role === 'user') last.content = text;
       }
-      const systemPrompt = buildSystemPrompt(convo.projectId);
+      const systemPrompt = buildSystemPrompt(convo.projectId, { excludeConvoId: convo.id });
       if (systemPrompt) {
         apiMessages.unshift({ role: 'system', content: systemPrompt });
       }
@@ -9069,12 +9279,10 @@
         return;
       }
       const extracted = applyMemoryUpdateProtocol(typer.target, { streaming: false });
-      if (extracted.memory != null && convo.projectId) {
-        persistProjectMemory(convo.projectId, extracted.memory);
-      }
+      applyExtractedMemories(convo, extracted);
       let assistantText = extracted.cleaned;
-      if (!assistantText && extracted.memory != null && !stream.errorMessage) {
-        assistantText = 'Updated project memory.';
+      if (!assistantText && !stream.errorMessage) {
+        assistantText = memoryOnlyAssistantFallback(extracted);
       }
 
       stream.timeline.forEach((part) => {
@@ -9648,6 +9856,11 @@
     document.getElementById('btnProjectCancel').addEventListener('click', closeProjectSettings);
     document.getElementById('btnProjectClose').addEventListener('click', closeProjectSettings);
     document.getElementById('btnProjectSave').addEventListener('click', commitProjectSettings);
+    document.getElementById('projectMemoryModeToggle')?.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-memory-mode]');
+      if (!btn) return;
+      syncProjectMemoryModeControls(btn.getAttribute('data-memory-mode'));
+    });
     document.getElementById('btnProjectDelete').addEventListener('click', () => {
       if (editingProjectId) deleteProject(editingProjectId);
     });
