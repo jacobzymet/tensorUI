@@ -2117,7 +2117,6 @@ mod tests {
         assert_eq!(turn.content, "Checking sources first.");
     }
 
-
     #[test]
     fn synthesizes_flattened_tool_call_deltas() {
         let mut slots = Vec::new();

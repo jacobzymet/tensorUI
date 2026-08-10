@@ -37,10 +37,7 @@ fn cache() -> &'static Mutex<Option<CachedCheck>> {
 
 /// Normalize tags like `v1.2.3`, `V1.2.3-beta.1` → comparable core + pre parts.
 fn normalize_version(raw: &str) -> String {
-    raw.trim()
-        .trim_start_matches(['v', 'V'])
-        .trim()
-        .to_string()
+    raw.trim().trim_start_matches(['v', 'V']).trim().to_string()
 }
 
 fn parse_semver_parts(raw: &str) -> Option<(Vec<u64>, Option<String>)> {
@@ -105,9 +102,7 @@ fn status_up_to_date() -> UpdateStatus {
 }
 
 async fn fetch_latest_release() -> Result<UpdateStatus, String> {
-    let url = format!(
-        "https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
-    );
+    let url = format!("https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest");
     let client = http::public_client();
     let response = client
         .get(&url)
@@ -141,7 +136,10 @@ async fn fetch_latest_release() -> Result<UpdateStatus, String> {
         .await
         .map_err(|error| format!("invalid GitHub response: {error}"))?;
 
-    if payload.get("draft").and_then(|v| v.as_bool()).unwrap_or(false)
+    if payload
+        .get("draft")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
         || payload
             .get("prerelease")
             .and_then(|v| v.as_bool())
