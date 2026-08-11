@@ -751,6 +751,19 @@
     .convo-item.is-streaming .convo-title {
       color: var(--color-accent);
     }
+    .convo-spinner {
+      flex: 0 0 auto;
+      width: 0.85rem;
+      height: 0.85rem;
+      margin-right: 0.1rem;
+      border-radius: 50%;
+      border: 1.5px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
+      border-top-color: var(--color-accent);
+      animation: convo-spin 0.7s linear infinite;
+    }
+    @keyframes convo-spin {
+      to { transform: rotate(360deg); }
+    }
     .convo-item.is-dragging {
       opacity: 0.45;
     }
@@ -5120,7 +5133,7 @@
     }
 
     function revealGeneratedTitle(convo, title) {
-      const sidebarLabel = (isConvoBusy(convo.id) ? '◉ ' : '') + title;
+      const sidebarLabel = title;
       let sidebarEl = document.querySelector(
         '.convo-item[data-convo-id="' + CSS.escape(convo.id) + '"] .convo-title'
       );
@@ -7743,7 +7756,12 @@
       if (nested) item.classList.add('is-nested');
       if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
       const fullTitle = convo.title || (convo.incognito ? 'Ghost Chat' : 'New chat');
-      if (convo.incognito) {
+      if (isConvoBusy(convo.id)) {
+        const spinner = document.createElement('span');
+        spinner.className = 'convo-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        item.appendChild(spinner);
+      } else if (convo.incognito) {
         const mark = document.createElement('span');
         mark.className = 'convo-incognito-mark';
         mark.setAttribute('aria-hidden', 'true');
@@ -7756,7 +7774,7 @@
       }
       const title = document.createElement('span');
       title.className = 'convo-title';
-      title.textContent = (isConvoBusy(convo.id) ? '◉ ' : '') + fullTitle;
+      title.textContent = fullTitle;
       title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
       item.title = title.title;
       const move = document.createElement('button');
