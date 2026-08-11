@@ -3051,6 +3051,14 @@
       box-sizing: border-box;
       line-height: 1;
     }
+    .composer-tools .btn-think,
+    .composer-tools .btn-agent {
+      font-family: var(--font-body);
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.005em;
+      line-height: 1;
+    }
     .composer-tools .btn-attach,
     .composer-buttons .btn-mic {
       width: 2.1rem;
@@ -3208,11 +3216,11 @@
     .btn-think {
       display: inline-flex;
       align-items: center;
-      gap: 0.4rem;
-      font-size: var(--text-xs);
-      font-family: var(--font-mono);
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      font-family: var(--font-body);
       font-weight: 500;
-      letter-spacing: 0.01em;
+      letter-spacing: 0.005em;
       color: var(--color-muted);
       padding: 0 0.75rem;
       border-radius: var(--radius-pill);
@@ -3236,32 +3244,35 @@
     }
     .btn-think-label {
       display: inline-flex;
-      align-items: baseline;
-      gap: 0.32rem;
+      align-items: center;
+      gap: 0.28rem;
       min-width: 0;
+      line-height: 1;
     }
     .btn-think-verb {
       color: inherit;
+      font-size: 1em;
       font-weight: 500;
     }
     .btn-think-effort {
       color: var(--color-accent);
-      font-weight: 650;
-      letter-spacing: 0.01em;
+      font-size: 1em;
+      font-weight: 550;
+      line-height: 1;
     }
     .btn-think-effort.is-off {
       color: var(--color-muted);
-      font-weight: 550;
+      font-weight: 500;
     }
     .btn-think-caret {
-      font-size: 1.15rem;
+      font-size: 0.72rem;
       line-height: 1;
-      opacity: 0.9;
-      transform: translateY(-0.04em);
+      opacity: 0.72;
+      transform: translateY(0.02em);
       transition: transform var(--dur-short) var(--ease-settle);
     }
     .btn-think[aria-expanded="true"] .btn-think-caret {
-      transform: translateY(-0.04em) rotate(180deg);
+      transform: translateY(0.02em) rotate(180deg);
     }
     .think-menu {
       position: absolute;
@@ -3326,11 +3337,12 @@
       color: var(--color-muted);
     }
     .btn-agent {
-      gap: 0.5rem;
-      font-size: var(--text-xs);
-      font-family: var(--font-mono);
+      gap: 0.45rem;
+      font-size: 0.8rem;
+      font-family: var(--font-body);
       font-weight: 500;
-      letter-spacing: 0.01em;
+      letter-spacing: 0.005em;
+      line-height: 1;
       color: var(--color-muted);
       padding: 0 0.75rem 0 0.5rem;
       border-radius: var(--radius-pill);
