@@ -2985,6 +2985,7 @@
     .composer-tools .btn-attach,
     .composer-tools .btn-think,
     .composer-tools .btn-agent,
+    .composer-buttons .btn-mic,
     .composer-buttons .btn-send,
     .composer-buttons #btnStop {
       height: 2.1rem;
@@ -2992,13 +2993,15 @@
       box-sizing: border-box;
       line-height: 1;
     }
-    .composer-tools .btn-attach {
+    .composer-tools .btn-attach,
+    .composer-buttons .btn-mic {
       width: 2.1rem;
       padding: 0;
     }
     .composer-tools .btn-think { padding: 0 0.75rem; }
     .composer-tools .btn-agent { padding: 0 0.75rem 0 0.5rem; }
     /* Circular send/stop: an unmistakable single target at the corner. */
+    .composer-buttons .btn-mic,
     .composer-buttons .btn-send,
     .composer-buttons #btnStop {
       width: 2.1rem;
@@ -3006,6 +3009,7 @@
       padding: 0;
       border-radius: var(--radius-pill);
     }
+    .composer-buttons .btn-mic svg,
     .composer-buttons .btn-send svg,
     .composer-buttons #btnStop svg {
       width: 1.05rem;
@@ -3066,7 +3070,8 @@
       color: var(--color-danger);
       background: color-mix(in oklch, var(--color-danger) 12%, transparent);
     }
-    .btn-attach {
+    .btn-attach,
+    .btn-mic {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -3076,18 +3081,37 @@
       color: var(--color-ink-2);
       cursor: pointer;
       flex: 0 0 auto;
-      transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
+      transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
     }
-    .btn-attach svg { width: 1.05rem; height: 1.05rem; }
-    .btn-attach:hover:not(.is-disabled) {
+    .btn-attach svg,
+    .btn-mic svg { width: 1.05rem; height: 1.05rem; }
+    .btn-attach:hover:not(.is-disabled),
+    .btn-mic:hover:not(.is-disabled):not(.is-listening) {
       color: var(--color-ink);
       border-color: var(--color-rule-2);
       background: var(--surface-hover);
     }
-    .btn-attach.is-disabled {
+    .btn-attach.is-disabled,
+    .btn-mic.is-disabled {
       opacity: 0.42;
       cursor: pointer;
       color: var(--color-muted);
+    }
+    .btn-mic.is-listening {
+      color: var(--color-accent);
+      border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule));
+      background: var(--accent-wash);
+    }
+    .btn-mic.is-listening:hover {
+      border-color: color-mix(in oklch, var(--color-accent) 70%, var(--color-rule));
+      background: var(--accent-wash-2);
+    }
+    @keyframes mic-listen-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    .btn-mic.is-listening svg {
+      animation: mic-listen-pulse 1.35s ease-in-out infinite;
     }
     .composer-card.is-dragover {
       border-color: color-mix(in oklch, var(--color-accent) 60%, var(--color-rule-2));
@@ -4081,6 +4105,9 @@
           <button type="button" class="btn btn-outline is-hidden" id="btnStop" aria-label="Stop generating" title="Stop generating">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
           </button>
+          <button type="button" class="btn-mic is-hidden" id="btnMic" aria-label="Voice input" aria-pressed="false" title="Voice input" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M8 22h8"/></svg>
+          </button>
           <button type="button" class="btn btn-primary btn-send" id="btnSend" aria-label="Send message" title="Send message" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
           </button>
@@ -4690,8 +4717,16 @@
     const btnStop = document.getElementById('btnStop');
     const btnAgent = document.getElementById('btnAgent');
     const btnAttach = document.getElementById('btnAttach');
+    const btnMic = document.getElementById('btnMic');
     const attachFileInput = document.getElementById('attachFileInput');
     const composerAttachmentsEl = document.getElementById('composerAttachments');
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let voiceRecognition = null;
+    let voiceListening = false;
+    let voicePrefix = '';
+    let voiceSuffix = '';
+    let voiceFinal = '';
+    let voiceHintUntil = 0;
     const traceSidebar = document.getElementById('traceSidebar');
     const traceSidebarBody = document.getElementById('traceSidebarBody');
     const traceSidebarTitle = document.getElementById('traceSidebarTitle');
@@ -6092,6 +6127,208 @@
         : (reason || 'Go to Preferences → Attachments to configure');
       renderPendingAttachments();
       updateSendEnabled();
+      syncMicButton();
+    }
+
+    function voiceInputSupported() {
+      return typeof SpeechRecognitionAPI === 'function';
+    }
+
+    function syncMicButton() {
+      if (!btnMic) return;
+      const supported = voiceInputSupported();
+      btnMic.classList.toggle('is-hidden', !supported);
+      btnMic.hidden = !supported;
+      if (!supported) {
+        stopVoiceInput({ silent: true });
+        return;
+      }
+      const locked = diskEncryptionLocked();
+      const enabled = serverReady && !locked;
+      if (!enabled && voiceListening) stopVoiceInput({ silent: true });
+      btnMic.classList.toggle('is-disabled', !enabled);
+      btnMic.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      btnMic.classList.toggle('is-listening', voiceListening);
+      btnMic.setAttribute('aria-pressed', voiceListening ? 'true' : 'false');
+      btnMic.setAttribute('aria-label', voiceListening ? 'Stop voice input' : 'Voice input');
+      if (!enabled) {
+        btnMic.title = locked
+          ? 'Unlock local data to use voice input'
+          : 'Connect a provider to use voice input';
+      } else if (voiceListening) {
+        btnMic.title = 'Listening… click to stop';
+      } else {
+        btnMic.title = 'Voice input';
+      }
+    }
+
+    function showVoiceHint(message, { warn = true, ms = 8000 } = {}) {
+      if (!composerHint || !message) return;
+      composerHint.textContent = message;
+      composerHint.classList.toggle('is-warn', !!warn);
+      voiceHintUntil = Date.now() + ms;
+    }
+
+    let voiceAudioCtx = null;
+    function playVoiceCue(kind) {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        if (!voiceAudioCtx) voiceAudioCtx = new AC();
+        if (voiceAudioCtx.state === 'suspended') void voiceAudioCtx.resume();
+        const t0 = voiceAudioCtx.currentTime;
+        // Soft two-note blips: up for start, down for stop.
+        const tones = kind === 'start'
+          ? [
+              { f: 620, d: 0.055, g: 0.16 },
+              { f: 880, d: 0.08, g: 0.13, delay: 0.05 },
+            ]
+          : [
+              { f: 700, d: 0.05, g: 0.14 },
+              { f: 460, d: 0.075, g: 0.11, delay: 0.045 },
+            ];
+        for (const tone of tones) {
+          const osc = voiceAudioCtx.createOscillator();
+          const gain = voiceAudioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = tone.f;
+          const startAt = t0 + (tone.delay || 0);
+          gain.gain.setValueAtTime(0.0001, startAt);
+          gain.gain.exponentialRampToValueAtTime(tone.g, startAt + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startAt + tone.d);
+          osc.connect(gain);
+          gain.connect(voiceAudioCtx.destination);
+          osc.start(startAt);
+          osc.stop(startAt + tone.d + 0.02);
+        }
+      } catch (_) {
+        // Audio cues are optional; ignore Autoplay / Web Audio failures.
+      }
+    }
+
+    function paintVoiceTranscript(interim) {
+      const spoken = (voiceFinal + (interim || '')).replace(/^\s+/, '');
+      const needsSpace = spoken
+        && voicePrefix.length > 0
+        && !/\s$/.test(voicePrefix)
+        && !/^[.,!?;:]/.test(spoken);
+      const lead = needsSpace ? ' ' : '';
+      composerInput.value = voicePrefix + lead + spoken + voiceSuffix;
+      const cursor = voicePrefix.length + lead.length + spoken.length;
+      composerInput.setSelectionRange(cursor, cursor);
+      autoResize(composerInput);
+      updateSendEnabled();
+    }
+
+    function stopVoiceInput({ silent = false, cue = true } = {}) {
+      const wasListening = voiceListening;
+      voiceListening = false;
+      if (voiceRecognition) {
+        const rec = voiceRecognition;
+        voiceRecognition = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        try { rec.stop(); } catch (_) { /* already stopped */ }
+        try { rec.abort(); } catch (_) { /* unsupported / already stopped */ }
+      }
+      if (btnMic) {
+        btnMic.classList.remove('is-listening');
+        btnMic.setAttribute('aria-pressed', 'false');
+        btnMic.setAttribute('aria-label', 'Voice input');
+        btnMic.title = 'Voice input';
+      }
+      if (wasListening && cue) playVoiceCue('stop');
+      if (!silent && wasListening) updateComposerHint();
+    }
+
+    function startVoiceInput() {
+      if (!voiceInputSupported() || !btnMic) return;
+      if (!serverReady || diskEncryptionLocked()) {
+        showVoiceHint(
+          diskEncryptionLocked()
+            ? 'Unlock local data to use voice input.'
+            : 'Connect a provider before using voice input.'
+        );
+        return;
+      }
+      if (!requireUnlockedData()) return;
+
+      stopVoiceInput({ silent: true, cue: false });
+
+      const start = composerInput.selectionStart ?? composerInput.value.length;
+      const end = composerInput.selectionEnd ?? start;
+      voicePrefix = composerInput.value.slice(0, start);
+      voiceSuffix = composerInput.value.slice(end);
+      voiceFinal = '';
+
+      const recognition = new SpeechRecognitionAPI();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || 'en-US';
+
+      recognition.onresult = (event) => {
+        if (!voiceListening) return;
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          const chunk = result?.[0]?.transcript || '';
+          if (result.isFinal) voiceFinal += chunk;
+          else interim += chunk;
+        }
+        paintVoiceTranscript(interim);
+      };
+
+      recognition.onerror = (event) => {
+        const code = event.error || '';
+        if (code === 'aborted') return;
+        if (code === 'no-speech') {
+          stopVoiceInput();
+          return;
+        }
+        stopVoiceInput({ silent: true });
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
+          showVoiceHint('Microphone permission is blocked for this site.');
+        } else if (code === 'audio-capture') {
+          showVoiceHint('No microphone was found.');
+        } else if (code === 'network') {
+          showVoiceHint('Voice recognition needs a network connection.');
+        } else {
+          showVoiceHint('Voice input failed (' + code + ').');
+        }
+        syncMicButton();
+      };
+
+      recognition.onend = () => {
+        if (!voiceListening) return;
+        // Chromium sometimes ends continuous sessions; restart while armed.
+        try {
+          recognition.start();
+        } catch (_) {
+          stopVoiceInput();
+        }
+      };
+
+      try {
+        recognition.start();
+      } catch (error) {
+        showVoiceHint(error?.message || 'Could not start voice input.');
+        return;
+      }
+
+      voiceRecognition = recognition;
+      voiceListening = true;
+      voiceHintUntil = 0;
+      playVoiceCue('start');
+      syncMicButton();
+      composerHint.classList.remove('is-warn');
+      composerHint.textContent = 'Listening… click the mic or press Esc to stop';
+      composerInput.focus();
+    }
+
+    function toggleVoiceInput() {
+      if (voiceListening) stopVoiceInput();
+      else startVoiceInput();
     }
 
     function renderPendingAttachments() {
@@ -7830,11 +8067,20 @@
         return;
       }
       if (!serverReady) return;
-      // Keep recent attachment warnings visible; pollState would otherwise wipe them.
+      if (voiceListening) {
+        composerHint.classList.remove('is-warn');
+        composerHint.textContent = 'Listening… click the mic or press Esc to stop';
+        return;
+      }
+      // Keep recent attachment / voice warnings visible; pollState would otherwise wipe them.
       if (Date.now() < attachHintUntil && composerHint.classList.contains('is-warn')) {
         return;
       }
+      if (Date.now() < voiceHintUntil && composerHint.classList.contains('is-warn')) {
+        return;
+      }
       attachHintUntil = 0;
+      voiceHintUntil = 0;
       composerHint.classList.remove('is-warn');
       const sendHint = settings.enterSends
         ? 'Shift+Enter for a new line'
@@ -9647,6 +9893,7 @@
       const queued = pendingAttachments.slice();
       if ((!typed && !queued.length) || !serverReady || isConvoBusy(activeId)) return;
       if (!requireUnlockedData()) return;
+      stopVoiceInput({ silent: true });
       cancelMessageEdit();
       showChatView();
 
@@ -10384,6 +10631,17 @@
       }
       attachFileInput.click();
     });
+    btnMic?.addEventListener('click', () => {
+      if (btnMic.getAttribute('aria-disabled') === 'true') {
+        showVoiceHint(
+          diskEncryptionLocked()
+            ? 'Unlock local data to use voice input.'
+            : 'Connect a provider before using voice input.'
+        );
+        return;
+      }
+      toggleVoiceInput();
+    });
     attachFileInput.addEventListener('change', async (event) => {
       const files = event.target.files;
       event.target.value = '';
@@ -10453,6 +10711,7 @@
     syncThinkingEffortControls(settings.thinkingEffort);
     syncComposerThinkVisibility(null);
     syncAttachButton();
+    syncMicButton();
     syncAttachmentFallbackControls();
     document.getElementById('btnNewChat').addEventListener('click', () => {
       // New chat stays in the current project context when one is active.
@@ -10975,6 +11234,10 @@
         return;
       }
       if (event.key === 'Escape') {
+        if (voiceListening) {
+          stopVoiceInput();
+          return;
+        }
         if (searchModal && !searchModal.classList.contains('is-hidden')) {
           closeSearchModal();
           return;
@@ -11096,6 +11359,7 @@
       if (modelMenuIsOpen()) positionModelMenu();
     }, true);
     composerInput.addEventListener('input', () => {
+      if (voiceListening) stopVoiceInput({ silent: true });
       mentionInput = composerInput;
       promoteTypedMentions();
       autoResize(composerInput);
