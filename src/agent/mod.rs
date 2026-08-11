@@ -625,10 +625,7 @@ async fn stream_once(
             object.insert("reasoning".into(), reasoning.clone());
         }
         if style == ApiStyle::Openai {
-            object.insert(
-                "stream_options".into(),
-                json!({ "include_usage": true }),
-            );
+            object.insert("stream_options".into(), json!({ "include_usage": true }));
         }
     }
 
