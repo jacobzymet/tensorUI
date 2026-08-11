@@ -87,7 +87,7 @@
       --control-h: 2.15rem;
       --control-h-sm: 1.9rem;
 
-      --sidebar-w: 15.5rem;
+      --sidebar-w: 17.75rem;
       --trace-sidebar-w: 22rem;
       --composer-max: 47rem;
       --thread-max: 47rem;
@@ -733,9 +733,9 @@
     .convo-item {
       display: flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: 0.35rem;
       border-radius: var(--radius-pill);
-      padding: 0.42rem 0.35rem 0.42rem 0.75rem;
+      padding: 0.45rem 0.65rem;
       cursor: pointer;
       color: var(--color-ink-2);
       font-size: var(--text-sm);
@@ -787,6 +787,12 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .convo-item:hover .convo-title,
+    .convo-item:focus-within .convo-title {
+      /* Keep titles readable while move/delete overlay the trailing edge. */
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 2.9rem), transparent);
+      mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 2.9rem), transparent);
+    }
     .convo-title.is-typing-title,
     .chat-topbar-title.is-typing-title {
       text-overflow: clip;
@@ -823,9 +829,20 @@
       border-radius: var(--radius-pill);
       font-size: var(--text-lg);
       line-height: 1;
-      opacity: 0;
       transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
     }
+    .convo-delete,
+    .convo-move {
+      /* Overlay on hover so idle rows give titles the full sidebar width. */
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .convo-delete { right: 0.2rem; }
+    .convo-move { right: 1.55rem; }
     .convo-delete:hover,
     .convo-move:hover,
     .project-settings-btn:hover { background: var(--surface-active); }
@@ -835,7 +852,10 @@
     .convo-item:hover .convo-move,
     .convo-delete:focus-visible,
     .convo-move:focus-visible,
-    .project-settings-btn:focus-visible { opacity: 1; }
+    .project-settings-btn:focus-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
     .convo-delete:hover { color: var(--color-danger); }
     .convo-move:hover,
     .project-settings-btn:hover { color: var(--color-accent); }
