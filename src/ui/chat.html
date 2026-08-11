@@ -822,12 +822,6 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .convo-item:hover .convo-title,
-    .convo-item:focus-within .convo-title {
-      /* Keep titles readable while move/delete overlay the trailing edge. */
-      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 2.9rem), transparent);
-      mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 2.9rem), transparent);
-    }
     .convo-title.is-typing-title,
     .chat-topbar-title.is-typing-title {
       text-overflow: clip;
@@ -858,26 +852,28 @@
       cursor: pointer;
       display: inline-grid;
       place-items: center;
-      width: 1.4rem;
-      height: 1.4rem;
+      width: 1.35rem;
+      height: 1.35rem;
       padding: 0;
       border-radius: var(--radius-pill);
       font-size: var(--text-lg);
       line-height: 1;
-      transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
+      transition:
+        opacity var(--dur-short) var(--ease-out),
+        color var(--dur-short) var(--ease-out),
+        background var(--dur-short) var(--ease-out),
+        width var(--dur-short) var(--ease-out),
+        min-width var(--dur-short) var(--ease-out);
     }
     .convo-delete,
     .convo-move {
-      /* Overlay on hover so idle rows give titles the full sidebar width. */
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
+      /* Collapse when idle so titles keep the full row; expand on hover/focus. */
+      width: 0;
+      min-width: 0;
+      overflow: hidden;
       opacity: 0;
       pointer-events: none;
-      z-index: 1;
     }
-    .convo-delete { right: 0.2rem; }
-    .convo-move { right: 1.55rem; }
     .convo-delete:hover,
     .convo-move:hover,
     .project-settings-btn:hover { background: var(--surface-active); }
@@ -885,9 +881,13 @@
     .project-settings-btn { font-size: var(--text-sm); opacity: 1; }
     .convo-item:hover .convo-delete,
     .convo-item:hover .convo-move,
+    .convo-item:focus-within .convo-delete,
+    .convo-item:focus-within .convo-move,
     .convo-delete:focus-visible,
     .convo-move:focus-visible,
     .project-settings-btn:focus-visible {
+      width: 1.35rem;
+      min-width: 1.35rem;
       opacity: 1;
       pointer-events: auto;
     }
@@ -1251,6 +1251,32 @@
     .agent-final-answer {
       min-width: 0;
     }
+    /* Inline web citations: linked claim + site favicon. */
+    .msg-bubble a.md-cite {
+      color: var(--color-accent);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.16em;
+      text-decoration-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
+      transition: color var(--dur-short) var(--ease-out), text-decoration-color var(--dur-short) var(--ease-out);
+    }
+    .msg-bubble a.md-cite:hover {
+      color: var(--color-ink);
+      text-decoration-color: color-mix(in oklch, var(--color-accent) 80%, transparent);
+    }
+    .msg-bubble a.md-cite .md-cite-favicon {
+      display: inline-block;
+      width: 0.9em;
+      height: 0.9em;
+      margin-right: 0.28em;
+      vertical-align: -0.12em;
+      border-radius: 2px;
+      object-fit: contain;
+      background: color-mix(in oklch, var(--color-ink) 6%, transparent);
+    }
+    .msg-bubble a.md-cite .md-cite-favicon.is-missing {
+      display: none;
+    }
     .agent-process-notes .agent-timeline-fold-toggle {
       font-weight: 500;
       color: var(--color-ink-2);
@@ -1570,6 +1596,40 @@
       padding: 0.18rem 0.5rem;
       border-radius: var(--radius-pill);
       background: color-mix(in oklch, var(--color-ink) 7%, transparent);
+    }
+    .chat-model-tabs {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.2rem;
+      padding: 0.45rem 0.55rem 0.35rem;
+      border-bottom: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+    }
+    .chat-model-tab {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      border-radius: var(--radius-pill);
+      padding: 0.38rem 0.6rem;
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.005em;
+      line-height: 1;
+      cursor: pointer;
+      transition:
+        color var(--dur-short) var(--ease-out),
+        background var(--dur-short) var(--ease-out);
+    }
+    .chat-model-tab:hover {
+      color: var(--color-ink-2);
+      background: var(--surface-hover);
+    }
+    .chat-model-tab.is-active {
+      color: var(--color-ink);
+      background: var(--accent-wash);
+      font-weight: 600;
     }
     .chat-model-list {
       flex: 1 1 auto;
@@ -4117,6 +4177,10 @@
                   >
                   <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
                 </div>
+                <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
+                  <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
+                  <button type="button" class="chat-model-tab" id="chatModelTabAll" role="tab" aria-selected="false" data-model-tab="all">All</button>
+                </div>
                 <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
                 <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
               </div>
@@ -5073,16 +5137,56 @@
     const chatModelEmpty = document.getElementById('chatModelEmpty');
     const REMOTE_MODEL_KEY = 'tensorui_remote_model_id';
     const CHAT_MODEL_KEY = 'tensorui_chat_model';
+    const RECENT_MODELS_KEY = 'tensorui_recent_models';
+    const RECENT_MODELS_MAX = 12;
     /** Below this many models the filter field is more noise than help. */
     const MODEL_SEARCH_MIN_OPTIONS = 6;
     let selectedRemoteModelId = localStorage.getItem(REMOTE_MODEL_KEY) || '';
     let selectedChatModel = localStorage.getItem(CHAT_MODEL_KEY) || '';
+    let recentModelIds = loadRecentModelIds();
     let modelMenuOptions = [];
     /** Options passing the current filter — what the arrow keys actually walk. */
     let modelMenuMatches = [];
     let modelMenuFilter = '';
     let modelMenuActiveIndex = -1;
+    let modelMenuTab = recentModelIds.length ? 'recents' : 'all';
     let latestState = null;
+
+    function loadRecentModelIds() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(RECENT_MODELS_KEY) || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .filter((id) => typeof id === 'string' && id.trim())
+          .map((id) => id.trim())
+          .slice(0, RECENT_MODELS_MAX);
+      } catch {
+        return [];
+      }
+    }
+
+    function saveRecentModelIds(ids) {
+      recentModelIds = (Array.isArray(ids) ? ids : [])
+        .filter((id) => typeof id === 'string' && id)
+        .slice(0, RECENT_MODELS_MAX);
+      try {
+        localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(recentModelIds));
+      } catch {
+        // ignore quota / private-mode failures
+      }
+    }
+
+    function rememberRecentModel(value) {
+      if (!value) return;
+      saveRecentModelIds([value, ...recentModelIds.filter((id) => id !== value)]);
+    }
+
+    function pruneRecentModels(availableValues) {
+      const allowed = new Set(availableValues || []);
+      const next = recentModelIds.filter((id) => allowed.has(id));
+      if (next.length !== recentModelIds.length) saveRecentModelIds(next);
+      if (modelMenuTab === 'recents' && !recentModelIds.length) modelMenuTab = 'all';
+    }
 
     function newId(prefix) {
       return crypto.randomUUID
@@ -8758,11 +8862,31 @@
             const label = this.parser.parseInline(tokens);
             if (!href || !/^(https?:|mailto:|\/|#)/i.test(href)) return label;
             const titleAttr = title ? (' title="' + escapeHtml(title) + '"') : '';
+            const favicon = citeFaviconUrl(href);
+            if (favicon) {
+              return '<a class="md-cite" href="' + escapeHtml(href) + '"' + titleAttr +
+                ' target="_blank" rel="noopener noreferrer">' +
+                '<img class="md-cite-favicon" src="' + escapeHtml(favicon) + '"' +
+                ' alt="" width="14" height="14" loading="lazy" decoding="async" referrerpolicy="no-referrer">' +
+                '<span class="md-cite-text">' + label + '</span></a>';
+            }
             return '<a href="' + escapeHtml(href) + '"' + titleAttr +
               ' target="_blank" rel="noopener noreferrer">' + label + '</a>';
           },
         },
       });
+    }
+
+    function citeFaviconUrl(href) {
+      try {
+        const url = new URL(String(href || ''), window.location.origin);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        if (!url.hostname) return '';
+        return 'https://www.google.com/s2/favicons?domain=' +
+          encodeURIComponent(url.hostname) + '&sz=32';
+      } catch {
+        return '';
+      }
     }
 
     if (window.DOMPurify) {
@@ -8782,13 +8906,30 @@
       const raw = window.marked.parse(String(text), { async: false });
       return window.DOMPurify.sanitize(raw, {
         USE_PROFILES: { html: true },
-        ADD_ATTR: ['target', 'align'],
+        ADD_ATTR: ['target', 'align', 'loading', 'decoding', 'referrerpolicy'],
+      });
+    }
+
+    /** Hide broken citation favicons so the claim link still reads cleanly. */
+    function enhanceCiteFavicons(root) {
+      if (!root) return;
+      root.querySelectorAll('a.md-cite img.md-cite-favicon').forEach((img) => {
+        if (img.dataset.citeBound) return;
+        img.dataset.citeBound = '1';
+        if (img.complete && img.naturalWidth === 0) {
+          img.classList.add('is-missing');
+          return;
+        }
+        img.addEventListener('error', () => {
+          img.classList.add('is-missing');
+        }, { once: true });
       });
     }
 
     /** Wrap fenced blocks with copy UI and syntax-highlight (skip mid-stream flicker). */
     function enhanceCodeBlocks(root) {
       if (!root) return;
+      enhanceCiteFavicons(root);
       root.querySelectorAll('pre > code').forEach((codeEl) => {
         let block = codeEl.closest('.md-code-block');
         if (!block) {
@@ -9598,18 +9739,54 @@
       return modelMenuFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
     }
 
+    function modelMenuSourceOptions() {
+      if (modelMenuTab !== 'recents') return modelMenuOptions.slice();
+      const byValue = new Map(modelMenuOptions.map((option) => [option.value, option]));
+      return recentModelIds
+        .map((id) => byValue.get(id))
+        .filter(Boolean);
+    }
+
+    function syncModelMenuTabs() {
+      const tabs = chatModelMenu?.querySelectorAll('[data-model-tab]');
+      if (!tabs) return;
+      tabs.forEach((tab) => {
+        const active = tab.getAttribute('data-model-tab') === modelMenuTab;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      if (chatModelList) {
+        chatModelList.setAttribute(
+          'aria-label',
+          modelMenuTab === 'recents' ? 'Recent models' : 'All models'
+        );
+      }
+    }
+
+    function setModelMenuTab(tab, { keepActive = false } = {}) {
+      const next = tab === 'recents' ? 'recents' : 'all';
+      if (modelMenuTab === next && modelMenuIsOpen()) {
+        applyModelFilter({ keepActive });
+        return;
+      }
+      modelMenuTab = next;
+      syncModelMenuTabs();
+      if (modelMenuIsOpen()) applyModelFilter({ keepActive });
+    }
+
     /**
      * Every term must appear somewhere in "<label> <provider>". Ranked so
-     * label-prefix hits float above mid-string ones; ties keep provider order.
+     * label-prefix hits float above mid-string ones; ties keep source order.
      */
     function computeModelMatches() {
+      const source = modelMenuSourceOptions();
       const terms = modelFilterTerms();
       if (!terms.length) {
-        modelMenuMatches = modelMenuOptions.slice();
+        modelMenuMatches = source;
         return;
       }
       const scored = [];
-      modelMenuOptions.forEach((option, index) => {
+      source.forEach((option, index) => {
         const label = String(option.label || '').toLowerCase();
         const haystack = (label + ' ' + String(option.provider || '')).toLowerCase();
         if (!terms.every((term) => haystack.includes(term))) return;
@@ -9653,6 +9830,7 @@
 
     function renderModelMenuList() {
       const terms = modelFilterTerms();
+      const sourceCount = modelMenuSourceOptions().length;
       chatModelList.innerHTML = modelMenuMatches.map((option, index) => {
         const isSelected = option.value === selectedChatModel;
         const badge = option.provider
@@ -9673,12 +9851,18 @@
       chatModelEmpty.classList.toggle('is-hidden', !empty);
       chatModelList.classList.toggle('is-hidden', empty);
       if (empty) {
-        chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
+        if (modelMenuTab === 'recents' && !terms.length) {
+          chatModelEmpty.textContent = 'Models you pick will show up here.';
+        } else if (terms.length) {
+          chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
+        } else {
+          chatModelEmpty.textContent = 'No models available.';
+        }
       }
       if (chatModelSearchCount) {
         chatModelSearchCount.textContent = terms.length
-          ? modelMenuMatches.length + '/' + modelMenuOptions.length
-          : String(modelMenuOptions.length);
+          ? modelMenuMatches.length + '/' + sourceCount
+          : String(sourceCount);
       }
     }
 
@@ -9767,6 +9951,8 @@
       chatModelSearchWrap.classList.toggle('is-hidden', !searchable);
       modelMenuFilter = '';
       if (chatModelSearch) chatModelSearch.value = '';
+      if (modelMenuTab === 'recents' && !recentModelIds.length) modelMenuTab = 'all';
+      syncModelMenuTabs();
       chatModelMenu.classList.remove('is-hidden');
       syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
       chatModelSelectWrap.classList.add('is-open');
@@ -9798,6 +9984,7 @@
         closeModelMenu({ restoreFocus: true });
         return;
       }
+      rememberRecentModel(value);
       if (value !== selectedChatModel) {
         selectedChatModel = value;
         selectedRemoteModelId = selectedChatModel;
@@ -9920,6 +10107,10 @@
         thinking: !!m.thinking_supported,
       }));
       modelMenuOptions = remoteOptions;
+      pruneRecentModels(remoteOptions.map((o) => o.value));
+      if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
+        rememberRecentModel(selectedChatModel);
+      }
       syncModelSelectorWidth(remoteOptions);
 
       const allValues = remoteOptions.map((o) => o.value);
@@ -11470,21 +11661,29 @@
       event.stopPropagation();
       chatModelSearch.focus();
     });
+    chatModelMenu.addEventListener('click', (event) => {
+      const tab = event.target.closest('[data-model-tab]');
+      if (tab) {
+        event.preventDefault();
+        event.stopPropagation();
+        setModelMenuTab(tab.getAttribute('data-model-tab'));
+        return;
+      }
+      if (event.target.closest('.chat-model-option')) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
     // pointerdown so selection wins before the document "outside click" closer.
     chatModelMenu.addEventListener('pointerdown', (event) => {
       // Let the filter field take the caret normally.
       if (event.target.closest('.chat-model-search')) return;
+      if (event.target.closest('[data-model-tab]')) return;
       const btn = event.target.closest('.chat-model-option');
       if (!btn) return;
       event.preventDefault();
       event.stopPropagation();
       chooseModelOption(btn.getAttribute('data-value') || '');
-    });
-    chatModelMenu.addEventListener('click', (event) => {
-      if (event.target.closest('.chat-model-option')) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
     });
     document.addEventListener('click', (event) => {
       if (!modelMenuIsOpen()) return;
