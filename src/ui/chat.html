@@ -375,8 +375,7 @@
       font-size: 0.66rem;
       font-weight: 500;
       letter-spacing: 0.045em;
-      text-transform: uppercase;
-      padding: 0.24rem 0.6rem;
+            padding: 0.24rem 0.6rem;
       border: 1px solid var(--color-rule);
       border-radius: var(--radius-pill);
       background: color-mix(in oklch, var(--color-graphite) 55%, transparent);
@@ -632,8 +631,7 @@
       font-size: 0.68rem;
       font-weight: 600;
       letter-spacing: 0.02em;
-      text-transform: uppercase;
-      color: var(--color-ink-2);
+            color: var(--color-ink-2);
       background: color-mix(in oklch, var(--color-ink) 8%, transparent);
       border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
     }
@@ -665,8 +663,7 @@
       font-size: 0.66rem;
       font-weight: 600;
       letter-spacing: 0.09em;
-      text-transform: uppercase;
-      color: color-mix(in oklch, var(--color-muted) 82%, transparent);
+            color: color-mix(in oklch, var(--color-muted) 82%, transparent);
       padding: 0 0.7rem;
       margin: var(--space-sm) 0 0.3rem;
     }
@@ -724,8 +721,7 @@
       padding: 0 0.15rem;
       font-size: 0.65rem;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-family: var(--font-mono);
+            font-family: var(--font-mono);
       color: var(--color-accent);
     }
     .sidebar-project-chip {
@@ -929,8 +925,7 @@
       padding: 0.3rem 0.7rem 0.25rem;
       font-size: 0.66rem;
       letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
       font-family: var(--font-mono);
     }
 
@@ -989,8 +984,7 @@
       font-size: 0.66rem;
       font-weight: 650;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--color-accent);
+            color: var(--color-accent);
     }
     .update-toast-title {
       margin: 0;
@@ -1104,8 +1098,7 @@
       font-size: var(--text-xs);
       font-weight: 650;
       letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
     }
     .trace-sidebar-head .btn-toggle-trace {
       width: 1.85rem;
@@ -1721,8 +1714,7 @@
       font-size: 0.66rem;
       font-weight: 600;
       letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--color-accent);
+            color: var(--color-accent);
       text-align: center;
       padding: 0.26rem 0.75rem;
       border-radius: var(--radius-pill);
@@ -2494,8 +2486,7 @@
       margin: 0.35rem 0.35rem 0.15rem;
       font-size: var(--text-xs);
       letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
       font-family: var(--font-mono);
     }
     .search-dialog-item {
@@ -2547,8 +2538,7 @@
       font-size: 0.66rem;
       font-weight: 600;
       letter-spacing: 0.09em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
       font-family: var(--font-mono);
     }
     .settings-nav-group:first-child { margin-top: 0.15rem; }
@@ -3222,8 +3212,7 @@
       font-size: var(--text-xs);
       font-family: var(--font-mono);
       font-weight: 500;
-      letter-spacing: 0.045em;
-      text-transform: uppercase;
+      letter-spacing: 0.01em;
       color: var(--color-muted);
       padding: 0 0.75rem;
       border-radius: var(--radius-pill);
@@ -3245,11 +3234,34 @@
       border-color: var(--accent-edge);
       background: var(--accent-wash);
     }
+    .btn-think-label {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.32rem;
+      min-width: 0;
+    }
+    .btn-think-verb {
+      color: inherit;
+      font-weight: 500;
+    }
+    .btn-think-effort {
+      color: var(--color-accent);
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+    .btn-think-effort.is-off {
+      color: var(--color-muted);
+      font-weight: 550;
+    }
     .btn-think-caret {
       font-size: 1.15rem;
       line-height: 1;
       opacity: 0.9;
       transform: translateY(-0.04em);
+      transition: transform var(--dur-short) var(--ease-settle);
+    }
+    .btn-think[aria-expanded="true"] .btn-think-caret {
+      transform: translateY(-0.04em) rotate(180deg);
     }
     .think-menu {
       position: absolute;
@@ -3262,6 +3274,18 @@
       background: var(--color-paper-3);
       box-shadow: var(--shadow-3);
       z-index: 40;
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+      transform-origin: bottom left;
+      pointer-events: none;
+      transition:
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-short) var(--ease-settle);
+    }
+    .think-menu.is-open {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
     }
     .think-menu.is-hidden { display: none !important; }
     .think-menu-label {
@@ -3270,8 +3294,7 @@
       font-size: 0.66rem;
       font-weight: 600;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
     }
     .think-menu button {
       display: flex;
@@ -3307,8 +3330,7 @@
       font-size: var(--text-xs);
       font-family: var(--font-mono);
       font-weight: 500;
-      letter-spacing: 0.055em;
-      text-transform: uppercase;
+      letter-spacing: 0.01em;
       color: var(--color-muted);
       padding: 0 0.75rem 0 0.5rem;
       border-radius: var(--radius-pill);
@@ -3613,8 +3635,7 @@
       font-size: 0.66rem;
       font-weight: 600;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--color-muted);
+            color: var(--color-muted);
     }
     .mention-option {
       width: 100%;
@@ -4152,7 +4173,10 @@
           <input type="file" id="attachFileInput" multiple accept="image/*,.pdf,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.yml,.yaml,.toml,.ini,.log,.sql,.sh,.bat,.ps1,text/*" hidden>
           <div class="composer-think-wrap" id="composerThinkWrap">
             <button type="button" class="btn-think" id="btnThink" aria-haspopup="menu" aria-expanded="false" title="Thinking intensity — how hard reasoning models should think">
-              <span id="btnThinkLabel">Think</span>
+              <span class="btn-think-label" id="btnThinkLabel">
+                <span class="btn-think-verb">Think</span>
+                <span class="btn-think-effort is-hidden" id="btnThinkEffort"></span>
+              </span>
               <span class="btn-think-caret" aria-hidden="true">▾</span>
             </button>
             <div class="think-menu is-hidden" id="thinkMenu" role="menu" aria-label="Thinking intensity">
@@ -7264,14 +7288,15 @@
       openSkillEditor(body);
     }
 
-    const THINKING_EFFORT_LABELS = {
-      auto: 'Think',
-      off: 'Think off',
-      low: 'Think low',
-      medium: 'Think med',
-      high: 'Think high',
-      max: 'Think max',
+    const THINKING_EFFORT_SUFFIX = {
+      auto: '',
+      off: 'off',
+      low: 'low',
+      medium: 'med',
+      high: 'high',
+      max: 'max',
     };
+    let thinkMenuCloseTimer = 0;
 
     function syncThinkingEffortControls(effort) {
       const value = THINKING_EFFORTS.includes(effort) ? effort : 'auto';
@@ -7279,9 +7304,20 @@
       if (setting && setting.value !== value) setting.value = value;
 
       const btn = document.getElementById('btnThink');
-      const label = document.getElementById('btnThinkLabel');
+      const effortEl = document.getElementById('btnThinkEffort');
       const menu = document.getElementById('thinkMenu');
-      if (label) label.textContent = THINKING_EFFORT_LABELS[value] || 'Think';
+      const suffix = THINKING_EFFORT_SUFFIX[value] || '';
+      if (effortEl) {
+        if (suffix) {
+          effortEl.textContent = suffix;
+          effortEl.classList.remove('is-hidden');
+          effortEl.classList.toggle('is-off', value === 'off');
+        } else {
+          effortEl.textContent = '';
+          effortEl.classList.add('is-hidden');
+          effortEl.classList.remove('is-off');
+        }
+      }
       if (btn) {
         btn.classList.toggle('is-active', value !== 'auto' && value !== 'off');
         btn.title = 'Thinking intensity: ' + value + ' — how hard reasoning models should think';
@@ -7294,12 +7330,37 @@
       }
     }
 
+    function thinkMenuIsOpen() {
+      const menu = document.getElementById('thinkMenu');
+      return !!(menu && !menu.classList.contains('is-hidden') && menu.classList.contains('is-open'));
+    }
+
     function setThinkMenuOpen(open) {
       const menu = document.getElementById('thinkMenu');
       const btn = document.getElementById('btnThink');
       if (!menu || !btn) return;
-      menu.classList.toggle('is-hidden', !open);
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (thinkMenuCloseTimer) {
+        window.clearTimeout(thinkMenuCloseTimer);
+        thinkMenuCloseTimer = 0;
+      }
+      if (open) {
+        menu.classList.remove('is-hidden');
+        btn.setAttribute('aria-expanded', 'true');
+        void menu.offsetWidth;
+        requestAnimationFrame(() => menu.classList.add('is-open'));
+        return;
+      }
+      menu.classList.remove('is-open');
+      btn.setAttribute('aria-expanded', 'false');
+      const finish = () => {
+        menu.classList.add('is-hidden');
+        thinkMenuCloseTimer = 0;
+      };
+      if (prefersReducedMotion()) {
+        finish();
+        return;
+      }
+      thinkMenuCloseTimer = window.setTimeout(finish, 180);
     }
 
     let thinkingSupported = false;
@@ -10760,8 +10821,7 @@
     });
     document.getElementById('btnThink').addEventListener('click', (event) => {
       event.stopPropagation();
-      const menu = document.getElementById('thinkMenu');
-      setThinkMenuOpen(menu.classList.contains('is-hidden'));
+      setThinkMenuOpen(!thinkMenuIsOpen());
     });
     document.getElementById('thinkMenu').addEventListener('click', (event) => {
       const item = event.target.closest('[data-effort]');
@@ -10772,7 +10832,7 @@
     document.addEventListener('click', (event) => {
       const wrap = document.getElementById('composerThinkWrap');
       if (!wrap || wrap.contains(event.target)) return;
-      setThinkMenuOpen(false);
+      if (thinkMenuIsOpen()) setThinkMenuOpen(false);
     });
     document.getElementById('settingThinkingEffort').addEventListener('change', (event) => {
       setThinkingEffort(event.target.value, true);
