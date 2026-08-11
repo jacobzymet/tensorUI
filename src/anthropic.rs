@@ -521,6 +521,16 @@ impl AnthropicSseTranslator {
                 }
                 Ok(Vec::new())
             }
+            "message_delta" => {
+                let mut frames = Vec::new();
+                if let Some(usage) = payload.get("usage") {
+                    frames.push(openai_usage_frame(
+                        usage.get("input_tokens").and_then(|v| v.as_u64()),
+                        usage.get("output_tokens").and_then(|v| v.as_u64()),
+                    ));
+                }
+                Ok(frames)
+            }
             "error" => {
                 let message = payload
                     .pointer("/error/message")
@@ -588,6 +598,24 @@ pub fn relay_anthropic_sse_as_openai<R: Read>(
 fn openai_content_delta(text: &str) -> Vec<u8> {
     let payload = json!({
         "choices": [{ "delta": { "content": text } }]
+    });
+    format!("data: {payload}\n\n").into_bytes()
+}
+
+fn openai_usage_frame(prompt_tokens: Option<u64>, completion_tokens: Option<u64>) -> Vec<u8> {
+    let mut usage = serde_json::Map::new();
+    if let Some(n) = prompt_tokens {
+        usage.insert("prompt_tokens".into(), json!(n));
+    }
+    if let Some(n) = completion_tokens {
+        usage.insert("completion_tokens".into(), json!(n));
+    }
+    if let (Some(p), Some(c)) = (prompt_tokens, completion_tokens) {
+        usage.insert("total_tokens".into(), json!(p + c));
+    }
+    let payload = json!({
+        "choices": [],
+        "usage": Value::Object(usage),
     });
     format!("data: {payload}\n\n").into_bytes()
 }

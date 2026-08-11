@@ -492,6 +492,117 @@
       width: 1.02rem;
       height: 1.02rem;
     }
+    .btn-new-chat-split {
+      display: grid;
+      grid-template-columns: 4fr 1fr;
+      align-items: stretch;
+      min-height: var(--control-h);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+      background: var(--color-accent);
+      box-shadow:
+        0 1px 0 color-mix(in oklch, white 22%, transparent) inset,
+        var(--shadow-1);
+      transition:
+        box-shadow var(--dur-short) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-release);
+    }
+    .btn-new-chat-split:hover {
+      box-shadow:
+        0 1px 0 color-mix(in oklch, white 22%, transparent) inset,
+        0 6px 18px color-mix(in oklch, var(--color-accent) 32%, transparent);
+    }
+    .btn-new-chat-split:active {
+      transform: scale(0.985);
+      transition-duration: var(--dur-press);
+      transition-timing-function: var(--ease-press);
+    }
+    .btn-new-chat-split > .btn {
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      min-height: 100%;
+      color: var(--color-accent-ink);
+      font-weight: 600;
+    }
+    .btn-new-chat-split > .btn:hover:not(:disabled),
+    .btn-new-chat-split > .btn:active:not(:disabled) {
+      transform: none;
+      box-shadow: none;
+    }
+    .btn-new-chat-main {
+      width: 100%;
+      justify-content: flex-start;
+      padding-left: 0.95rem;
+      padding-right: 0.55rem;
+      background: transparent;
+      gap: 0.4rem;
+    }
+    .btn-new-chat-main:hover:not(:disabled) {
+      background: color-mix(in oklab, var(--color-accent) 88%, white);
+    }
+    .btn-new-chat-split > .btn-new-chat-incognito {
+      width: 100%;
+      padding: 0 2px 0 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      color: #0a0a0a;
+      border-left: 1px solid color-mix(in oklch, var(--color-accent-ink) 12%, transparent);
+    }
+    .btn-new-chat-split > .btn-new-chat-incognito:hover:not(:disabled) {
+      background: color-mix(in oklab, #fff 88%, var(--color-accent));
+      color: #0a0a0a;
+    }
+    .btn-new-chat-split > .btn-new-chat-incognito svg {
+      width: 1.05rem;
+      height: 1.05rem;
+      transform: translateX(-1.5px);
+    }
+    html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito {
+      background: #0a0a0a;
+      color: #fff;
+      border-left-color: color-mix(in oklch, #fff 14%, transparent);
+    }
+    html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not(:disabled) {
+      background: color-mix(in oklab, #0a0a0a 82%, var(--color-accent));
+      color: #fff;
+    }
+    .convo-item.is-incognito .convo-incognito-mark {
+      flex: 0 0 auto;
+      display: inline-flex;
+      width: 0.95rem;
+      height: 0.95rem;
+      margin-right: 0.15rem;
+      color: var(--color-muted);
+      opacity: 0.9;
+    }
+    .convo-item.is-incognito .convo-incognito-mark svg {
+      width: 100%;
+      height: 100%;
+    }
+    .topbar-incognito-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      flex: 0 0 auto;
+      margin-left: 0.15rem;
+      padding: 0.15rem 0.55rem;
+      border-radius: var(--radius-pill);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--color-ink-2);
+      background: color-mix(in oklch, var(--color-ink) 8%, transparent);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+    }
+    .topbar-incognito-pill svg {
+      width: 0.85rem;
+      height: 0.85rem;
+    }
+    .topbar-incognito-pill.is-hidden { display: none; }
     .sidebar-nav {
       flex: 1 1 auto;
       min-height: 0;
@@ -1009,6 +1120,7 @@
     }
     .msg-role-assistant .msg-actions,
     .msg-role-assistant .msg-action,
+    .msg-role-assistant .msg-meta,
     .msg-role-assistant details,
     .msg-role-assistant summary,
     .msg-role-assistant a,
@@ -1816,11 +1928,57 @@
     html[data-theme="light"] .msg-bubble .hljs-type,
     html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
     .msg-error { display: block; margin-top: 0.4rem; color: var(--color-danger); font-size: var(--text-sm); }
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      min-width: 0;
+      flex: 1 1 auto;
+      padding: 0;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--color-muted);
+      letter-spacing: 0.01em;
+      line-height: 1.3;
+    }
+    .msg-role-user .msg-meta { display: none; }
+    .msg-meta-model {
+      color: var(--color-ink-2);
+      opacity: 0.9;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 16rem;
+    }
+    .msg-meta-sep {
+      opacity: 0.45;
+      user-select: none;
+    }
+    .msg-meta-speed {
+      font-variant-numeric: tabular-nums;
+      opacity: 0.92;
+    }
+    .msg-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.55rem;
+      width: 100%;
+      min-height: 1.35rem;
+      padding: 0.05rem 0.15rem 0;
+    }
+    .msg-role-user .msg-footer {
+      width: auto;
+      max-width: 85%;
+      align-self: flex-end;
+      justify-content: flex-end;
+    }
     .msg-actions {
       display: flex;
       align-items: center;
       gap: 0.1rem;
-      align-self: flex-end;
+      flex: 0 0 auto;
       min-height: 1.35rem;
     }
     .msg-action {
@@ -1845,6 +2003,7 @@
     .msg-action:hover { color: var(--color-accent); background: var(--accent-wash); }
     .msg-action.is-copied { color: var(--color-ok); }
     .msg.is-editing .msg-actions { display: none; }
+    .msg.is-editing .msg-meta { display: none; }
     .msg-edit {
       width: min(100%, 36rem);
       display: flex;
@@ -3647,10 +3806,15 @@
       </div>
       <div class="sidebar-actions">
         <div class="sidebar-actions-row">
-          <button type="button" class="btn btn-primary" id="btnNewChat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            <span id="btnNewChatLabel">New chat</span>
-          </button>
+          <div class="btn-new-chat-split" role="group" aria-label="New chat">
+            <button type="button" class="btn btn-primary btn-new-chat-main" id="btnNewChat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              <span id="btnNewChatLabel">New chat</span>
+            </button>
+            <button type="button" class="btn btn-primary btn-new-chat-incognito" id="btnNewIncognitoChat" aria-label="New ghost chat" title="New ghost chat — temporary session, not saved">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
+            </button>
+          </div>
           <button type="button" class="btn btn-outline btn-search-chats" id="btnSearchChats" aria-label="Search chats and projects" title="Search (Ctrl+K)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
@@ -3723,6 +3887,10 @@
             <div class="chat-topbar-leading">
               <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
               <div class="chat-topbar-title" id="convoTitle"></div>
+              <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk or browser storage">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
+                Temporary Session
+              </span>
             </div>
             <div class="chat-model-select-wrap" id="chatModelSelectWrap">
               <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
@@ -4438,6 +4606,8 @@
     const emptyEyebrow = document.getElementById('emptyEyebrow');
     const btnNewChat = document.getElementById('btnNewChat');
     const btnNewChatLabel = document.getElementById('btnNewChatLabel');
+    const btnNewIncognitoChat = document.getElementById('btnNewIncognitoChat');
+    const topbarIncognito = document.getElementById('topbarIncognito');
     const btnSend = document.getElementById('btnSend');
     const btnStop = document.getElementById('btnStop');
     const btnAgent = document.getElementById('btnAgent');
@@ -4726,6 +4896,7 @@
         sortOrder: typeof convo.sortOrder === 'number' && Number.isFinite(convo.sortOrder)
           ? convo.sortOrder
           : null,
+        incognito: !!convo.incognito,
       };
     }
 
@@ -4801,11 +4972,7 @@
 
     function saveStoreToLocal() {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          version: 2,
-          projects,
-          conversations,
-        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(storePayload()));
       } catch {
         // private browsing / quota
       }
@@ -4820,7 +4987,11 @@
     let saveSettingsTimer = null;
 
     function storePayload() {
-      return { version: 2, projects, conversations };
+      return {
+        version: 2,
+        projects,
+        conversations: conversations.filter((convo) => !convo.incognito),
+      };
     }
 
     function diskEncryptionLocked() {
@@ -4893,7 +5064,7 @@
     }
 
     function needsGeneratedTitle(convo) {
-      if (!convo) return false;
+      if (!convo || convo.incognito) return false;
       const userText = firstUserText(convo);
       if (!userText) return false;
       const current = String(convo.title || '').trim();
@@ -4965,10 +5136,13 @@
         if (row) row.title = title;
         typeTitleInto(sidebarEl, sidebarLabel);
       } else renderSidebar();
-      if (activeId === convo.id && convoTitleEl) typeTitleInto(convoTitleEl, title);
+      if (activeId === convo.id && convoTitleEl && !convo.incognito) {
+        typeTitleInto(convoTitleEl, title);
+      }
     }
 
     function generateConversationTitle(convo, userText) {
+      if (convo?.incognito) return;
       const text = String(userText || firstUserText(convo) || '').trim();
       if (!convo || !text) return;
       if (convo._titleBusy) return;
@@ -4995,6 +5169,7 @@
     // null = draft: nothing is written to storage until the first message is sent,
     // so opening the page does not litter the sidebar with empty conversations.
     let activeId = null;
+    let draftIncognito = false;
     /** Project context for drafts / New chat. null = general Recents. */
     let activeProjectId = null;
     /** 'chat' | 'projects' */
@@ -5662,7 +5837,7 @@
     }
 
     function applyExtractedMemories(convo, extracted) {
-      if (!extracted) return;
+      if (!extracted || convo?.incognito) return;
       if (extracted.memory != null && convo.projectId) {
         persistProjectMemory(convo.projectId, extracted.memory);
       }
@@ -6795,16 +6970,10 @@
               '</div></div>' +
             '</div>';
         }
-        // Mid-turn narration (`type: 'text'`) is rendered in the answer area,
-        // not as an activity-rail step.
       }
       return html;
     }
 
-    /**
-     * Mid-turn `text` sealed before a later tool is process narration; text after
-     * the last tool (or any text when there were no tools) is answer body.
-     */
     function splitSealedTextParts(parts) {
       const list = Array.isArray(parts) ? parts : [];
       let lastToolIndex = -1;
@@ -6849,7 +7018,6 @@
       );
     }
 
-    /** Sealed mid-turn answer text (+ process-note fold when tool prefaces exist). */
     function renderSealedAnswerHtml(parts, { notesCollapsed = false } = {}) {
       const { processNotes, answerChunks } = splitSealedTextParts(parts);
       const notesHtml = renderProcessNotesFold(processNotes, { collapsed: notesCollapsed });
@@ -6928,10 +7096,6 @@
       }, 0);
     }
 
-    /**
-     * Split an assistant turn into activity (reasoning / tools / notices),
-     * process notes (mid-turn narration before tools), and the final answer.
-     */
     function collectTimelineAndAnswer(message) {
       const timelineParts = [];
       let answerText = '';
@@ -7057,6 +7221,7 @@
           });
         }
       }
+      attachMessageMeta(row, message);
     }
 
     function syncTraceSelectionClasses() {
@@ -7331,15 +7496,29 @@
     /** Keep chrome (shell class, topbar, empty state, composer) in sync with project context. */
     function syncProjectChrome() {
       const project = inProjectChat() ? getProject(activeProjectId) : null;
+      const incognito = isIncognitoContext();
       chatShell.classList.toggle('is-in-project', !!project);
+      chatShell.classList.toggle('is-incognito', incognito);
+      if (topbarIncognito) {
+        topbarIncognito.classList.toggle('is-hidden', !incognito);
+      }
 
       // Label only — the leading plus icon is a sibling span and must survive.
       btnNewChatLabel.textContent = project ? 'New chat in project' : 'New chat';
       btnNewChat.title = project
         ? 'Start a new chat inside ' + project.name
         : 'Start a new chat';
+      if (btnNewIncognitoChat) {
+        btnNewIncognitoChat.title = project
+          ? 'Ghost chat in ' + project.name + ' — temporary, not saved'
+          : 'New ghost chat — temporary session, not saved';
+      }
 
-      if (project && !activeId) {
+      if (incognito && !activeId) {
+        emptyEyebrow.textContent = 'Temporary Session';
+        emptyEyebrow.classList.remove('is-hidden');
+        greetingEl.textContent = project ? project.name : 'Ghost Chat';
+      } else if (project && !activeId) {
         emptyEyebrow.textContent = 'Project';
         emptyEyebrow.classList.remove('is-hidden');
         greetingEl.textContent = project.name;
@@ -7363,23 +7542,33 @@
         pill.addEventListener('click', () => openProjectSettings(project.id));
         topbarProject.appendChild(pill);
         if (!activeId) {
-          convoTitleEl.textContent = 'New chat';
+          convoTitleEl.textContent = incognito ? '' : 'New chat';
         }
       } else {
         topbarProject.classList.add('is-hidden');
         if (!activeId) convoTitleEl.textContent = '';
       }
+      if (incognito && activeId) convoTitleEl.textContent = '';
 
-      composerInput.placeholder = project
-        ? 'Message in ' + project.name + '… Type @ to mention'
-        : 'How can I help you today? Type @ to mention';
+      if (incognito) {
+        composerInput.placeholder = project
+          ? 'Ghost chat in ' + project.name + ' — not saved. Type @ to mention'
+          : 'Ghost chat — not saved. Type @ to mention';
+      } else {
+        composerInput.placeholder = project
+          ? 'Message in ' + project.name + '… Type @ to mention'
+          : 'How can I help you today? Type @ to mention';
+      }
 
       updateComposerHint();
       // Refresh model line without waiting for the next poll.
       if (serverReady) {
         const suffix = project ? ' · Project: ' + project.name : '';
         const current = modelHintEl.textContent || '';
-        if (current.startsWith('Chatting with ')) {
+        if (incognito && !activeId) {
+          modelHintEl.textContent = 'Temporary session — stays in memory only until you close the tab.'
+            + (project ? ' · Project: ' + project.name : '');
+        } else if (current.startsWith('Chatting with ')) {
           const model = current.replace(/^Chatting with /, '').split(' · ')[0];
           modelHintEl.textContent = project && !activeId
             ? 'Shared instructions & memory apply · ' + model
@@ -7387,9 +7576,19 @@
         } else if (project && !activeId) {
           modelHintEl.textContent = 'Shared instructions and memory apply to chats in this project.';
         }
+      } else if (incognito && !activeId) {
+        modelHintEl.textContent = 'Temporary session — nothing saved · start the model to chat.';
       } else if (project && !activeId) {
         modelHintEl.textContent = 'Shared instructions and memory apply · start the model to chat.';
       }
+    }
+
+    function isIncognitoContext() {
+      if (activeId) {
+        const convo = conversations.find((item) => item.id === activeId);
+        return !!(convo && convo.incognito);
+      }
+      return draftIncognito;
     }
 
     function updateGreeting() {
@@ -7539,15 +7738,28 @@
     function createConvoItem(convo, { nested = false } = {}) {
       const item = document.createElement('div');
       item.className = 'convo-item' + (convo.id === activeId ? ' is-active' : '');
+      if (convo.incognito) item.classList.add('is-incognito');
       item.dataset.convoId = convo.id;
       if (nested) item.classList.add('is-nested');
       if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
-      const fullTitle = convo.title || 'New chat';
+      const fullTitle = convo.title || (convo.incognito ? 'Ghost Chat' : 'New chat');
+      if (convo.incognito) {
+        const mark = document.createElement('span');
+        mark.className = 'convo-incognito-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        mark.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M9 10h.01"/><path d="M15 10h.01"/>' +
+            '<path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>' +
+          '</svg>';
+        item.appendChild(mark);
+      }
       const title = document.createElement('span');
       title.className = 'convo-title';
       title.textContent = (isConvoBusy(convo.id) ? '◉ ' : '') + fullTitle;
-      title.title = fullTitle;
-      item.title = fullTitle;      const move = document.createElement('button');
+      title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
+      item.title = title.title;
+      const move = document.createElement('button');
       move.type = 'button';
       move.className = 'convo-move';
       move.setAttribute('aria-label', 'Move conversation');
@@ -8093,7 +8305,7 @@
       emptyState.classList.add('is-hidden');
       threadWrap.classList.remove('is-hidden');
       chatTopbar.classList.add('has-thread');
-      convoTitleEl.textContent = convo.title || 'New chat';
+      convoTitleEl.textContent = convo?.incognito ? '' : (convo.title || 'New chat');
       composerDock.appendChild(composerShell);
       syncProjectChrome();
     }
@@ -8241,8 +8453,114 @@
       await runAssistantTurn(convo, { useAgent: turn.useAgent, text: apiText, skills: turn.skills });
     }
 
+    function formatTokPerSec(n) {
+      const v = Number(n);
+      if (!Number.isFinite(v) || v <= 0) return '';
+      if (v >= 100) return Math.round(v) + ' tok/s';
+      if (v >= 10) return v.toFixed(1) + ' tok/s';
+      return v.toFixed(2) + ' tok/s';
+    }
+
+    function ingestStreamUsage(stats, json) {
+      if (!stats || !json || typeof json !== 'object') return;
+      const usage = json.usage;
+      if (usage && typeof usage === 'object') {
+        const completion = Number(usage.completion_tokens);
+        if (Number.isFinite(completion) && completion >= 0) {
+          stats.completionTokens = (stats.completionTokens || 0) + completion;
+        }
+        const prompt = Number(usage.prompt_tokens);
+        if (Number.isFinite(prompt) && prompt >= 0) {
+          stats.promptTokens = (stats.promptTokens || 0) + prompt;
+        }
+      }
+      const timings = json.timings;
+      if (timings && typeof timings === 'object') {
+        const predicted = Number(timings.predicted_per_second);
+        if (Number.isFinite(predicted) && predicted > 0) {
+          stats.providerTokPerSec = predicted;
+        } else {
+          const n = Number(timings.predicted_n);
+          const ms = Number(timings.predicted_ms);
+          if (Number.isFinite(n) && n > 0 && Number.isFinite(ms) && ms > 0) {
+            stats.providerTokPerSec = n / (ms / 1000);
+          }
+        }
+      }
+      if (typeof json.model === 'string' && json.model.trim() && !stats.upstreamModel) {
+        stats.upstreamModel = json.model.trim();
+      }
+    }
+
+    function finalizeTurnStats(stats, firstTokenAt, endedAt) {
+      if (!stats) return null;
+      let tokensPerSec = null;
+      if (Number.isFinite(stats.providerTokPerSec) && stats.providerTokPerSec > 0) {
+        tokensPerSec = stats.providerTokPerSec;
+      } else if (
+        Number.isFinite(stats.completionTokens)
+        && stats.completionTokens > 0
+        && firstTokenAt
+      ) {
+        const sec = (endedAt - firstTokenAt) / 1000;
+        if (sec > 0.05) tokensPerSec = stats.completionTokens / sec;
+      }
+      return {
+        completionTokens: Number.isFinite(stats.completionTokens) ? stats.completionTokens : null,
+        promptTokens: Number.isFinite(stats.promptTokens) ? stats.promptTokens : null,
+        tokensPerSec: tokensPerSec != null && Number.isFinite(tokensPerSec) ? tokensPerSec : null,
+        upstreamModel: stats.upstreamModel || null,
+      };
+    }
+
+    function ensureMsgFooter(row) {
+      let footer = row.querySelector(':scope > .msg-footer');
+      if (!footer) {
+        footer = document.createElement('div');
+        footer.className = 'msg-footer';
+        row.appendChild(footer);
+      }
+      return footer;
+    }
+
+    function attachMessageMeta(row, message) {
+      if (!row) return;
+      const footer = ensureMsgFooter(row);
+      let meta = footer.querySelector(':scope > .msg-meta');
+      if (!message || message.role !== 'assistant') {
+        meta?.remove();
+        return;
+      }
+      const model = String(message.model || '').trim();
+      const speed = formatTokPerSec(message.tokensPerSec);
+      if (!model && !speed) {
+        meta?.remove();
+        return;
+      }
+      if (!meta) {
+        meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        const actions = footer.querySelector(':scope > .msg-actions');
+        if (actions) footer.insertBefore(meta, actions);
+        else footer.appendChild(meta);
+      }
+      const bits = [];
+      if (model) {
+        bits.push('<span class="msg-meta-model" title="' + escapeHtml(model) + '">' + escapeHtml(model) + '</span>');
+      }
+      if (speed) {
+        if (bits.length) bits.push('<span class="msg-meta-sep" aria-hidden="true">·</span>');
+        const tip = Number.isFinite(message.completionTokens)
+          ? (message.completionTokens + ' completion tokens')
+          : 'Generation speed';
+        bits.push('<span class="msg-meta-speed" title="' + escapeHtml(tip) + '">' + escapeHtml(speed) + '</span>');
+      }
+      meta.innerHTML = bits.join('');
+    }
+
     function attachMessageActions(row) {
-      if (row.querySelector('.msg-actions')) return;
+      const footer = ensureMsgFooter(row);
+      if (footer.querySelector(':scope > .msg-actions')) return;
       const actions = document.createElement('div');
       actions.className = 'msg-actions';
 
@@ -8282,7 +8600,7 @@
         actions.appendChild(editBtn);
       }
 
-      row.appendChild(actions);
+      footer.appendChild(actions);
     }
 
     function buildBubble(role, content, index, message, { animate = false } = {}) {
@@ -8301,6 +8619,7 @@
         bubble.innerHTML = formatUserMessageHtml(message || { content });
       }
       attachMessageActions(row);
+      if (role === 'assistant') attachMessageMeta(row, message || { content });
       if (animate) queueMicrotask(() => motionEnter(row, { y: role === 'user' ? 10 : 14 }));
       return row;
     }
@@ -8401,6 +8720,7 @@
       if (!convo) return;
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = id;
+      draftIncognito = !!convo.incognito;
       activeProjectId = convo.projectId || null;
       stickToBottom = stickByConvo.has(id) ? stickByConvo.get(id) : true;
       userScrollOverride = !stickToBottom;
@@ -8427,10 +8747,11 @@
     }
 
     /** Return to the draft state — no conversation object until a message is sent. */
-    function startDraft() {
+    function startDraft({ incognito = false } = {}) {
       cancelMessageEdit();
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = null;
+      draftIncognito = !!incognito;
       stickToBottom = true;
       userScrollOverride = false;
       resumeBottomIntent = false;
@@ -9084,11 +9405,12 @@
         const id = newId('c');
         convo = {
           id,
-          title: 'New chat',
+          title: draftIncognito ? 'Ghost Chat' : 'New chat',
           messages: [],
           updatedAt: Date.now(),
           projectId: activeProjectId || null,
           sortOrder: nextTopSortOrder(activeProjectId || null),
+          incognito: !!draftIncognito,
         };
         conversations.push(convo);
         activeId = id;
@@ -9264,8 +9586,6 @@
         : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
 
       if (desktop) {
-        // Tools/reasoning stay in the sidebar; process notes (folded) + sealed
-        // post-tool text + live answer stay in the chat bubble.
         if (answerHtml) {
           answerEl.innerHTML = answerHtml;
           if (!streaming) enhanceCodeBlocks(answerEl);
@@ -9396,6 +9716,16 @@
         scrollToBottom({ force: true });
       }
 
+      const remote = selectedRemoteModel(latestState);
+      const turnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
+      const usageStats = {
+        completionTokens: 0,
+        promptTokens: 0,
+        providerTokPerSec: null,
+        upstreamModel: null,
+      };
+      let firstTokenAt = null;
+
       const typer = createStreamTyper((replyText, streaming) => {
         if (activeId === convo.id && stream.dom) {
           if (isThinkingOpen(replyText)) {
@@ -9410,6 +9740,9 @@
         }
         paintStreamIntoView(convo, stream, replyText, streaming);
       });
+      const markFirstToken = () => {
+        if (firstTokenAt == null) firstTokenAt = Date.now();
+      };
       const onAgentEvent = (payload) => {
         if (payload.phase === 'content_clear') {
           // Keep prior think/tool cards — seal the live buffer, then apply any
@@ -9512,7 +9845,6 @@
           ? { thinking_effort: activeThinkingEffort }
           : {}),
       };
-      const remote = selectedRemoteModel(latestState);
       if (remote) {
         requestBody.remote_base = remote.base;
         requestBody.model = remote.model;
@@ -9565,6 +9897,7 @@
             } catch {
               continue;
             }
+            ingestStreamUsage(usageStats, json);
             const choice = json.choices && json.choices[0];
             const deltaObj = (choice && choice.delta) || {};
             const reasoning =
@@ -9572,9 +9905,15 @@
               deltaObj.reasoning ||
               (choice && choice.message && (choice.message.reasoning_content || choice.message.reasoning)) ||
               '';
-            if (reasoning) typer.pushReasoning(String(reasoning));
+            if (reasoning) {
+              markFirstToken();
+              typer.pushReasoning(String(reasoning));
+            }
             const delta = deltaObj.content || '';
-            if (delta) typer.push(delta);
+            if (delta) {
+              markFirstToken();
+              typer.push(delta);
+            }
           }
         }
       } catch (error) {
@@ -9584,6 +9923,8 @@
       }
 
       typer.flush();
+      const endedAt = Date.now();
+      const finalStats = finalizeTurnStats(usageStats, firstTokenAt, endedAt);
       if (!conversations.some((item) => item.id === convo.id)) {
         if (stream.dom?.thinkingOrb) stream.dom.thinkingOrb.stop();
         activeStreams.delete(convo.id);
@@ -9661,8 +10002,12 @@
         const message = {
           role: 'assistant',
           content: assistantText || '',
+          model: turnModel || finalStats?.upstreamModel || '',
         };
         if (persistedParts) message.parts = persistedParts;
+        if (finalStats?.tokensPerSec != null) message.tokensPerSec = finalStats.tokensPerSec;
+        if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
+        if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
         convo.messages.push(message);
         const msgIndex = convo.messages.length - 1;
         if (dom && dom.row.isConnected) {
@@ -9820,7 +10165,10 @@
     syncAttachmentFallbackControls();
     document.getElementById('btnNewChat').addEventListener('click', () => {
       // New chat stays in the current project context when one is active.
-      startDraft();
+      startDraft({ incognito: false });
+    });
+    btnNewIncognitoChat?.addEventListener('click', () => {
+      startDraft({ incognito: true });
     });
     btnProjectsNav.addEventListener('click', showProjectsView);
     document.getElementById('btnNewProject').addEventListener('click', createProject);

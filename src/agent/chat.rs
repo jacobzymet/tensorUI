@@ -111,6 +111,12 @@ pub fn stream_remote_completion(
         }
         match style {
             ApiStyle::Openai => {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert(
+                        "stream_options".into(),
+                        serde_json::json!({ "include_usage": true }),
+                    );
+                }
                 let url = format!("{api_base}/chat/completions");
                 proxy_openai_sse(&api_base, &url, &token, &payload, &tx, "remote LLM").await
             }

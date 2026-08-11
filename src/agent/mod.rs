@@ -624,6 +624,12 @@ async fn stream_once(
         if let Some(reasoning) = &request.reasoning {
             object.insert("reasoning".into(), reasoning.clone());
         }
+        if style == ApiStyle::Openai {
+            object.insert(
+                "stream_options".into(),
+                json!({ "include_usage": true }),
+            );
+        }
     }
 
     let url = match style {
@@ -779,6 +785,23 @@ async fn apply_openai_sse_line(
     let Ok(value) = serde_json::from_str::<Value>(data) else {
         return Ok(());
     };
+
+    if value.get("usage").is_some() || value.get("timings").is_some() {
+        let mut out = serde_json::Map::new();
+        out.insert("choices".into(), json!([]));
+        if let Some(usage) = value.get("usage") {
+            out.insert("usage".into(), usage.clone());
+        }
+        if let Some(timings) = value.get("timings") {
+            out.insert("timings".into(), timings.clone());
+        }
+        if let Some(model) = value.get("model") {
+            out.insert("model".into(), model.clone());
+        }
+        let frame = Value::Object(out);
+        send_sse(tx, format!("data: {frame}\n\n").into_bytes()).await?;
+    }
+
     let Some(delta) = value.pointer("/choices/0/delta") else {
         return Ok(());
     };
