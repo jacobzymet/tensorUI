@@ -498,6 +498,7 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
     let mut lines: Vec<String> = vec![
         "You are running in agent mode with tools.".into(),
         "Call a tool when it helps; do not invent tool results. After a tool result, call another tool or answer normally.".into(),
+        "Put planning and status updates in reasoning/thinking, not in user-visible text. Do not narrate tool steps in the reply (for example \"Let me search…\", \"Digging deeper…\", \"Checking sources…\"). After tools finish, write the final answer only.".into(),
     ];
     if skills.web_search {
         let depth = skills.web_search_depth;

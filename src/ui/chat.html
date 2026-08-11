@@ -1073,6 +1073,33 @@
     .agent-final-answer {
       min-width: 0;
     }
+    .agent-process-notes .agent-timeline-fold-toggle {
+      font-weight: 500;
+      color: var(--color-ink-2);
+      background: transparent;
+      border-color: color-mix(in oklch, var(--color-rule) 70%, transparent);
+    }
+    .agent-process-notes .agent-timeline-fold-toggle:hover {
+      color: var(--color-ink-2);
+      border-color: var(--color-rule);
+    }
+    .agent-process-note {
+      color: var(--color-ink-2);
+      font-size: var(--text-sm, 0.92em);
+      line-height: 1.45;
+      opacity: 0.88;
+    }
+    .agent-process-note + .agent-process-note {
+      margin-top: 0.65rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid color-mix(in oklch, var(--color-rule) 55%, transparent);
+    }
+    .agent-process-note > :first-child {
+      margin-top: 0;
+    }
+    .agent-process-note > :last-child {
+      margin-bottom: 0;
+    }
     .chat-starfield {
       position: absolute;
       inset: 0;
@@ -6774,18 +6801,67 @@
       return html;
     }
 
-    /** Visible answer so far: sealed mid-turn text parts + optional live tail. */
-    function renderSealedAnswerHtml(parts) {
-      let text = '';
-      for (const part of parts || []) {
+    /**
+     * Mid-turn `text` sealed before a later tool is process narration; text after
+     * the last tool (or any text when there were no tools) is answer body.
+     */
+    function splitSealedTextParts(parts) {
+      const list = Array.isArray(parts) ? parts : [];
+      let lastToolIndex = -1;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i]?.type === 'tool') lastToolIndex = i;
+      }
+      const processNotes = [];
+      const answerChunks = [];
+      for (let i = 0; i < list.length; i++) {
+        const part = list[i];
         if (!part || part.type !== 'text') continue;
         const chunk = String(part.content || '');
         if (!chunk.trim()) continue;
+        if (lastToolIndex >= 0 && i < lastToolIndex) {
+          processNotes.push(chunk);
+        } else {
+          answerChunks.push(chunk);
+        }
+      }
+      return { processNotes, answerChunks };
+    }
+
+    function renderProcessNotesFold(notes, { collapsed = true } = {}) {
+      if (!notes || !notes.length) return '';
+      const label = notes.length === 1
+        ? '1 note while working'
+        : (notes.length + ' notes while working');
+      const body = notes.map((note) => (
+        '<div class="agent-process-note">' + renderMarkdown(note) + '</div>'
+      )).join('');
+      return (
+        '<div class="agent-timeline-fold agent-process-notes' + (collapsed ? ' is-collapsed' : '') + '">' +
+          '<button type="button" class="agent-timeline-fold-toggle" aria-expanded="' +
+            (collapsed ? 'false' : 'true') + '">' +
+            '<span>' + escapeHtml(label) + '</span>' +
+            THINK_CHEVRON +
+          '</button>' +
+          '<div class="agent-timeline-fold-panel">' +
+            '<div class="agent-timeline-fold-inner">' + body + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    /** Sealed mid-turn answer text (+ process-note fold when tool prefaces exist). */
+    function renderSealedAnswerHtml(parts, { notesCollapsed = false } = {}) {
+      const { processNotes, answerChunks } = splitSealedTextParts(parts);
+      const notesHtml = renderProcessNotesFold(processNotes, { collapsed: notesCollapsed });
+      let text = '';
+      for (const chunk of answerChunks) {
         if (text) text += '\n\n';
         text += chunk;
       }
-      if (!text.trim()) return '';
-      return '<div class="agent-final-answer">' + renderMarkdown(text) + '</div>';
+      const answerHtml = text.trim()
+        ? '<div class="agent-final-answer">' + renderMarkdown(text) + '</div>'
+        : '';
+      return notesHtml + answerHtml;
     }
 
     function ensureSealedTimelineText(stream, text) {
@@ -6853,9 +6929,8 @@
     }
 
     /**
-     * Split an assistant turn into activity (reasoning / tools / notices) vs the
-     * visible answer. Mid-turn narration (`parts` text sealed before a tool) is
-     * part of the answer — not only the final post-tool content.
+     * Split an assistant turn into activity (reasoning / tools / notices),
+     * process notes (mid-turn narration before tools), and the final answer.
      */
     function collectTimelineAndAnswer(message) {
       const timelineParts = [];
@@ -6866,14 +6941,14 @@
         if (answerText) answerText += '\n\n';
         answerText += text;
       };
+      const { processNotes, answerChunks } = splitSealedTextParts(message?.parts);
       for (const part of message?.parts || []) {
         if (!part) continue;
         if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') {
           timelineParts.push(part);
-          continue;
         }
-        if (part.type === 'text') pushAnswer(part.content);
       }
+      for (const chunk of answerChunks) pushAnswer(chunk);
       const content = typeof message?.content === 'string' ? message.content : '';
       if (content) {
         for (const segment of parseThinkSegments(content)) {
@@ -6888,6 +6963,8 @@
       }
       return {
         timelineParts,
+        processNotes,
+        processNotesHtml: renderProcessNotesFold(processNotes, { collapsed: true }),
         answerText,
         answerHtml: answerText ? renderMarkdown(answerText) : '',
         stepCount: timelinePartCount(timelineParts),
@@ -6919,28 +6996,31 @@
     function renderAssistantMessage(message, { streaming = false, collapseTimeline = null } = {}) {
       if (streaming) {
         const partsHtml = renderCommittedParts(message.parts);
-        const sealedHtml = renderSealedAnswerHtml(message.parts);
+        const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed: false });
         const bodyHtml = message.content
           ? renderAssistantHtml(message.content, { streaming: true })
           : '';
         return partsHtml + sealedHtml + bodyHtml;
       }
 
-      const { timelineParts, answerHtml, stepCount } = collectTimelineAndAnswer(message);
+      const { timelineParts, answerHtml, stepCount, processNotesHtml } =
+        collectTimelineAndAnswer(message);
       const timelineHtml = renderCommittedParts(timelineParts);
-      const finalHtml = answerHtml
+      const answerBlock = answerHtml
         ? '<div class="agent-final-answer">' + answerHtml + '</div>'
         : '';
+      const finalHtml = (processNotesHtml || '') + answerBlock;
 
       if (!timelineHtml) {
-        // No separable activity — fall back to the classic content renderer
-        // (still strips/shows think tags via settings).
+        // No separable activity — still show process-note fold when present,
+        // else classic content renderer (think tags via settings).
+        if (processNotesHtml) return finalHtml;
         return message.content
           ? renderAssistantHtml(message.content, { streaming: false })
           : finalHtml;
       }
 
-      // Desktop: activity lives in the right sidebar; bubble stays answer-only.
+      // Desktop: activity lives in the right sidebar; bubble stays answer + notes.
       if (isDesktopTraceLayout()) {
         return finalHtml || '<div class="agent-final-answer"></div>';
       }
@@ -9174,7 +9254,9 @@
       const thinkingOpen = streaming && isThinkingOpen(cleaned);
       const hasTimeline = stream.timeline.length > 0;
       const desktop = isDesktopTraceLayout();
-      const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline);
+      const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline, {
+        notesCollapsed: !streaming,
+      });
       const liveAnswerHtml = renderStreamingAnswerHtml(cleaned);
       const answerHtml = desktop ? (sealedAnswerHtml + liveAnswerHtml) : '';
       const hasVisibleAnswer = desktop
@@ -9182,8 +9264,8 @@
         : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
 
       if (desktop) {
-        // Tools/reasoning stay in the sidebar; sealed mid-turn narration + live
-        // answer stay in the chat bubble.
+        // Tools/reasoning stay in the sidebar; process notes (folded) + sealed
+        // post-tool text + live answer stay in the chat bubble.
         if (answerHtml) {
           answerEl.innerHTML = answerHtml;
           if (!streaming) enhanceCodeBlocks(answerEl);
