@@ -1182,16 +1182,18 @@
       box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 18%, transparent);
     }
     .msg-role-assistant {
-      cursor: pointer;
+      cursor: text;
     }
     .msg-role-assistant .msg-actions,
     .msg-role-assistant .msg-action,
-    .msg-role-assistant .msg-meta,
-    .msg-role-assistant details,
-    .msg-role-assistant summary,
     .msg-role-assistant button,
-    .msg-role-assistant .md-code-copy {
-      cursor: auto;
+    .msg-role-assistant .md-code-copy,
+    .msg-role-assistant summary {
+      cursor: pointer;
+    }
+    .msg-role-assistant .msg-meta,
+    .msg-role-assistant details {
+      cursor: text;
     }
     .msg-role-assistant a,
     .msg-role-assistant a.md-cite,
