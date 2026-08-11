@@ -1972,6 +1972,38 @@
       font-variant-numeric: tabular-nums;
       opacity: 0.92;
     }
+    .msg-memory-notices {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-top: 0.7rem;
+    }
+    .msg-bubble > .msg-memory-notices:first-child {
+      margin-top: 0;
+    }
+    .msg-memory-notice {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      align-self: flex-start;
+      max-width: 100%;
+      padding: 0.22rem 0.55rem;
+      border-radius: var(--radius-pill);
+      font-size: 0.72rem;
+      font-weight: 550;
+      letter-spacing: 0.01em;
+      color: var(--color-ok);
+      background: color-mix(in oklch, var(--color-ok) 12%, transparent);
+      border: 1px solid color-mix(in oklch, var(--color-ok) 28%, transparent);
+    }
+    .msg-memory-notice::before {
+      content: "";
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 50%;
+      background: var(--color-ok);
+      flex: 0 0 auto;
+    }
     .msg-footer {
       display: flex;
       align-items: center;
@@ -2814,6 +2846,23 @@
       border-top: 1px solid var(--color-rule);
       background: var(--color-paper-2);
     }
+    #btnSettingsSave {
+      min-width: 5.75rem;
+      gap: 0.35rem;
+    }
+    #btnSettingsSave.is-saved,
+    #btnSettingsSave.is-saved:disabled {
+      background: color-mix(in oklch, var(--color-ok) 18%, var(--color-paper-2));
+      border-color: color-mix(in oklch, var(--color-ok) 40%, var(--color-rule));
+      color: var(--color-ok);
+      box-shadow: none;
+      opacity: 1;
+      cursor: default;
+    }
+    #btnSettingsSave.is-saved svg {
+      width: 0.95rem;
+      height: 0.95rem;
+    }
     @media (max-width: 640px) {
       .dialog.settings-dialog {
         grid-template-columns: 1fr;
@@ -3320,13 +3369,21 @@
       margin: -0.05rem 0 0.2rem;
     }
     .agent-step.is-notice .agent-step-card {
-      border-color: color-mix(in oklch, var(--color-warn) 35%, var(--color-rule));
-      background: color-mix(in oklch, var(--color-warn) 8%, var(--color-paper-2));
+      border-color: var(--color-rule-2);
+      background: color-mix(in oklch, var(--color-ink) 3.5%, var(--color-paper-2));
+    }
+    .agent-step.is-notice.is-ok .agent-step-card {
+      border-color: color-mix(in oklch, var(--color-ok) 34%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-ok) 9%, var(--color-paper-2));
     }
     .agent-step-notice {
       font-size: var(--text-sm);
       color: var(--color-ink-2);
       line-height: 1.45;
+    }
+    .agent-step.is-notice.is-ok .agent-step-notice {
+      color: var(--color-ok);
+      font-weight: 550;
     }
     .agent-step-detail {
       font-size: var(--text-sm);
@@ -4476,8 +4533,10 @@
           </section>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn btn-ghost" id="btnSettingsCancel">Cancel</button>
-          <button type="button" class="btn btn-primary" id="btnSettingsSave">Save</button>
+          <button type="button" class="btn btn-ghost" id="btnSettingsCancel">Close</button>
+          <button type="button" class="btn btn-primary" id="btnSettingsSave" disabled>
+            <span id="btnSettingsSaveLabel">Save</span>
+          </button>
         </div>
       </div>
     </div>
@@ -4543,7 +4602,7 @@
           </div>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn btn-ghost project-dialog-danger" id="btnProjectDelete">Delete project</button>
+          <button type="button" class="btn btn-ghost project-dialog-danger is-hidden" id="btnProjectDelete">Delete project</button>
           <button type="button" class="btn btn-ghost" id="btnProjectCancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="btnProjectSave">Save</button>
         </div>
@@ -5196,6 +5255,7 @@
     /** 'chat' | 'projects' */
     let mainView = 'chat';
     let editingProjectId = null;
+    let creatingProject = false;
     let openConvoMenu = null;
     let serverReady = false;
     /**
@@ -5705,8 +5765,9 @@
       if (!projectOnly) {
         parts.push(
           'Long-term memory — durable facts shared across all chats and projects.\n' +
-          'When you learn a lasting personal fact, preference, or identity detail that should apply everywhere (not just one project), emit a FULL replacement using exactly this form (and do not mention the tag to the user):\n' +
+          'When you learn a lasting personal fact, preference, or identity detail that should apply everywhere (not just one project), you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):\n' +
           '<global_memory_update>\n…updated memory text…\n</global_memory_update>\n' +
+          'Critical: planning or deciding to update memory in reasoning/thinking is not enough — the <global_memory_update>…</global_memory_update> tags must appear in the actual reply text (before or after your user-visible answer). Without those tags, nothing is saved.\n' +
           'If nothing new belongs in long-term memory, do not emit that tag.\n' +
           'Keep concise durable notes. Skip ephemeral task details.\n' +
           'Current long-term memory:\n' + (globalMemory || '(empty)')
@@ -5717,8 +5778,9 @@
         const memory = project.memory.trim();
         parts.push(
           'Project memory for "' + project.name + '" — durable notes shared by every chat in this project only.\n' +
-          'When you learn a lasting fact specific to THIS project, emit a FULL replacement using exactly this form (and do not mention the tag to the user):\n' +
+          'When you learn a lasting fact specific to THIS project, you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):\n' +
           '<memory_update>\n…updated memory text…\n</memory_update>\n' +
+          'Critical: reasoning about a memory update is not enough — the <memory_update>…</memory_update> tags must appear in the actual reply text. Without those tags, nothing is saved.\n' +
           'If nothing new belongs in project memory, do not emit that tag.\n' +
           (projectOnly
             ? 'This project is project-only: do not rely on or write long-term (global) memory.\n'
@@ -5812,11 +5874,13 @@
       let memory = null;
       let globalMemory = null;
       cleaned = cleaned.replace(/<global_memory_update>\s*([\s\S]*?)\s*<\/global_memory_update>/gi, (_, body) => {
-        globalMemory = String(body || '').trim();
+        const next = String(body || '').trim();
+        if (next) globalMemory = next;
         return '';
       });
       cleaned = cleaned.replace(/<memory_update>\s*([\s\S]*?)\s*<\/memory_update>/gi, (_, body) => {
-        memory = String(body || '').trim();
+        const next = String(body || '').trim();
+        if (next) memory = next;
         return '';
       });
       if (streaming) {
@@ -5837,17 +5901,20 @@
 
     function persistGlobalMemory(memoryText) {
       const next = String(memoryText || '');
-      if ((settings.memory || '') === next) return;
+      if ((settings.memory || '') === next) return false;
       saveSettings({ ...settings, memory: next });
       const el = document.getElementById('settingMemory');
-      if (el && settingsModal && !settingsModal.classList.contains('is-hidden')) {
-        el.value = next;
+      if (el) el.value = next;
+      if (settingsModal && !settingsModal.classList.contains('is-hidden')) {
+        syncSettingsSaveButton();
       }
+      return true;
     }
 
     function persistProjectMemory(projectId, memoryText) {
       const project = getProject(projectId);
-      if (!project) return;
+      if (!project) return false;
+      if ((project.memory || '') === String(memoryText || '')) return false;
       project.memory = memoryText;
       project.updatedAt = Date.now();
       saveStore();
@@ -5855,16 +5922,49 @@
         document.getElementById('projectMemory').value = memoryText;
       }
       if (mainView === 'projects') renderProjectsPage();
+      return true;
     }
 
     function applyExtractedMemories(convo, extracted) {
-      if (!extracted || convo?.incognito) return;
+      const result = { globalUpdated: false, projectUpdated: false };
+      if (!extracted || convo?.incognito) return result;
       if (extracted.memory != null && convo.projectId) {
-        persistProjectMemory(convo.projectId, extracted.memory);
+        result.projectUpdated = persistProjectMemory(convo.projectId, extracted.memory);
       }
       if (extracted.globalMemory != null && !projectIsProjectOnly(convo.projectId)) {
-        persistGlobalMemory(extracted.globalMemory);
+        result.globalUpdated = persistGlobalMemory(extracted.globalMemory);
       }
+      return result;
+    }
+
+    function collectTurnMemoryExtraction(stream, finalText) {
+      const chunks = [];
+      for (const part of stream?.timeline || []) {
+        if (!part) continue;
+        if (part.type === 'text' || part.type === 'think') {
+          const content = String(part.content || '');
+          if (content) chunks.push(content);
+        }
+      }
+      if (finalText) chunks.push(String(finalText));
+      const fromAll = applyMemoryUpdateProtocol(chunks.join('\n\n'), { streaming: false });
+      for (const part of stream?.timeline || []) {
+        if (!part || (part.type !== 'text' && part.type !== 'think')) continue;
+        part.content = applyMemoryUpdateProtocol(String(part.content || ''), { streaming: false }).cleaned;
+      }
+      const fromFinal = applyMemoryUpdateProtocol(String(finalText || ''), { streaming: false });
+      return {
+        cleaned: fromFinal.cleaned,
+        memory: fromAll.memory,
+        globalMemory: fromAll.globalMemory,
+      };
+    }
+
+    function memoryNoticeLabels(changes) {
+      const labels = [];
+      if (changes?.globalUpdated) labels.push('Updated long-term memory');
+      if (changes?.projectUpdated) labels.push('Updated project memory');
+      return labels;
     }
 
     function memoryOnlyAssistantFallback(extracted) {
@@ -6636,11 +6736,64 @@
       syncAttachmentFallbackControls();
     }
 
+    function readSettingsForm() {
+      const maxCharsRaw = Number(document.getElementById('settingAttachmentMaxChars').value);
+      const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
+      const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
+      return normalizeSettings({
+        name: document.getElementById('settingName').value.trim(),
+        about: document.getElementById('settingAbout').value,
+        instructions: document.getElementById('settingInstructions').value,
+        memory: document.getElementById('settingMemory').value,
+        thinking: document.getElementById('settingThinking').value,
+        thinkingEffort: document.getElementById('settingThinkingEffort').value,
+        enterSends: document.getElementById('settingEnterSends').checked,
+        skillWebSearch: document.getElementById('settingSkillWebSearch').checked,
+        webSearchDepth: document.getElementById('settingWebSearchDepth').value,
+        webSearchBackend: document.getElementById('settingWebSearchBackend').value,
+        webSearchResults: searchResultsRaw,
+        webSearchRegion: searchRegionRaw,
+        webSearchSafeSearch: document.getElementById('settingWebSearchSafeSearch').value,
+        webSearchRecency: document.getElementById('settingWebSearchRecency').value,
+        skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
+        agentMode: settings.agentMode,
+        attachmentsMode: document.getElementById('settingAttachmentsMode').value,
+        attachmentTextFallback: document.getElementById('settingAttachmentTextFallback').checked,
+        attachmentOcr: document.getElementById('settingAttachmentOcr').checked,
+        attachmentMaxChars: maxCharsRaw,
+      });
+    }
+
+    function settingsFormIsDirty() {
+      return JSON.stringify(readSettingsForm()) !== JSON.stringify(normalizeSettings(settings));
+    }
+
+    const SETTINGS_SAVE_CHECK =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    function syncSettingsSaveButton({ saved = false } = {}) {
+      const btn = document.getElementById('btnSettingsSave');
+      if (!btn) return;
+      const dirty = settingsFormIsDirty();
+      if (saved && !dirty) {
+        btn.disabled = true;
+        btn.classList.add('is-saved');
+        btn.innerHTML = SETTINGS_SAVE_CHECK + '<span>Saved</span>';
+        btn.setAttribute('aria-label', 'Preferences saved');
+        return;
+      }
+      btn.classList.remove('is-saved');
+      btn.innerHTML = '<span id="btnSettingsSaveLabel">Save</span>';
+      btn.disabled = !dirty;
+      btn.setAttribute('aria-label', dirty ? 'Save preferences' : 'No changes to save');
+    }
+
     function openSettings() {
       fillSettingsFormFromState();
       refreshLocalDataPane();
       showSettingsPane('personalization');
       openBackdrop(settingsModal);
+      syncSettingsSaveButton();
       document.getElementById('settingName').focus();
       loadUserSkills();
     }
@@ -6895,51 +7048,14 @@
 
     function commitSettings() {
       if (!requireUnlockedData()) return;
-      const maxCharsRaw = Number(document.getElementById('settingAttachmentMaxChars').value);
-      const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
-      const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
-      saveSettings({
-        name: document.getElementById('settingName').value.trim(),
-        about: document.getElementById('settingAbout').value,
-        instructions: document.getElementById('settingInstructions').value,
-        memory: document.getElementById('settingMemory').value,
-        thinking: document.getElementById('settingThinking').value,
-        thinkingEffort: document.getElementById('settingThinkingEffort').value,
-        enterSends: document.getElementById('settingEnterSends').checked,
-        skillWebSearch: document.getElementById('settingSkillWebSearch').checked,
-        webSearchDepth: WEB_SEARCH_DEPTHS.includes(document.getElementById('settingWebSearchDepth').value)
-          ? document.getElementById('settingWebSearchDepth').value
-          : 'auto',
-        webSearchBackend: WEB_SEARCH_BACKENDS.includes(document.getElementById('settingWebSearchBackend').value)
-          ? document.getElementById('settingWebSearchBackend').value
-          : 'auto',
-        webSearchResults: Number.isFinite(searchResultsRaw)
-          ? Math.min(20, Math.max(1, Math.round(searchResultsRaw)))
-          : DEFAULT_SETTINGS.webSearchResults,
-        webSearchRegion: /^[a-z]{2}-[a-z]{2}$/.test(searchRegionRaw)
-          ? searchRegionRaw
-          : DEFAULT_SETTINGS.webSearchRegion,
-        webSearchSafeSearch: WEB_SEARCH_SAFESEARCH.includes(document.getElementById('settingWebSearchSafeSearch').value)
-          ? document.getElementById('settingWebSearchSafeSearch').value
-          : 'moderate',
-        webSearchRecency: WEB_SEARCH_RECENCIES.includes(document.getElementById('settingWebSearchRecency').value)
-          ? document.getElementById('settingWebSearchRecency').value
-          : 'any',
-        skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
-        agentMode: settings.agentMode,
-        attachmentsMode: ATTACHMENTS_MODES.includes(document.getElementById('settingAttachmentsMode').value)
-          ? document.getElementById('settingAttachmentsMode').value
-          : 'auto',
-        attachmentTextFallback: document.getElementById('settingAttachmentTextFallback').checked,
-        attachmentOcr: document.getElementById('settingAttachmentOcr').checked,
-        attachmentMaxChars: Number.isFinite(maxCharsRaw)
-          ? Math.min(500000, Math.max(2000, Math.round(maxCharsRaw)))
-          : DEFAULT_SETTINGS.attachmentMaxChars,
-      });
+      if (!settingsFormIsDirty()) {
+        syncSettingsSaveButton({ saved: true });
+        return;
+      }
+      saveSettings(readSettingsForm());
       syncThinkingEffortControls(settings.thinkingEffort);
       syncAttachButton();
-      closeSettings();
-      // Re-render open thread so thinking mode changes apply immediately.
+      syncSettingsSaveButton({ saved: true });
       const convo = conversations.find((item) => item.id === activeId);
       if (convo) renderThread(convo);
     }
@@ -7043,8 +7159,9 @@
         } else if (part.type === 'notice') {
           const text = String(part.content || '').trim();
           if (!text) continue;
+          const toneClass = part.tone === 'ok' ? ' is-ok' : '';
           html +=
-            '<div class="agent-step is-notice is-done">' +
+            '<div class="agent-step is-notice is-done' + toneClass + '">' +
               agentStepRailHtml() +
               '<div class="agent-step-card"><div class="agent-step-notice">' +
                 escapeHtml(text) +
@@ -7238,14 +7355,29 @@
       );
     }
 
+    function renderMemoryNoticesHtml(message) {
+      const notices = Array.isArray(message?.memoryNotices)
+        ? message.memoryNotices.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      if (!notices.length) return '';
+      return (
+        '<div class="msg-memory-notices">' +
+          notices.map((label) => (
+            '<div class="msg-memory-notice">' + escapeHtml(label) + '</div>'
+          )).join('') +
+        '</div>'
+      );
+    }
+
     function renderAssistantMessage(message, { streaming = false, collapseTimeline = null } = {}) {
+      const memoryHtml = renderMemoryNoticesHtml(message);
       if (streaming) {
         const partsHtml = renderCommittedParts(message.parts);
         const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed: false });
         const bodyHtml = message.content
           ? renderAssistantHtml(message.content, { streaming: true })
           : '';
-        return partsHtml + sealedHtml + bodyHtml;
+        return partsHtml + sealedHtml + bodyHtml + memoryHtml;
       }
 
       const { timelineParts, answerHtml, stepCount, processNotesHtml } =
@@ -7254,23 +7386,19 @@
       const answerBlock = answerHtml
         ? '<div class="agent-final-answer">' + answerHtml + '</div>'
         : '';
-      const finalHtml = (processNotesHtml || '') + answerBlock;
+      const finalHtml = (processNotesHtml || '') + answerBlock + memoryHtml;
 
       if (!timelineHtml) {
-        // No separable activity — still show process-note fold when present,
-        // else classic content renderer (think tags via settings).
-        if (processNotesHtml) return finalHtml;
+        if (processNotesHtml || memoryHtml) return finalHtml;
         return message.content
-          ? renderAssistantHtml(message.content, { streaming: false })
+          ? renderAssistantHtml(message.content, { streaming: false }) + memoryHtml
           : finalHtml;
       }
 
-      // Desktop: activity lives in the right sidebar; bubble stays answer + notes.
       if (isDesktopTraceLayout()) {
         return finalHtml || '<div class="agent-final-answer"></div>';
       }
 
-      // Mobile / compact: fold the finished timeline under a toggle.
       const collapsed = collapseTimeline !== null ? !!collapseTimeline : true;
       return renderTimelineFold(timelineHtml, stepCount, { collapsed }) + finalHtml;
     }
@@ -8047,19 +8175,17 @@
 
     function createProject() {
       if (!requireUnlockedData()) return;
-      const project = normalizeProject({
-        id: newId('p'),
-        name: 'New project',
-        instructions: '',
-        memory: '',
-        memoryMode: 'default',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-      projects.unshift(project);
-      saveStore();
+      creatingProject = true;
+      editingProjectId = null;
+      document.getElementById('projectModalTitle').textContent = 'New project';
+      document.getElementById('projectName').value = '';
+      document.getElementById('projectInstructions').value = '';
+      document.getElementById('projectMemory').value = '';
+      syncProjectMemoryModeControls('default');
+      document.getElementById('btnProjectDelete').classList.add('is-hidden');
       showProjectsView();
-      openProjectSettings(project.id);
+      openBackdrop(projectModal);
+      document.getElementById('projectName').focus();
     }
 
     function syncProjectMemoryModeControls(mode) {
@@ -8089,11 +8215,14 @@
     function openProjectSettings(projectId) {
       const project = getProject(projectId);
       if (!project) return;
+      creatingProject = false;
       editingProjectId = projectId;
+      document.getElementById('projectModalTitle').textContent = 'Project';
       document.getElementById('projectName').value = project.name;
       document.getElementById('projectInstructions').value = project.instructions;
       document.getElementById('projectMemory').value = project.memory;
       syncProjectMemoryModeControls(project.memoryMode || 'default');
+      document.getElementById('btnProjectDelete').classList.remove('is-hidden');
       openBackdrop(projectModal);
       document.getElementById('projectName').focus();
     }
@@ -8101,18 +8230,40 @@
     function closeProjectSettings() {
       closeBackdrop(projectModal);
       editingProjectId = null;
+      creatingProject = false;
     }
 
     function commitProjectSettings() {
       if (!requireUnlockedData()) return;
-      const project = getProject(editingProjectId);
-      if (!project) return;
       const name = document.getElementById('projectName').value.trim() || 'Untitled project';
-      project.name = name;
-      project.instructions = document.getElementById('projectInstructions').value;
-      project.memory = document.getElementById('projectMemory').value;
-      project.memoryMode = selectedProjectMemoryMode();
-      project.updatedAt = Date.now();
+      const instructions = document.getElementById('projectInstructions').value;
+      const memory = document.getElementById('projectMemory').value;
+      const memoryMode = selectedProjectMemoryMode();
+      const now = Date.now();
+
+      if (creatingProject) {
+        const project = normalizeProject({
+          id: newId('p'),
+          name,
+          instructions,
+          memory,
+          memoryMode,
+          createdAt: now,
+          updatedAt: now,
+        });
+        projects.unshift(project);
+        creatingProject = false;
+        editingProjectId = project.id;
+      } else {
+        const project = getProject(editingProjectId);
+        if (!project) return;
+        project.name = name;
+        project.instructions = instructions;
+        project.memory = memory;
+        project.memoryMode = memoryMode;
+        project.updatedAt = now;
+      }
+
       saveStore();
       closeProjectSettings();
       renderSidebar();
@@ -8726,7 +8877,9 @@
         bubble.innerHTML = formatUserMessageHtml(message || { content });
       }
       attachMessageActions(row);
-      if (role === 'assistant') attachMessageMeta(row, message || { content });
+      if (role === 'assistant') {
+        attachMessageMeta(row, message || { content });
+      }
       if (animate) queueMicrotask(() => motionEnter(row, { y: role === 'user' ? 10 : 14 }));
       return row;
     }
@@ -9668,7 +9821,6 @@
       stream.partial = replyText;
       const extracted = applyMemoryUpdateProtocol(replyText, { streaming });
       const { cleaned } = extracted;
-      applyExtractedMemories(convo, extracted);
       if (activeId !== convo.id) {
         // Background stream — keep state only; sidebar shows the live marker.
         return;
@@ -10039,8 +10191,14 @@
         syncComposerStreamUi();
         return;
       }
-      const extracted = applyMemoryUpdateProtocol(typer.target, { streaming: false });
-      applyExtractedMemories(convo, extracted);
+      const extracted = collectTurnMemoryExtraction(stream, typer.target);
+      const memoryChanges = applyExtractedMemories(convo, extracted);
+      const memoryNotices = memoryNoticeLabels(memoryChanges);
+      for (const label of memoryNotices) {
+        if (!stream.timeline.some((part) => part.type === 'notice' && part.content === label)) {
+          stream.timeline.push({ type: 'notice', content: label, tone: 'ok' });
+        }
+      }
       let assistantText = extracted.cleaned;
       if (!assistantText && !stream.errorMessage) {
         assistantText = memoryOnlyAssistantFallback(extracted);
@@ -10064,7 +10222,13 @@
               ...(part.note ? { note: part.note } : {}),
               live: false,
             }
-            : { type: part.type, content: part.content }
+            : part.type === 'notice'
+              ? {
+                type: 'notice',
+                content: part.content,
+                ...(part.tone ? { tone: part.tone } : {}),
+              }
+              : { type: part.type, content: part.content }
         ))
         : null;
 
@@ -10105,13 +10269,14 @@
         }
       }
 
-      if (assistantText || persistedParts) {
+      if (assistantText || persistedParts || memoryNotices.length) {
         const message = {
           role: 'assistant',
           content: assistantText || '',
           model: turnModel || finalStats?.upstreamModel || '',
         };
         if (persistedParts) message.parts = persistedParts;
+        if (memoryNotices.length) message.memoryNotices = memoryNotices;
         if (finalStats?.tokensPerSec != null) message.tokensPerSec = finalStats.tokensPerSec;
         if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
         if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
@@ -10540,6 +10705,18 @@
     document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
     document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
     document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
+    settingsModal.querySelector('.settings-dialog')?.addEventListener('input', (event) => {
+      if (!event.target.closest('input, textarea, select')) return;
+      syncWebSearchControls();
+      syncAttachmentFallbackControls();
+      syncSettingsSaveButton();
+    });
+    settingsModal.querySelector('.settings-dialog')?.addEventListener('change', (event) => {
+      if (!event.target.closest('input, textarea, select')) return;
+      syncWebSearchControls();
+      syncAttachmentFallbackControls();
+      syncSettingsSaveButton();
+    });
     document.getElementById('settingSkillWebSearch').addEventListener('change', syncWebSearchControls);
     document.getElementById('btnSkillCreate').addEventListener('click', () => {
       openSkillEditor({
