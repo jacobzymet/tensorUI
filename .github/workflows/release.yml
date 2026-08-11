@@ -81,6 +81,8 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           TARGET="${{ matrix.target }}"
+          # Drop Rust's placeholder vendor ("unknown") from Linux archive names.
+          ASSET_TARGET="${TARGET/-unknown-/-}"
           ARCHIVE="${{ matrix.archive }}"
           BIN_NAME="tensorui"
           EXT=""
@@ -89,15 +91,18 @@ jobs:
           fi
           SRC="target/${TARGET}/release/${BIN_NAME}${EXT}"
           SEARCH_HELPER="target/search-helper/tensorui-search${EXT}"
-          STAGING_NAME="${BIN_NAME}-${VERSION}-${TARGET}"
+          STAGING_NAME="${BIN_NAME}-${VERSION}-${ASSET_TARGET}"
           mkdir -p "dist/${STAGING_NAME}"
           cp "${SRC}" "dist/${STAGING_NAME}/"
           cp "${SEARCH_HELPER}" "dist/${STAGING_NAME}/"
           cp README.md "dist/${STAGING_NAME}/"
           ASSET_NAME="${STAGING_NAME}.${ARCHIVE}"
           if [[ "${ARCHIVE}" == "zip" ]]; then
-            # tar is available on GitHub Windows runners; avoids needing zip(1).
-            tar -a -cf "dist/${ASSET_NAME}" -C dist "${STAGING_NAME}"
+            # GNU tar's -a does not create real ZIP files (Windows Explorer rejects them).
+            # Use PowerShell so the asset is a proper ZIP.
+            rm -f "dist/${ASSET_NAME}"
+            powershell.exe -NoProfile -Command \
+              "Compress-Archive -Path 'dist/${STAGING_NAME}' -DestinationPath 'dist/${ASSET_NAME}' -Force"
           else
             tar -czf "dist/${ASSET_NAME}" -C dist "${STAGING_NAME}"
           fi
