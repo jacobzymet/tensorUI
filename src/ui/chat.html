@@ -2018,6 +2018,7 @@
     .msg.is-editing .msg-actions { display: none; }
     .msg.is-editing .msg-meta { display: none; }
     .msg-edit {
+      position: relative;
       width: min(100%, 36rem);
       display: flex;
       flex-direction: column;
@@ -2026,6 +2027,11 @@
       border-radius: var(--radius-2xl);
       background: color-mix(in oklch, var(--color-accent) 12%, var(--color-paper-2));
       border: 1px solid var(--accent-edge);
+    }
+    .msg-edit > .mention-menu {
+      left: 0.55rem;
+      right: 0.55rem;
+      bottom: calc(100% - 0.25rem);
     }
     .msg-edit-input {
       width: 100%;
@@ -4851,6 +4857,8 @@
     let mentionState = null; // { start, query, activeIndex, items }
     /** Active composer mentions shown as chips (not as literal text in the textarea). */
     const composerMentionIds = new Set();
+    /** Textarea currently driving the @mention menu (composer or message edit). */
+    let mentionInput = composerInput;
     const convoTitleEl = document.getElementById('convoTitle');
     const greetingEl = document.getElementById('greeting');
     const modelHintEl = document.getElementById('modelHint');
@@ -6324,6 +6332,25 @@
       mentionState = null;
       mentionMenu.classList.add('is-hidden');
       mentionMenu.innerHTML = '';
+      if (mentionMenu.parentElement !== composerCard) {
+        composerCard.insertBefore(mentionMenu, composerMentions);
+      }
+    }
+
+    function placeMentionMenu() {
+      const host = mentionInput?.closest('.msg-edit') || composerCard;
+      if (mentionMenu.parentElement !== host) {
+        if (host === composerCard) {
+          composerCard.insertBefore(mentionMenu, composerMentions);
+        } else {
+          host.appendChild(mentionMenu);
+        }
+      }
+    }
+
+    function activeMentionExcludeIds() {
+      if (mentionInput === composerInput) return composerMentionIds;
+      return parseCapabilityMentions(mentionInput?.value || '').mentions;
     }
 
     function renderMentionMenu() {
@@ -6331,6 +6358,7 @@
         closeMentionMenu();
         return;
       }
+      placeMentionMenu();
       mentionMenu.innerHTML = '<div class="mention-menu-label">Capabilities</div>';
       mentionState.items.forEach((item, index) => {
         const btn = document.createElement('button');
@@ -6350,14 +6378,17 @@
       mentionMenu.classList.remove('is-hidden');
     }
 
-    function updateMentionMenu() {
-      const ctx = getMentionContext(composerInput);
+    function updateMentionMenu(forInput) {
+      if (forInput) mentionInput = forInput;
+      const input = mentionInput || composerInput;
+      const ctx = getMentionContext(input);
       if (!ctx) {
         closeMentionMenu();
         return;
       }
+      const excluded = activeMentionExcludeIds();
       const items = MENTION_OPTIONS.filter(
-        (item) => item.label.startsWith(ctx.query) && !composerMentionIds.has(item.id)
+        (item) => item.label.startsWith(ctx.query) && !excluded.has(item.id)
       );
       if (items.length === 0) {
         closeMentionMenu();
@@ -6392,20 +6423,57 @@
     }
 
     function insertMention(item) {
-      if (!mentionState) return;
-      const value = composerInput.value;
-      const cursor = composerInput.selectionStart;
-      // Remove the in-progress @query from the textarea; chip is the only UI.
+      if (!mentionState || !mentionInput) return;
+      const input = mentionInput;
+      const value = input.value;
+      const cursor = input.selectionStart;
       const before = value.slice(0, mentionState.start);
       const after = value.slice(cursor);
-      composerInput.value = before + after;
-      composerInput.setSelectionRange(before.length, before.length);
-      composerMentionIds.add(item.id);
-      closeMentionMenu();
-      autoResize(composerInput);
-      updateSendEnabled();
-      renderComposerMentions();
-      composerInput.focus();
+      if (input === composerInput) {
+        input.value = before + after;
+        input.setSelectionRange(before.length, before.length);
+        composerMentionIds.add(item.id);
+        closeMentionMenu();
+        autoResize(composerInput);
+        updateSendEnabled();
+        renderComposerMentions();
+      } else {
+        const inserted = '@' + item.label + (after.startsWith(' ') ? '' : ' ');
+        input.value = before + inserted + after;
+        const pos = before.length + inserted.length;
+        input.setSelectionRange(pos, pos);
+        closeMentionMenu();
+        autoResize(input);
+      }
+      input.focus();
+    }
+
+    function handleMentionKeydown(event) {
+      if (!mentionState) return false;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        mentionState.activeIndex = (mentionState.activeIndex + 1) % mentionState.items.length;
+        renderMentionMenu();
+        return true;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        mentionState.activeIndex =
+          (mentionState.activeIndex - 1 + mentionState.items.length) % mentionState.items.length;
+        renderMentionMenu();
+        return true;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        insertMention(mentionState.items[mentionState.activeIndex]);
+        return true;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMentionMenu();
+        return true;
+      }
+      return false;
     }
 
     function renderComposerMentions() {
@@ -8350,6 +8418,8 @@
       const row = editingRow;
       const raw = row.dataset.raw || '';
       const bubble = row.querySelector('.msg-bubble, .msg-edit');
+      closeMentionMenu();
+      mentionInput = composerInput;
       if (bubble) {
         const next = document.createElement('div');
         next.className = 'msg-bubble';
@@ -8374,6 +8444,7 @@
       input.className = 'msg-edit-input';
       input.value = raw;
       input.setAttribute('aria-label', 'Edit message');
+      input.placeholder = 'Edit message… Type @ to mention';
       const bar = document.createElement('div');
       bar.className = 'msg-edit-bar';
       const btnCancel = document.createElement('button');
@@ -8392,15 +8463,34 @@
       bubble.replaceWith(editor);
       row.classList.add('is-editing');
       editingRow = row;
+      mentionInput = input;
 
       const commit = () => {
         const next = input.value.trim();
         if (!next || isConvoBusy(activeId)) return;
+        closeMentionMenu();
+        mentionInput = composerInput;
         submitEditedMessage(row, next);
       };
       btnCancel.addEventListener('click', cancelMessageEdit);
       btnSave.addEventListener('click', commit);
+      input.addEventListener('input', () => {
+        autoResize(input);
+        updateMentionMenu(input);
+      });
+      input.addEventListener('click', () => updateMentionMenu(input));
+      input.addEventListener('keyup', (event) => {
+        if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          updateMentionMenu(input);
+        }
+      });
+      input.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (document.activeElement !== input) closeMentionMenu();
+        }, 120);
+      });
       input.addEventListener('keydown', (event) => {
+        if (handleMentionKeydown(event)) return;
         if (event.key === 'Escape') {
           event.preventDefault();
           cancelMessageEdit();
@@ -8420,7 +8510,6 @@
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
       autoResize(input);
-      input.addEventListener('input', () => autoResize(input));
     }
 
     async function submitEditedMessage(row, rawText) {
@@ -10811,15 +10900,16 @@
       if (modelMenuIsOpen()) positionModelMenu();
     }, true);
     composerInput.addEventListener('input', () => {
+      mentionInput = composerInput;
       promoteTypedMentions();
       autoResize(composerInput);
       updateSendEnabled();
-      updateMentionMenu();
+      updateMentionMenu(composerInput);
     });
-    composerInput.addEventListener('click', updateMentionMenu);
+    composerInput.addEventListener('click', () => updateMentionMenu(composerInput));
     composerInput.addEventListener('keyup', (event) => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-        updateMentionMenu();
+        updateMentionMenu(composerInput);
       }
     });
     composerInput.addEventListener('blur', () => {
@@ -10829,31 +10919,8 @@
       }, 120);
     });
     composerInput.addEventListener('keydown', (event) => {
-      if (mentionState) {
-        if (event.key === 'ArrowDown') {
-          event.preventDefault();
-          mentionState.activeIndex = (mentionState.activeIndex + 1) % mentionState.items.length;
-          renderMentionMenu();
-          return;
-        }
-        if (event.key === 'ArrowUp') {
-          event.preventDefault();
-          mentionState.activeIndex =
-            (mentionState.activeIndex - 1 + mentionState.items.length) % mentionState.items.length;
-          renderMentionMenu();
-          return;
-        }
-        if (event.key === 'Enter' || event.key === 'Tab') {
-          event.preventDefault();
-          insertMention(mentionState.items[mentionState.activeIndex]);
-          return;
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          closeMentionMenu();
-          return;
-        }
-      }
+      mentionInput = composerInput;
+      if (handleMentionKeydown(event)) return;
 
       if (event.key !== 'Enter') return;
       if (settings.enterSends) {
