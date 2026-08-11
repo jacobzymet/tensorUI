@@ -7296,6 +7296,7 @@
 
     function collectTimelineAndAnswer(message) {
       const timelineParts = [];
+      const deferredNotices = [];
       let answerText = '';
       const pushAnswer = (chunk) => {
         const text = String(chunk || '');
@@ -7306,6 +7307,11 @@
       const { processNotes, answerChunks } = splitSealedTextParts(message?.parts);
       for (const part of message?.parts || []) {
         if (!part) continue;
+        // Memory notices are recorded at turn end — keep them after reasoning/tools.
+        if (part.type === 'notice' && part.tone === 'ok') {
+          deferredNotices.push(part);
+          continue;
+        }
         if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') {
           timelineParts.push(part);
         }
@@ -7323,6 +7329,7 @@
           }
         }
       }
+      for (const notice of deferredNotices) timelineParts.push(notice);
       return {
         timelineParts,
         processNotes,
@@ -7471,8 +7478,16 @@
       let timelineHtml = '';
       let stepCount = 0;
       if (live && Array.isArray(message.parts)) {
-        timelineHtml = renderCommittedParts(message.parts, { forceOpenThinking: true });
-        stepCount = timelinePartCount(message.parts);
+        // Memory notices land on the timeline at turn end; keep them after live reasoning.
+        const earlyParts = [];
+        const deferredNotices = [];
+        for (const part of message.parts) {
+          if (!part) continue;
+          if (part.type === 'notice' && part.tone === 'ok') deferredNotices.push(part);
+          else earlyParts.push(part);
+        }
+        timelineHtml = renderCommittedParts(earlyParts, { forceOpenThinking: true });
+        stepCount = timelinePartCount(earlyParts);
         if (message.content) {
           for (const segment of parseThinkSegments(message.content)) {
             if (segment.type !== 'think' || !String(segment.content || '').trim()) continue;
@@ -7483,6 +7498,10 @@
             });
             stepCount += 1;
           }
+        }
+        if (deferredNotices.length) {
+          timelineHtml += renderCommittedParts(deferredNotices, { forceOpenThinking: true });
+          stepCount += timelinePartCount(deferredNotices);
         }
       } else {
         const collected = collectTimelineAndAnswer(message);
