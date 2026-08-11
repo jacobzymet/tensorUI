@@ -36,10 +36,27 @@
       --accent-wash-2: color-mix(in oklch, var(--color-accent) 24%, transparent);
       --accent-edge: color-mix(in oklch, var(--color-accent) 42%, var(--color-rule));
 
-      --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.32);
-      --shadow-2: 0 4px 14px oklch(0% 0 0 / 0.28);
-      --shadow-3: 0 12px 34px oklch(0% 0 0 / 0.36);
-      --shadow-4: 0 28px 68px oklch(0% 0 0 / 0.5);
+      --shadow-1:
+        0 1px 1px oklch(0% 0 0 / 0.2),
+        0 1px 3px oklch(0% 0 0 / 0.12);
+      --shadow-2:
+        0 1px 2px oklch(0% 0 0 / 0.16),
+        0 6px 18px oklch(0% 0 0 / 0.2);
+      --shadow-3:
+        0 2px 4px oklch(0% 0 0 / 0.14),
+        0 12px 28px oklch(0% 0 0 / 0.26),
+        0 28px 56px oklch(0% 0 0 / 0.16);
+      --shadow-4:
+        0 4px 12px oklch(0% 0 0 / 0.18),
+        0 24px 48px oklch(0% 0 0 / 0.32),
+        0 48px 80px oklch(0% 0 0 / 0.18);
+      /* Hero lift for the composer — ambient bloom + tight contact. */
+      --shadow-composer:
+        inset 0 1px 0 oklch(100% 0 0 / 0.07),
+        0 1px 2px oklch(0% 0 0 / 0.18),
+        0 10px 28px oklch(0% 0 0 / 0.28),
+        0 28px 56px oklch(0% 0 0 / 0.22);
+      --shadow-sidebar: 6px 0 28px oklch(0% 0 0 / 0.18);
       --ring: 0 0 0 3px color-mix(in oklch, var(--color-accent) 24%, transparent);
 
       --font-display: "Space Grotesk", system-ui, sans-serif;
@@ -72,17 +89,19 @@
       --dur-enter: 220ms;
       --dur-theme: 320ms;
 
-      /* Radius scale. Single-line interactive controls are capsules; containers
-         step up through a soft ladder so nothing in the app reads as a hard box. */
+      /* Radius scale. Controls stay capsules; large surfaces open up so panels
+         and the composer read as soft objects, not outlined boxes. */
       --radius-pill: 999px;
       --radius-xs: 6px;
-      --radius-sm: 9px;
-      --radius-md: 12px;
-      --radius-lg: 16px;
-      --radius-xl: 20px;
-      --radius-2xl: 26px;
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 18px;
+      --radius-xl: 22px;
+      --radius-2xl: 28px;
+      --radius-3xl: 34px;
       --radius-input: var(--radius-pill);
-      --radius-panel: var(--radius-lg);
+      --radius-panel: var(--radius-xl);
+      --radius-composer: var(--radius-3xl);
 
       --control-h: 2.15rem;
       --control-h-sm: 1.9rem;
@@ -121,10 +140,26 @@
       --surface-hover: color-mix(in oklch, var(--color-ink) 6%, transparent);
       --surface-active: color-mix(in oklch, var(--color-ink) 9%, transparent);
 
-      --shadow-1: 0 1px 2px oklch(35% 0.03 260 / 0.07);
-      --shadow-2: 0 4px 14px oklch(35% 0.03 260 / 0.09);
-      --shadow-3: 0 12px 32px oklch(35% 0.03 260 / 0.12);
-      --shadow-4: 0 28px 68px oklch(35% 0.03 260 / 0.18);
+      --shadow-1:
+        0 1px 1px oklch(40% 0.02 260 / 0.05),
+        0 1px 3px oklch(40% 0.02 260 / 0.04);
+      --shadow-2:
+        0 1px 2px oklch(40% 0.02 260 / 0.05),
+        0 8px 20px oklch(40% 0.02 260 / 0.08);
+      --shadow-3:
+        0 2px 4px oklch(40% 0.02 260 / 0.05),
+        0 12px 28px oklch(40% 0.02 260 / 0.09),
+        0 28px 52px oklch(40% 0.02 260 / 0.06);
+      --shadow-4:
+        0 4px 12px oklch(40% 0.02 260 / 0.06),
+        0 24px 48px oklch(40% 0.02 260 / 0.1),
+        0 48px 80px oklch(40% 0.02 260 / 0.07);
+      --shadow-composer:
+        inset 0 1px 0 oklch(100% 0 0 / 0.85),
+        0 1px 2px oklch(40% 0.02 260 / 0.05),
+        0 12px 28px oklch(40% 0.02 260 / 0.1),
+        0 28px 56px oklch(40% 0.02 260 / 0.08);
+      --shadow-sidebar: 6px 0 24px oklch(40% 0.02 260 / 0.08);
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -390,7 +425,9 @@
       width: var(--sidebar-w);
       min-width: 0;
       background: var(--color-graphite);
-      border-right: 1px solid var(--color-rule);
+      border-right: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
+      box-shadow: var(--shadow-sidebar);
+      z-index: 5;
       display: flex;
       flex-direction: column;
       padding: var(--space-sm) var(--space-xs) var(--space-sm);
@@ -401,7 +438,8 @@
         width var(--dur-enter) var(--ease-settle),
         padding var(--dur-enter) var(--ease-settle),
         opacity var(--dur-short) var(--ease-settle),
-        border-color var(--dur-short) var(--ease-settle);
+        border-color var(--dur-short) var(--ease-settle),
+        box-shadow var(--dur-short) var(--ease-settle);
     }
     .chat-shell.sidebar-collapsed .chat-sidebar {
       flex-basis: 0;
@@ -409,6 +447,7 @@
       padding-left: 0;
       padding-right: 0;
       border-right-color: transparent;
+      box-shadow: none;
       opacity: 0;
       pointer-events: none;
     }
@@ -864,8 +903,8 @@
       z-index: 45;
       min-width: 11rem;
       max-width: 15rem;
-      background: var(--color-paper-2);
-      border: 1px solid var(--color-rule);
+      background: var(--color-paper-3);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
       border-radius: var(--radius-xl);
       box-shadow: var(--shadow-3);
       padding: 0.35rem;
@@ -929,8 +968,8 @@
       gap: 0.7rem;
       padding: 0.95rem 1rem 1rem;
       border-radius: var(--radius-xl);
-      border: 1px solid var(--color-rule);
-      background: var(--color-paper-2);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
+      background: var(--color-paper-3);
       box-shadow: var(--shadow-3);
       color: var(--color-ink);
       transform: translateY(0.7rem) scale(0.98);
@@ -1001,7 +1040,8 @@
       flex-direction: column;
       height: 100vh;
       background:
-        radial-gradient(70% 48% at 50% -14%, color-mix(in oklch, var(--color-accent) 11%, transparent), transparent 62%),
+        radial-gradient(72% 52% at 50% -16%, color-mix(in oklch, var(--color-accent) 13%, transparent), transparent 64%),
+        radial-gradient(48% 36% at 88% 108%, color-mix(in oklch, var(--color-accent) 5%, transparent), transparent 70%),
         var(--color-paper);
       overflow: hidden;
     }
@@ -1488,8 +1528,8 @@
       overflow: hidden;
       padding: 0;
       border-radius: var(--radius-xl);
-      border: 1px solid var(--color-rule);
-      background: var(--color-paper-2);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
+      background: var(--color-paper-3);
       color: var(--color-ink);
       box-shadow: var(--shadow-3);
       pointer-events: auto;
@@ -1737,8 +1777,8 @@
     .msg-role-assistant { align-items: flex-start; }
     .msg-bubble {
       max-width: 100%;
-      padding: 0.75rem 1.1rem;
-      border-radius: var(--radius-2xl);
+      padding: 0.85rem 1.2rem;
+      border-radius: var(--radius-3xl);
       font-size: var(--text-md);
       line-height: 1.65;
       overflow-wrap: anywhere;
@@ -1746,7 +1786,7 @@
     /* User turns read as a spoken capsule; the tail corner keeps direction legible. */
     .msg-role-user .msg-bubble {
       max-width: 85%;
-      border: 1px solid var(--accent-edge);
+      border: 1px solid color-mix(in oklch, var(--accent-edge) 70%, transparent);
       color: var(--color-ink);
       border-bottom-right-radius: var(--radius-sm);
       background-image: linear-gradient(
@@ -1759,8 +1799,8 @@
     /* Assistant turns are a quiet reading surface, not a competing card. */
     .msg-role-assistant .msg-bubble {
       width: 100%;
-      background: var(--color-paper-2);
-      border: 1px solid var(--color-rule);
+      background: color-mix(in oklch, var(--color-paper-2) 92%, var(--color-paper-3));
+      border: 1px solid color-mix(in oklch, var(--color-rule) 55%, transparent);
       color: var(--color-ink-2);
       border-bottom-left-radius: var(--radius-sm);
       box-shadow: var(--shadow-1);
@@ -2295,9 +2335,9 @@
       grid-template-columns: 13.5rem minmax(0, 1fr);
       padding: 0;
       overflow: hidden;
-      background: var(--color-paper-2);
-      border: 1px solid var(--color-rule);
-      border-radius: var(--radius-2xl);
+      background: var(--color-paper-3);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 65%, transparent);
+      border-radius: var(--radius-3xl);
       box-shadow: var(--shadow-4);
     }
     .dialog-close {
@@ -2908,7 +2948,7 @@
       flex: 0 0 auto;
       display: flex;
       justify-content: center;
-      padding: 0 clamp(1rem, 4vw, 2rem) var(--space-sm);
+      padding: 0 clamp(1rem, 4vw, 2rem) calc(var(--space-sm) + 0.35rem);
     }
     /* Scrim so thread content dissolves into the dock instead of being sliced
        off by the composer's top edge as it scrolls past. */
@@ -2918,9 +2958,14 @@
       left: 0;
       right: 0;
       bottom: 100%;
-      height: 2.5rem;
+      height: 3.4rem;
       pointer-events: none;
-      background: linear-gradient(to top, var(--color-paper), transparent);
+      background: linear-gradient(
+        to top,
+        var(--color-paper) 12%,
+        color-mix(in oklch, var(--color-paper) 72%, transparent) 52%,
+        transparent
+      );
     }
     .chat-composer-dock:empty { padding: 0; }
     .chat-composer-dock:empty::before { display: none; }
@@ -2932,25 +2977,28 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.45rem;
+      gap: 0.55rem;
     }
     .composer-card {
       position: relative;
       width: 100%;
-      background: var(--color-paper-2);
-      border: 1px solid var(--color-rule-2);
-      border-radius: var(--radius-2xl);
-      padding: 0.85rem 0.85rem 0.7rem 1.15rem;
+      background: var(--color-paper-3);
+      border: 1px solid color-mix(in oklch, var(--color-rule-2) 62%, transparent);
+      border-radius: var(--radius-composer);
+      padding: 1rem 1rem 0.8rem 1.3rem;
       display: flex;
       flex-direction: column;
-      gap: 0.55rem;
-      box-shadow: var(--shadow-3);
-      transition: border-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out), transform var(--dur-enter) var(--ease-settle);
+      gap: 0.65rem;
+      box-shadow: var(--shadow-composer);
+      transition:
+        border-color var(--dur-short) var(--ease-out),
+        box-shadow var(--dur-enter) var(--ease-settle),
+        transform var(--dur-enter) var(--ease-settle);
     }
     .composer-card:focus-within {
-      border-color: color-mix(in oklch, var(--color-accent) 50%, var(--color-rule-2));
-      box-shadow: var(--ring), var(--shadow-3);
-      transform: translateY(-1px);
+      border-color: color-mix(in oklch, var(--color-accent) 42%, var(--color-rule-2));
+      box-shadow: var(--ring), var(--shadow-composer);
+      transform: translateY(-2px);
     }
     .composer-textarea {
       width: 100%;
@@ -2963,7 +3011,7 @@
       line-height: 1.55;
       max-height: 14rem;
       outline: none;
-      padding: 0.2rem 0.15rem;
+      padding: 0.28rem 0.15rem 0.15rem;
     }
     .composer-textarea::placeholder { color: var(--color-muted); }
     /* Tools left, send right — the arrangement people already have muscle
@@ -3134,8 +3182,9 @@
       animation: mic-listen-pulse 1.35s ease-in-out infinite;
     }
     .composer-card.is-dragover {
-      border-color: color-mix(in oklch, var(--color-accent) 60%, var(--color-rule-2));
-      box-shadow: var(--ring), var(--shadow-3);
+      border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule-2));
+      box-shadow: var(--ring), var(--shadow-composer);
+      transform: translateY(-2px);
     }
     .msg-attachments {
       display: flex;
@@ -3208,9 +3257,9 @@
       bottom: calc(100% + 0.45rem);
       min-width: 12rem;
       padding: 0.35rem;
-      border: 1px solid var(--color-rule);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
       border-radius: var(--radius-xl);
-      background: var(--color-paper-2);
+      background: var(--color-paper-3);
       box-shadow: var(--shadow-3);
       z-index: 40;
     }
