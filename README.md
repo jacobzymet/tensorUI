@@ -66,7 +66,7 @@ Pass `--config PATH` to use a different `config.toml` (chats/preferences still s
 
 ### Encryption at rest
 
-In **Chat → Preferences → Local Data**, enable encryption with a passphrase. tensorUI then:
+In **Chat → Settings → Local Data**, enable encryption with a passphrase. tensorUI then:
 
 - Derives a 256-bit key with **Argon2id** (OWASP interactive defaults: 19 MiB memory, 2 iterations)
 - Encrypts `chats.json` and `preferences.json` with **AES-256-GCM** (random 96-bit nonces, purpose-bound AAD so files cannot be swapped)
@@ -80,7 +80,7 @@ In **Chat → Preferences → Local Data**, enable encryption with a passphrase.
 
 Encryption applies to **disk** storage only. Browser `localStorage` mode does not use it. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
 
-In **Preferences → Local Data** you can also open the data folder, or optionally switch chats/preferences to browser `localStorage` only.
+In **Settings → Local Data** you can also open the data folder, or optionally switch chats/settings to browser `localStorage` only.
 
 ```toml
 [ui]

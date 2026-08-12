@@ -48,28 +48,47 @@ try:
         "month": "m",
         "year": "y",
     }.get(recency)
+    kind = str(request.get("kind", "web")).strip().lower() or "web"
+    if kind not in ("web", "news"):
+        kind = "web"
     if not query:
         fail("TENSORUI_DDGS_ERROR", "query is empty")
 
-    raw_results = DDGS().text(
-        query,
-        region=region,
-        safesearch=safesearch,
-        timelimit=timelimit,
-        max_results=max_results,
-        backend=backend,
-    )
+    ddgs = DDGS()
+    if kind == "news":
+        raw_results = ddgs.news(
+            query,
+            region=region,
+            safesearch=safesearch,
+            timelimit=timelimit,
+            max_results=max_results,
+        )
+    else:
+        raw_results = ddgs.text(
+            query,
+            region=region,
+            safesearch=safesearch,
+            timelimit=timelimit,
+            max_results=max_results,
+            backend=backend,
+        )
     results = []
     for item in raw_results or []:
         url = clean(item.get("href") or item.get("url"))
         title = clean(item.get("title"))
         if not title or not url:
             continue
+        snippet = clean(item.get("body") or item.get("snippet"))
+        extra = " · ".join(
+            part for part in (clean(item.get("source")), clean(item.get("date"))) if part
+        )
+        if extra:
+            snippet = f"{snippet} ({extra})" if snippet else extra
         results.append(
             {
                 "title": title,
                 "url": url,
-                "snippet": clean(item.get("body") or item.get("snippet")),
+                "snippet": snippet,
             }
         )
     # Emit locale-independent ASCII JSON. This avoids Windows console code pages

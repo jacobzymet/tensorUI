@@ -89,6 +89,9 @@ pub fn openai_to_anthropic_messages(payload: &Value) -> Result<Value, String> {
         if let Some(tools) = openai_tools_to_anthropic(payload.get("tools")) {
             object.insert("tools".into(), Value::Array(tools));
         }
+        if let Some(choice) = openai_tool_choice_to_anthropic(payload.get("tool_choice")) {
+            object.insert("tool_choice".into(), choice);
+        }
         if let Some(effort) = payload.get("reasoning_effort").and_then(|v| v.as_str()) {
             let budget = match effort {
                 "low" => Some(1024u64),
@@ -134,6 +137,23 @@ fn openai_tools_to_anthropic(tools: Option<&Value>) -> Option<Vec<Value>> {
     } else {
         Some(converted)
     }
+}
+
+fn openai_tool_choice_to_anthropic(choice: Option<&Value>) -> Option<Value> {
+    let choice = choice?;
+    if let Some(as_str) = choice.as_str() {
+        return match as_str {
+            "auto" => Some(json!({ "type": "auto" })),
+            "required" | "any" => Some(json!({ "type": "any" })),
+            "none" => Some(json!({ "type": "none" })),
+            _ => None,
+        };
+    }
+    let name = choice
+        .pointer("/function/name")
+        .and_then(|v| v.as_str())
+        .or_else(|| choice.get("name").and_then(|v| v.as_str()))?;
+    Some(json!({ "type": "tool", "name": name }))
 }
 
 fn message_content_to_text(msg: &Value) -> String {
@@ -751,6 +771,21 @@ mod tests {
         assert_eq!(tool_user["role"], "user");
         assert_eq!(tool_user["content"][0]["type"], "tool_result");
         assert_eq!(tool_user["content"][0]["tool_use_id"], "call_1");
+    }
+
+    #[test]
+    fn converts_openai_tool_choice() {
+        let auto = openai_tool_choice_to_anthropic(Some(&json!("auto"))).unwrap();
+        assert_eq!(auto["type"], "auto");
+        let required = openai_tool_choice_to_anthropic(Some(&json!("required"))).unwrap();
+        assert_eq!(required["type"], "any");
+        let named = openai_tool_choice_to_anthropic(Some(&json!({
+            "type": "function",
+            "function": { "name": "web_search" }
+        })))
+        .unwrap();
+        assert_eq!(named["type"], "tool");
+        assert_eq!(named["name"], "web_search");
     }
 
     #[test]

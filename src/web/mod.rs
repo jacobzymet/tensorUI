@@ -111,6 +111,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
 
     let api = Router::new()
         .route("/api/chat/completions", post(chat_completions))
+        .route("/api/chat/clarify", post(chat_clarify))
         .route("/api/chat/title", post(chat_title))
         .route("/api/state", get(state))
         .route("/api/ui/theme", post(set_ui_theme))
@@ -146,6 +147,11 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
 
     let router = Router::new()
         .route("/", get(chat_page))
+        .route("/projects", get(chat_page))
+        .route("/ghost", get(chat_page))
+        .route("/c/{id}", get(chat_page))
+        .route("/p/{id}", get(chat_page))
+        .route("/p/{id}/ghost", get(chat_page))
         .route("/settings", get(settings_page))
         .route("/admin", get(|| async { Redirect::permanent("/settings") }))
         .route("/chat", get(|| async { Redirect::permanent("/") }))
@@ -422,6 +428,8 @@ async fn chat_completions(
     }
     apply_thinking_control(&mut body, thinking_model.as_ref());
     let key = (!token.trim().is_empty()).then_some(token.as_str());
+    let wants_agent = body.get("agent").and_then(|v| v.as_bool()).unwrap_or(false)
+        || body.get("deep_research").and_then(|v| v.as_bool()).unwrap_or(false);
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
         Ok(request) if agent::should_run_agent(&request, &user_skills) => {
             if request.messages.is_empty() {
@@ -429,7 +437,18 @@ async fn chat_completions(
             }
             agent::stream_agent(&api_base, key, api_style, request, user_skills)
         }
-        _ => {
+        Ok(_) => {
+            if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
+                agent::inject_skill_catalog_into_messages(messages, &user_skills);
+            }
+            chat::stream_remote_completion(&api_base, &token, api_style, body)
+        }
+        Err(error) if wants_agent => {
+            return Err(ApiError::bad_request(format!(
+                "Invalid agent request: {error}"
+            )));
+        }
+        Err(_) => {
             if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
                 agent::inject_skill_catalog_into_messages(messages, &user_skills);
             }
@@ -444,6 +463,17 @@ async fn chat_completions(
         .body(Body::from_stream(stream))
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(response)
+}
+
+#[derive(Debug, Deserialize)]
+struct ClarifyAnswersBody {
+    id: String,
+    answers: serde_json::Value,
+}
+
+async fn chat_clarify(Json(body): Json<ClarifyAnswersBody>) -> Result<Json<serde_json::Value>, ApiError> {
+    agent::submit_clarify_answers(&body.id, body.answers).map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Debug, Deserialize)]

@@ -1254,6 +1254,181 @@
       overflow: hidden;
       min-height: 0;
     }
+    .clarify-host {
+      margin: 0 0 0.85rem;
+    }
+    .clarify-card {
+      border: 1px solid color-mix(in oklch, var(--color-accent) 28%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-accent) 6%, var(--color-paper-2));
+      border-radius: var(--radius-xl);
+      padding: 0.85rem 0.95rem 0.95rem;
+      display: grid;
+      gap: 0.85rem;
+    }
+    .clarify-card.is-done {
+      opacity: 0.92;
+      background: color-mix(in oklch, var(--color-ink) 2.5%, var(--color-paper-2));
+      border-color: var(--color-rule);
+    }
+    .clarify-card-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.35rem 0.65rem;
+    }
+    .clarify-card-kicker {
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+    }
+    .clarify-card-title {
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--color-ink);
+    }
+    .clarify-q {
+      display: grid;
+      gap: 0.45rem;
+    }
+    .clarify-q-chip {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 0.12rem 0.45rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid color-mix(in oklch, var(--color-accent) 30%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-accent) 12%, transparent);
+      color: var(--color-accent);
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .clarify-q-text {
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--color-ink);
+      line-height: 1.35;
+    }
+    .clarify-options {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .clarify-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 0.55rem;
+      align-items: start;
+      padding: 0.55rem 0.65rem;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--color-rule);
+      background: var(--color-paper-3);
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+    }
+    .clarify-option:hover {
+      border-color: var(--color-rule-2);
+      background: var(--surface-hover);
+    }
+    .clarify-option.is-selected {
+      border-color: color-mix(in oklch, var(--color-accent) 45%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-accent) 10%, var(--color-paper-3));
+    }
+    .clarify-option input {
+      margin-top: 0.2rem;
+    }
+    .clarify-option-label {
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--color-ink);
+      line-height: 1.3;
+    }
+    .clarify-option-desc {
+      margin-top: 0.12rem;
+      font-size: 0.8rem;
+      color: var(--color-muted);
+      line-height: 1.35;
+    }
+    .clarify-other {
+      display: grid;
+      gap: 0.35rem;
+      margin-top: 0.15rem;
+    }
+    .clarify-other-toggle {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 0.55rem;
+      align-items: center;
+      padding: 0.45rem 0.65rem;
+      border-radius: var(--radius-lg);
+      border: 1px dashed var(--color-rule-2);
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      color: var(--color-ink);
+      text-align: left;
+    }
+    .clarify-other-toggle.is-selected {
+      border-style: solid;
+      border-color: color-mix(in oklch, var(--color-accent) 45%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-accent) 8%, var(--color-paper-3));
+    }
+    .clarify-other-input {
+      width: 100%;
+      border: 1px solid var(--color-rule);
+      border-radius: var(--radius-lg);
+      background: var(--color-paper-3);
+      color: var(--color-ink);
+      font: inherit;
+      font-size: var(--text-sm);
+      padding: 0.55rem 0.7rem;
+      resize: vertical;
+      min-height: 2.6rem;
+    }
+    .clarify-other-input:focus {
+      outline: none;
+      border-color: color-mix(in oklch, var(--color-accent) 50%, var(--color-rule));
+    }
+    .clarify-card.is-done .clarify-option,
+    .clarify-card.is-done .clarify-other-toggle {
+      cursor: default;
+    }
+    .clarify-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      padding-top: 0.15rem;
+    }
+    .clarify-submit {
+      appearance: none;
+      border: 0;
+      border-radius: var(--radius-pill);
+      background: var(--color-accent);
+      color: var(--color-accent-ink);
+      font: inherit;
+      font-size: var(--text-sm);
+      font-weight: 600;
+      padding: 0.45rem 0.95rem;
+      cursor: pointer;
+    }
+    .clarify-submit:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .clarify-summary {
+      display: grid;
+      gap: 0.35rem;
+      font-size: var(--text-sm);
+      color: var(--color-ink-2);
+    }
+    .clarify-summary strong {
+      color: var(--color-ink);
+      font-weight: 600;
+    }
     .agent-final-answer {
       min-width: 0;
     }
@@ -1854,6 +2029,53 @@
         color-mix(in oklch, var(--color-accent) 13%, var(--color-paper-2))
       );
       box-shadow: var(--shadow-2);
+    }
+    .msg-queued {
+      opacity: 0.72;
+    }
+    .msg-queued.is-editing {
+      opacity: 1;
+    }
+    .msg-queued .msg-bubble {
+      border-style: dashed;
+      box-shadow: none;
+    }
+    .msg-queued.is-editing .msg-queued-meta {
+      display: none;
+    }
+    .msg-queued-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.45rem;
+      margin-top: 0.35rem;
+      max-width: 85%;
+      margin-left: auto;
+    }
+    .msg-queued-label {
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--color-muted);
+      text-transform: uppercase;
+    }
+    .msg-queued-label.is-paused {
+      color: var(--color-warn);
+    }
+    .msg-queued-action {
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      font: inherit;
+      font-size: var(--text-xs);
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0.1rem 0.25rem;
+      border-radius: var(--radius-sm);
+    }
+    .msg-queued-action:hover {
+      color: var(--color-ink);
+      background: var(--surface-hover);
     }
     /* Assistant turns are a quiet reading surface, not a competing card. */
     .msg-role-assistant .msg-bubble {
@@ -2776,6 +2998,55 @@
       font-weight: 600;
       color: var(--color-ink);
     }
+    .capability-advanced {
+      display: grid;
+      gap: 0.55rem;
+    }
+    .capability-advanced-toggle {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      justify-self: start;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      font: inherit;
+      font-size: var(--text-xs);
+      font-weight: 550;
+      letter-spacing: 0.02em;
+      padding: 0.15rem 0;
+      cursor: pointer;
+      transition: color var(--dur-short) var(--ease-out);
+    }
+    .capability-advanced-toggle:hover:not(:disabled) {
+      color: var(--color-ink-2);
+    }
+    .capability-advanced-toggle:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+    .capability-advanced-toggle:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
+    .capability-advanced-caret {
+      display: inline-block;
+      font-size: 0.7rem;
+      line-height: 1;
+      transition: transform var(--dur-short) var(--ease-settle);
+    }
+    .capability-advanced-toggle[aria-expanded="true"] .capability-advanced-caret {
+      transform: rotate(180deg);
+    }
+    .capability-advanced-panel {
+      display: grid;
+      gap: 1rem;
+    }
+    .capability-advanced-panel.is-collapsed {
+      display: none;
+    }
     .settings-row {
       display: grid;
       grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr);
@@ -3107,9 +3378,8 @@
       align-items: center;
       justify-content: flex-end;
     }
-    .composer-tools .btn-attach,
+    .composer-tools .btn-plus,
     .composer-tools .btn-think,
-    .composer-tools .btn-agent,
     .composer-buttons .btn-mic,
     .composer-buttons .btn-send,
     .composer-buttons #btnStop {
@@ -3118,21 +3388,263 @@
       box-sizing: border-box;
       line-height: 1;
     }
-    .composer-tools .btn-think,
-    .composer-tools .btn-agent {
+    .composer-tools .btn-think {
       font-family: var(--font-body);
       font-size: 0.8rem;
       font-weight: 500;
       letter-spacing: 0.005em;
       line-height: 1;
+      padding: 0 0.75rem;
     }
-    .composer-tools .btn-attach,
     .composer-buttons .btn-mic {
       width: 2.1rem;
       padding: 0;
     }
-    .composer-tools .btn-think { padding: 0 0.75rem; }
-    .composer-tools .btn-agent { padding: 0 0.75rem 0 0.5rem; }
+    .composer-plus-wrap {
+      position: relative;
+      flex: 0 0 auto;
+    }
+    .btn-plus {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.1rem;
+      padding: 0;
+      border: 1px solid var(--color-rule);
+      border-radius: var(--radius-pill);
+      background: transparent;
+      color: var(--color-ink-2);
+      cursor: pointer;
+      transition:
+        color var(--dur-short) var(--ease-out),
+        background var(--dur-short) var(--ease-out),
+        border-color var(--dur-short) var(--ease-out);
+    }
+    .btn-plus svg {
+      width: 1.1rem;
+      height: 1.1rem;
+      display: block;
+      transform: rotate(0deg);
+      transition: transform var(--dur-short) var(--ease-out);
+    }
+    .btn-plus:hover:not(:disabled) {
+      color: var(--color-ink);
+      border-color: var(--color-rule-2);
+      background: var(--surface-hover);
+    }
+    .btn-plus[aria-expanded="true"],
+    .btn-plus.is-active {
+      color: var(--color-ink);
+      border-color: var(--accent-edge);
+      background: var(--accent-wash);
+    }
+    .btn-plus[aria-expanded="true"] svg {
+      transform: rotate(45deg);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-plus svg {
+        transition: none;
+      }
+    }
+    .btn-plus:disabled {
+      opacity: 0.42;
+      cursor: default;
+    }
+    .plus-menu {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 10px);
+      bottom: auto;
+      width: 100%;
+      max-height: min(22rem, calc(100dvh - 8rem));
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 0.25rem;
+      border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
+      border-radius: var(--radius-xl);
+      background: var(--color-paper-3);
+      box-shadow: var(--shadow-3);
+      z-index: 45;
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+      transform-origin: top center;
+      pointer-events: none;
+      transition:
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-short) var(--ease-settle);
+    }
+    .plus-menu.is-above {
+      top: auto;
+      bottom: calc(100% + 10px);
+      transform: translateY(6px) scale(0.98);
+      transform-origin: bottom center;
+    }
+    .plus-menu.is-open {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+    }
+    .plus-menu.is-hidden { display: none !important; }
+    .plus-menu-item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1.65rem minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.65rem;
+      border: 0;
+      background: transparent;
+      color: var(--color-ink);
+      text-align: left;
+      padding: 0.42rem 0.55rem;
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      font: inherit;
+    }
+    .plus-menu-item:hover:not(:disabled),
+    .plus-menu-item.is-active:not(:disabled) {
+      background: var(--surface-hover);
+    }
+    .plus-menu-item:disabled {
+      opacity: 0.48;
+      cursor: default;
+    }
+    .plus-menu-item.is-on {
+      background: var(--accent-wash);
+    }
+    .plus-menu-icon {
+      width: 1.65rem;
+      height: 1.65rem;
+      border-radius: 0.5rem;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+    }
+    .plus-menu-icon svg {
+      width: 0.95rem;
+      height: 0.95rem;
+      display: block;
+    }
+    .plus-menu-icon.is-attach {
+      background: color-mix(in oklch, oklch(72% 0.08 250) 22%, transparent);
+      color: oklch(78% 0.1 250);
+    }
+    .plus-menu-icon.is-search {
+      background: color-mix(in oklch, oklch(78% 0.14 210) 22%, transparent);
+      color: oklch(78% 0.14 210);
+    }
+    .plus-menu-icon.is-fetch {
+      background: color-mix(in oklch, oklch(76% 0.15 55) 22%, transparent);
+      color: oklch(78% 0.15 55);
+    }
+    .plus-menu-icon.is-research {
+      background: color-mix(in oklch, oklch(70% 0.16 255) 24%, transparent);
+      color: oklch(74% 0.16 255);
+    }
+    .plus-menu-icon.is-agent {
+      background: color-mix(in oklch, oklch(72% 0.17 305) 22%, transparent);
+      color: oklch(78% 0.16 305);
+    }
+    html[data-theme="light"] .plus-menu-icon.is-attach { color: oklch(48% 0.12 250); }
+    html[data-theme="light"] .plus-menu-icon.is-search { color: oklch(48% 0.12 210); }
+    html[data-theme="light"] .plus-menu-icon.is-fetch { color: oklch(52% 0.14 55); }
+    html[data-theme="light"] .plus-menu-icon.is-research { color: oklch(48% 0.15 255); }
+    html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); }
+    .plus-menu-copy {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      overflow: hidden;
+    }
+    .plus-menu-title {
+      flex: 0 0 auto;
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--color-ink);
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+    .plus-menu-desc {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: 0.8rem;
+      font-weight: 450;
+      color: var(--color-muted);
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .plus-menu-badge {
+      flex: 0 0 auto;
+      padding: 0.08rem 0.4rem;
+      border-radius: var(--radius-pill);
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      background: color-mix(in oklch, var(--color-accent) 14%, transparent);
+      border: 1px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .plus-menu-trail {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.4rem;
+      min-width: 1rem;
+    }
+    .plus-menu-check {
+      width: 1rem;
+      height: 1rem;
+      color: var(--color-accent);
+      opacity: 0;
+      flex: 0 0 auto;
+    }
+    .plus-menu-item.is-on .plus-menu-check { opacity: 1; }
+    .plus-menu-check svg {
+      width: 1rem;
+      height: 1rem;
+      display: block;
+    }
+    .composer-modes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    .composer-modes:empty { display: none; }
+    .composer-mode-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.35rem 0.2rem 0.55rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--accent-edge);
+      background: color-mix(in oklch, var(--color-accent) 16%, transparent);
+      color: var(--color-ink);
+      font-size: var(--text-xs);
+      font-weight: 600;
+    }
+    .composer-mode-chip button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      cursor: pointer;
+      display: inline-grid;
+      place-items: center;
+      width: 1.15rem;
+      height: 1.15rem;
+      padding: 0;
+      font-size: 0.95rem;
+      line-height: 1;
+      border-radius: var(--radius-pill);
+    }
+    .composer-mode-chip button:hover { color: var(--color-ink); }
     /* Circular send/stop: an unmistakable single target at the corner. */
     .composer-buttons .btn-mic,
     .composer-buttons .btn-send,
@@ -3203,7 +3715,6 @@
       color: var(--color-danger);
       background: color-mix(in oklch, var(--color-danger) 12%, transparent);
     }
-    .btn-attach,
     .btn-mic {
       display: inline-flex;
       align-items: center;
@@ -3216,15 +3727,12 @@
       flex: 0 0 auto;
       transition: opacity var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out);
     }
-    .btn-attach svg,
     .btn-mic svg { width: 1.05rem; height: 1.05rem; }
-    .btn-attach:hover:not(.is-disabled),
     .btn-mic:hover:not(.is-disabled):not(.is-listening) {
       color: var(--color-ink);
       border-color: var(--color-rule-2);
       background: var(--surface-hover);
     }
-    .btn-attach.is-disabled,
     .btn-mic.is-disabled {
       opacity: 0.42;
       cursor: pointer;
@@ -3402,72 +3910,6 @@
       font-family: var(--font-mono);
       font-size: var(--text-xs);
       color: var(--color-muted);
-    }
-    .btn-agent {
-      gap: 0.45rem;
-      font-size: 0.8rem;
-      font-family: var(--font-body);
-      font-weight: 500;
-      letter-spacing: 0.005em;
-      line-height: 1;
-      color: var(--color-muted);
-      padding: 0 0.75rem 0 0.5rem;
-      border-radius: var(--radius-pill);
-      border-color: var(--color-rule);
-      background: transparent;
-      transition:
-        color var(--dur-short) var(--ease-out),
-        background var(--dur-short) var(--ease-out),
-        border-color var(--dur-short) var(--ease-out);
-    }
-    .btn-agent:hover:not(:disabled) {
-      color: var(--color-ink-2);
-      border-color: var(--color-rule-2);
-      background: var(--surface-hover);
-      box-shadow: none;
-      transform: none;
-    }
-    .btn-agent-switch {
-      position: relative;
-      flex: 0 0 auto;
-      width: 1.55rem;
-      height: 0.85rem;
-      border-radius: 999px;
-      background: color-mix(in oklch, var(--color-rule) 70%, var(--color-paper));
-      border: 1px solid var(--color-rule-2);
-      transition:
-        background var(--dur-short) var(--ease-out),
-        border-color var(--dur-short) var(--ease-out);
-    }
-    .btn-agent-switch::after {
-      content: "";
-      position: absolute;
-      top: 1px;
-      left: 1px;
-      width: 0.55rem;
-      height: 0.55rem;
-      border-radius: 999px;
-      background: var(--color-muted);
-      transition:
-        transform var(--dur-short) var(--ease-out),
-        background var(--dur-short) var(--ease-out);
-    }
-    .btn-agent.is-on {
-      color: var(--color-ink);
-      border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule));
-      background: var(--accent-wash);
-    }
-    .btn-agent.is-on:hover:not(:disabled) {
-      border-color: color-mix(in oklch, var(--color-accent) 70%, var(--color-rule));
-      background: var(--accent-wash-2);
-    }
-    .btn-agent.is-on .btn-agent-switch {
-      background: color-mix(in oklch, var(--color-accent) 55%, var(--color-paper));
-      border-color: color-mix(in oklch, var(--color-accent) 65%, var(--color-rule));
-    }
-    .btn-agent.is-on .btn-agent-switch::after {
-      transform: translateX(0.65rem);
-      background: var(--color-ink);
     }
     .agent-trace {
       display: grid;
@@ -3693,6 +4135,25 @@
       border-radius: var(--radius-pill);
     }
     .composer-mention-chip button:hover { color: var(--color-ink); }
+    .composer-mention-chip.is-forced {
+      border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-accent) 28%, transparent);
+    }
+    .composer-mention-chip .chip-badge {
+      font-family: var(--font-mono);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      padding: 0.05rem 0.35rem;
+      border-radius: var(--radius-pill);
+      background: color-mix(in oklch, var(--color-accent) 18%, transparent);
+      border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+    }
+    .composer-mode-chip.is-agent-available span:first-child {
+      letter-spacing: 0.01em;
+    }
 
     .mention-menu {
       position: absolute;
@@ -4029,10 +4490,9 @@
         max-width: 74vw;
       }
       .chat-model-select { max-width: none; }
-      /* Buy back ~18px so the three tool pills stay on one row a bit longer. */
+      /* Buy back space so + / Think stay on one row a bit longer. */
       .composer-tools { gap: 0.25rem; }
       .composer-tools .btn-think { padding: 0 0.55rem; }
-      .composer-tools .btn-agent { padding: 0 0.55rem 0 0.4rem; gap: 0.4rem; }
       .chat-composer-dock { padding-left: 0.75rem; padding-right: 0.75rem; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -4108,7 +4568,7 @@
         </div>
         <button type="button" class="btn btn-ghost sidebar-footer-prefs" id="btnSettings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
-          <span>Preferences</span>
+          <span>Settings</span>
         </button>
         <div class="mode-switch" role="navigation" aria-label="Mode">
           <a href="/" class="is-active" aria-current="page">
@@ -4239,6 +4699,7 @@
   <div class="composer-shell" id="composerShell">
     <div class="composer-card" id="composerCard">
       <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
+      <div class="composer-modes" id="composerModes" aria-live="polite"></div>
       <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
       <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
       <textarea
@@ -4250,9 +4711,11 @@
       ></textarea>
       <div class="composer-actions">
         <div class="composer-tools">
-          <button type="button" class="btn-attach is-disabled" id="btnAttach" aria-label="Attach files" aria-disabled="true" title="Go to Preferences → Attachments to configure">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          </button>
+          <div class="composer-plus-wrap" id="composerPlusWrap">
+            <button type="button" class="btn-plus" id="btnPlus" aria-haspopup="menu" aria-expanded="false" aria-controls="plusMenu" title="Add files and capabilities">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            </button>
+          </div>
           <input type="file" id="attachFileInput" multiple accept="image/*,.pdf,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.yml,.yaml,.toml,.ini,.log,.sql,.sh,.bat,.ps1,text/*" hidden>
           <div class="composer-think-wrap" id="composerThinkWrap">
             <button type="button" class="btn-think" id="btnThink" aria-haspopup="menu" aria-expanded="false" title="Thinking intensity — how hard reasoning models should think">
@@ -4272,10 +4735,6 @@
               <button type="button" role="menuitemradio" data-effort="max">Max</button>
             </div>
           </div>
-          <button type="button" class="btn btn-outline btn-agent" id="btnAgent" aria-pressed="false" title="Agent mode — model can call enabled capabilities">
-            <span class="btn-agent-switch" aria-hidden="true"></span>
-            Agent
-          </button>
         </div>
         <div class="composer-buttons">
           <button type="button" class="btn btn-outline is-hidden" id="btnStop" aria-label="Stop generating" title="Stop generating">
@@ -4289,6 +4748,7 @@
           </button>
         </div>
       </div>
+      <div class="plus-menu is-hidden" id="plusMenu" role="menu" aria-label="Add files and capabilities"></div>
     </div>
     <p class="composer-hint" id="composerHint">Shift+Enter for a new line · @ to use a tool once</p>
   </div>
@@ -4459,7 +4919,7 @@
 
           <section class="settings-pane" data-settings-pane="agent-capabilities">
             <h2 class="settings-pane-title">Agent Capabilities</h2>
-            <p class="settings-pane-lede">Tools the model can call in agent mode. Toggle <strong>Agent</strong> in the composer for every message, or type <code>@</code> to use a tool once.</p>
+            <p class="settings-pane-lede">Tools the model can call in agent mode. Open the composer <strong>+</strong> menu for Agent, Deep research, web search, fetch URL, and file uploads — or type <code>@</code> to use a tool once.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Web search</h3>
               <label class="field-check">
@@ -4471,81 +4931,87 @@
                   </span>
                 </span>
               </label>
-              <div id="webSearchOptions" style="display:grid;gap:1rem">
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchBackend">Search engine</label>
-                  <div>
-                    <select class="field-select" id="settingWebSearchBackend">
-                      <option value="auto">Auto (recommended)</option>
-                      <option value="duckduckgo">DuckDuckGo</option>
-                      <option value="brave">Brave</option>
-                      <option value="bing">Bing</option>
-                      <option value="google">Google</option>
-                      <option value="mojeek">Mojeek</option>
-                      <option value="startpage">Startpage</option>
-                      <option value="yahoo">Yahoo</option>
-                      <option value="yandex">Yandex</option>
-                      <option value="wikipedia">Wikipedia</option>
+              <div class="capability-advanced" data-capability-advanced="web-search">
+                <button type="button" class="capability-advanced-toggle" id="btnWebSearchAdvanced" aria-expanded="false" aria-controls="webSearchOptions">
+                  Advanced
+                  <span class="capability-advanced-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="webSearchOptions" class="capability-advanced-panel is-collapsed" hidden>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchBackend">Search engine</label>
+                    <div>
+                      <select class="field-select" id="settingWebSearchBackend">
+                        <option value="auto">Auto (recommended)</option>
+                        <option value="duckduckgo">DuckDuckGo</option>
+                        <option value="brave">Brave</option>
+                        <option value="bing">Bing</option>
+                        <option value="google">Google</option>
+                        <option value="mojeek">Mojeek</option>
+                        <option value="startpage">Startpage</option>
+                        <option value="yahoo">Yahoo</option>
+                        <option value="yandex">Yandex</option>
+                        <option value="wikipedia">Wikipedia</option>
+                      </select>
+                      <p class="field-hint">Auto lets DDGS choose and fall back between available search engines.</p>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchResults">Result count</label>
+                    <div>
+                      <input class="field-input" id="settingWebSearchResults" type="number" min="1" max="20" step="1" value="6">
+                      <p class="field-hint">How many linked results to return to the model (1–20).</p>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchRegion">Region</label>
+                    <div>
+                      <input class="field-input" id="settingWebSearchRegion" type="text" list="webSearchRegionOptions" maxlength="5" value="us-en" spellcheck="false" autocomplete="off">
+                      <datalist id="webSearchRegionOptions">
+                        <option value="wt-wt">Worldwide</option>
+                        <option value="us-en">United States</option>
+                        <option value="uk-en">United Kingdom</option>
+                        <option value="ca-en">Canada (English)</option>
+                        <option value="ca-fr">Canada (French)</option>
+                        <option value="au-en">Australia</option>
+                        <option value="de-de">Germany</option>
+                        <option value="fr-fr">France</option>
+                        <option value="es-es">Spain</option>
+                        <option value="it-it">Italy</option>
+                        <option value="jp-jp">Japan</option>
+                      </datalist>
+                      <p class="field-hint">A DDGS region code such as <code>us-en</code>, <code>uk-en</code>, or <code>wt-wt</code> for worldwide.</p>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchSafeSearch">SafeSearch</label>
+                    <select class="field-select" id="settingWebSearchSafeSearch">
+                      <option value="moderate">Moderate (default)</option>
+                      <option value="on">Strict</option>
+                      <option value="off">Off</option>
                     </select>
-                    <p class="field-hint">Auto lets DDGS choose and fall back between available search engines.</p>
                   </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchResults">Result count</label>
-                  <div>
-                    <input class="field-input" id="settingWebSearchResults" type="number" min="1" max="20" step="1" value="6">
-                    <p class="field-hint">How many linked results to return to the model (1–20).</p>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchRegion">Region</label>
-                  <div>
-                    <input class="field-input" id="settingWebSearchRegion" type="text" list="webSearchRegionOptions" maxlength="5" value="us-en" spellcheck="false" autocomplete="off">
-                    <datalist id="webSearchRegionOptions">
-                      <option value="wt-wt">Worldwide</option>
-                      <option value="us-en">United States</option>
-                      <option value="uk-en">United Kingdom</option>
-                      <option value="ca-en">Canada (English)</option>
-                      <option value="ca-fr">Canada (French)</option>
-                      <option value="au-en">Australia</option>
-                      <option value="de-de">Germany</option>
-                      <option value="fr-fr">France</option>
-                      <option value="es-es">Spain</option>
-                      <option value="it-it">Italy</option>
-                      <option value="jp-jp">Japan</option>
-                    </datalist>
-                    <p class="field-hint">A DDGS region code such as <code>us-en</code>, <code>uk-en</code>, or <code>wt-wt</code> for worldwide.</p>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchSafeSearch">SafeSearch</label>
-                  <select class="field-select" id="settingWebSearchSafeSearch">
-                    <option value="moderate">Moderate (default)</option>
-                    <option value="on">Strict</option>
-                    <option value="off">Off</option>
-                  </select>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchRecency">Recency</label>
-                  <select class="field-select" id="settingWebSearchRecency">
-                    <option value="any">Any time</option>
-                    <option value="day">Past day</option>
-                    <option value="week">Past week</option>
-                    <option value="month">Past month</option>
-                    <option value="year">Past year</option>
-                  </select>
-                </div>
-                <div class="settings-row">
-                  <label class="field-label" for="settingWebSearchDepth">Page depth</label>
-                  <div>
-                    <select class="field-select" id="settingWebSearchDepth">
-                      <option value="auto">Auto (default) — 3 pages</option>
-                      <option value="off">Snippets only — no page fetch</option>
-                      <option value="light">Light — 2 pages</option>
-                      <option value="standard">Standard — 4 pages</option>
-                      <option value="deep">Deep — 6 pages</option>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchRecency">Recency</label>
+                    <select class="field-select" id="settingWebSearchRecency">
+                      <option value="any">Any time</option>
+                      <option value="day">Past day</option>
+                      <option value="week">Past week</option>
+                      <option value="month">Past month</option>
+                      <option value="year">Past year</option>
                     </select>
-                    <p class="field-hint">How many result pages to open and how much text to extract after the search listing.</p>
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchDepth">Page depth</label>
+                    <div>
+                      <select class="field-select" id="settingWebSearchDepth">
+                        <option value="auto">Auto (default) — 3 pages</option>
+                        <option value="off">Snippets only — no page fetch</option>
+                        <option value="light">Light — 2 pages</option>
+                        <option value="standard">Standard — 4 pages</option>
+                        <option value="deep">Deep — 6 pages</option>
+                      </select>
+                      <p class="field-hint">How many result pages to open and how much text to extract after the search listing.</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4558,6 +5024,18 @@
                   <strong style="color:var(--color-ink);font-weight:600">Enable fetch URL</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
                     Open one specific page the user (or a prior result) names and extract readable text — not a web search.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Deep research</h3>
+              <label class="field-check">
+                <input type="checkbox" id="settingSkillDeepResearch" checked>
+                <span>
+                  <strong style="color:var(--color-ink);font-weight:600">Enable deep research</strong>
+                  <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
+                    Investigate across many sources with varied search methods. Pick comprehensive or concise from the composer <strong>+</strong> menu.
                   </span>
                 </span>
               </label>
@@ -4657,7 +5135,7 @@
 
           <section class="settings-pane" data-settings-pane="data">
             <h2 class="settings-pane-title">Local Data</h2>
-            <p class="settings-pane-lede" id="settingsDataLede">Chats, projects, and preferences are stored on disk by default.</p>
+            <p class="settings-pane-lede" id="settingsDataLede">Chats, projects, and settings are stored on disk by default.</p>
             <p class="field-hint" id="settingsDataSummary" style="margin:0 0 0.85rem">—</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Storage location</h3>
@@ -4674,11 +5152,11 @@
                 <input type="checkbox" id="settingBrowserStorage">
                 <span>Use browser localStorage only <span style="color:var(--color-muted)">(optional; data stays in this browser profile)</span></span>
               </label>
-              <p class="field-hint" id="settingsStorageHint" style="margin:0.35rem 0 0">When off, chats and preferences are saved under the data folder above.</p>
+              <p class="field-hint" id="settingsStorageHint" style="margin:0.35rem 0 0">When off, chats and settings are saved under the data folder above.</p>
             </div>
             <div class="settings-section" id="settingsEncryptionSection">
               <h3 class="settings-section-title">Encryption at rest</h3>
-              <p class="field-hint" id="settingsEncryptionStatus" style="margin:0 0 0.65rem">Off — chats and preferences are stored as plain JSON on disk.</p>
+              <p class="field-hint" id="settingsEncryptionStatus" style="margin:0 0 0.65rem">Off — chats and settings are stored as plain JSON on disk.</p>
               <div id="settingsEncryptionEnable" class="settings-encryption-form">
                 <label class="field">
                   <span class="field-label">Passphrase</span>
@@ -4759,7 +5237,7 @@
   <div id="unlockModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="unlockModalTitle">
     <div class="dialog unlock-dialog">
       <h2 class="settings-pane-title" id="unlockModalTitle">Unlock local data</h2>
-      <p class="settings-pane-lede">Chats and preferences are encrypted. Enter your passphrase to continue.</p>
+      <p class="settings-pane-lede">Chats and settings are encrypted. Enter your passphrase to continue.</p>
       <label class="field">
         <span class="field-label" for="unlockModalPassphrase">Passphrase</span>
         <input class="field-input" id="unlockModalPassphrase" type="password" autocomplete="current-password" spellcheck="false">
@@ -4828,6 +5306,7 @@
     const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'brave', 'bing', 'google', 'mojeek', 'startpage', 'yahoo', 'yandex', 'wikipedia'];
     const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
     const WEB_SEARCH_RECENCIES = ['any', 'day', 'week', 'month', 'year'];
+    const DEEP_RESEARCH_MODES = ['off', 'long', 'brief'];
     const ATTACHMENTS_MODES = ['auto', 'on', 'off'];
     const ATTACHMENT_MIN_CONTEXT = 16384;
     const ATTACHMENT_MAX_FILES = 6;
@@ -4853,7 +5332,9 @@
       webSearchSafeSearch: 'moderate',
       webSearchRecency: 'any',
       skillFetchUrl: true,
+      skillDeepResearch: true,
       agentMode: false,
+      deepResearch: 'off', // off | long | brief — composer Research mode
       attachmentsMode: 'auto', // auto | on | off
       attachmentTextFallback: false,
       attachmentOcr: false,
@@ -4891,8 +5372,9 @@
     const topbarIncognito = document.getElementById('topbarIncognito');
     const btnSend = document.getElementById('btnSend');
     const btnStop = document.getElementById('btnStop');
-    const btnAgent = document.getElementById('btnAgent');
-    const btnAttach = document.getElementById('btnAttach');
+    const btnPlus = document.getElementById('btnPlus');
+    const plusMenu = document.getElementById('plusMenu');
+    const composerModes = document.getElementById('composerModes');
     const btnMic = document.getElementById('btnMic');
     const attachFileInput = document.getElementById('attachFileInput');
     const composerAttachmentsEl = document.getElementById('composerAttachments');
@@ -5114,16 +5596,21 @@
       {
         id: 'web_search',
         label: 'web_search',
-        description: 'Search the web for this message',
+        description: 'Search the web (stays on until you remove it)',
       },
       {
         id: 'fetch_url',
         label: 'fetch_url',
-        description: 'Open a specific URL for this message',
+        description: 'Open a URL (stays on until you remove it)',
+      },
+      {
+        id: 'deep_research',
+        label: 'deep_research',
+        description: 'Investigate across many sources for this message',
       },
     ];
     const MENTION_IDS = MENTION_OPTIONS.map((item) => item.id);
-    const MENTION_TOKEN_RE = /@(?:web_search|fetch_url|agent)\b/gi;
+    const MENTION_TOKEN_RE = /@(?:web_search|fetch_url|deep_research|agent)\b/gi;
     let mentionState = null; // { start, query, activeIndex, items }
     /** Active composer mentions shown as chips (not as literal text in the textarea). */
     const composerMentionIds = new Set();
@@ -5505,6 +5992,7 @@
     let activeProjectId = null;
     /** 'chat' | 'projects' */
     let mainView = 'chat';
+    let suppressUrlSync = false;
     let editingProjectId = null;
     let creatingProject = false;
     let openConvoMenu = null;
@@ -5528,6 +6016,17 @@
      * }>}
      */
     const activeStreams = new Map();
+    /** @type {Map<string, Array<{
+     *   id: string,
+     *   editText: string,
+     *   displayText: string,
+     *   apiText: string|object,
+     *   attachments: Array<object>,
+     *   turn: { useAgent: boolean, skills: object, deepResearch: boolean, deepResearchOutput: string, forceTools: string[] }
+     * }>>} */
+    const outboundQueues = new Map();
+    /** Queue item id currently open in the in-thread editor, if any. */
+    let editingQueueId = null;
     /** Remember pin state per conversation across switches. */
     const stickByConvo = new Map();
 
@@ -5568,7 +6067,11 @@
           ? parsed.webSearchRecency
           : DEFAULT_SETTINGS.webSearchRecency,
         skillFetchUrl: parsed.skillFetchUrl !== false,
+        skillDeepResearch: parsed.skillDeepResearch !== false,
         agentMode: parsed.agentMode === true,
+        deepResearch: DEEP_RESEARCH_MODES.includes(parsed.deepResearch)
+          ? parsed.deepResearch
+          : DEFAULT_SETTINGS.deepResearch,
         attachmentsMode: ATTACHMENTS_MODES.includes(parsed.attachmentsMode)
           ? parsed.attachmentsMode
           : DEFAULT_SETTINGS.attachmentsMode,
@@ -5603,6 +6106,7 @@
       updateGreeting();
       updateComposerHint();
       syncAgentButton();
+      syncResearchControls();
       syncAttachButton();
       if (!storageReady || diskEncryptionLocked()) return;
       if (browserStorage) {
@@ -5643,7 +6147,9 @@
         && value.webSearchSafeSearch === DEFAULT_SETTINGS.webSearchSafeSearch
         && value.webSearchRecency === DEFAULT_SETTINGS.webSearchRecency
         && value.skillFetchUrl === DEFAULT_SETTINGS.skillFetchUrl
+        && value.skillDeepResearch === DEFAULT_SETTINGS.skillDeepResearch
         && value.agentMode === DEFAULT_SETTINGS.agentMode
+        && value.deepResearch === DEFAULT_SETTINGS.deepResearch
         && value.attachmentsMode === DEFAULT_SETTINGS.attachmentsMode
         && value.attachmentTextFallback === DEFAULT_SETTINGS.attachmentTextFallback
         && value.attachmentOcr === DEFAULT_SETTINGS.attachmentOcr
@@ -5664,8 +6170,8 @@
       if (toggle) toggle.checked = !!browserStorage;
       if (lede) {
         lede.textContent = browserStorage
-          ? 'Chats, projects, and preferences are stored in this browser profile only.'
-          : 'Chats, projects, and preferences are stored on disk in your OS data folder.';
+          ? 'Chats, projects, and settings are stored in this browser profile only.'
+          : 'Chats, projects, and settings are stored on disk in your OS data folder.';
       }
       if (personalizationLede) {
         personalizationLede.textContent = browserStorage
@@ -5677,7 +6183,7 @@
       }
       if (filesEl) {
         if (browserStorage) {
-          filesEl.textContent = 'Browser mode ignores the data folder for chats and preferences. Providers, appearance, and skills still use disk.';
+          filesEl.textContent = 'Browser mode ignores the data folder for chats and settings. Providers, appearance, and skills still use disk.';
         } else if (dataInfo) {
           filesEl.textContent = dataInfo.encryption_enabled
             ? 'Includes config.toml, encrypted chats.json / preferences.json, encryption.json, and chat-skills/. Providers & appearance stay in config.toml.'
@@ -5692,8 +6198,8 @@
       }
       if (hint) {
         hint.textContent = browserStorage
-          ? 'On: chats and preferences stay in this browser only. Providers/skills remain on disk.'
-          : 'Off: chats and preferences are saved under the data folder above.';
+          ? 'On: chats and settings stay in this browser only. Providers/skills remain on disk.'
+          : 'Off: chats and settings are saved under the data folder above.';
       }
       refreshEncryptionPane();
     }
@@ -5726,7 +6232,7 @@
       }
 
       if (!enabled) {
-        statusEl.textContent = 'Off — chats and preferences are stored as plain JSON on disk.';
+        statusEl.textContent = 'Off — chats and settings are stored as plain JSON on disk.';
         enableEl.classList.remove('is-hidden');
         return;
       }
@@ -5737,7 +6243,7 @@
         return;
       }
 
-      statusEl.textContent = 'Unlocked — chats and preferences are encrypted on disk for this session.';
+      statusEl.textContent = 'Unlocked — chats and settings are encrypted on disk for this session.';
       activeEl.classList.remove('is-hidden');
     }
 
@@ -5842,6 +6348,7 @@
       }
       refreshLocalDataPane();
       syncAgentButton();
+      syncResearchControls();
       if (diskEncryptionLocked()) promptUnlockSession();
     }
 
@@ -5876,13 +6383,11 @@
       updateGreeting();
       updateComposerHint();
       syncAgentButton();
+      syncResearchControls();
       if (settingsModal && !settingsModal.classList.contains('is-hidden')) {
         fillSettingsFormFromState();
       }
-      const convo = activeId && conversations.find((item) => item.id === activeId);
-      if (convo) selectConversation(convo.id);
-      else startDraft();
-      if (mainView === 'projects') renderProjectsPage();
+      applyLocationRoute();
       refreshSettingsDataSummary();
     }
 
@@ -5891,6 +6396,8 @@
       clearTimeout(saveSettingsTimer);
       abortAllStreams();
       activeStreams.clear();
+      outboundQueues.clear();
+      editingQueueId = null;
       stickByConvo.clear();
       projects = [];
       conversations = [];
@@ -5963,12 +6470,21 @@
     }
 
     function syncAgentButton() {
-      const on = !!settings.agentMode;
-      btnAgent.classList.toggle('is-on', on);
-      btnAgent.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btnAgent.title = on
-        ? 'Agent mode on — enabled capabilities can run on every message'
-        : 'Agent mode off — toggle on, or @ a tool for one message';
+      renderPlusMenu();
+      renderComposerModes();
+      renderComposerMentions();
+      syncPlusButton();
+    }
+
+    function syncPlusButton() {
+      if (!btnPlus) return;
+      const active = !!settings.agentMode
+        || settings.deepResearch === 'long'
+        || settings.deepResearch === 'brief'
+        || composerMentionIds.has('web_search')
+        || composerMentionIds.has('fetch_url')
+        || composerMentionIds.has('deep_research');
+      btnPlus.classList.toggle('is-active', active);
     }
 
     function getProject(id) {
@@ -6240,14 +6756,15 @@
         const id = token.slice(1).toLowerCase();
         if (id === 'agent') {
           // Legacy @agent → treat as all built-in capabilities for this message.
-          MENTION_IDS.forEach((cap) => mentions.add(cap));
+          mentions.add('web_search');
+          mentions.add('fetch_url');
         } else if (MENTION_IDS.includes(id)) {
           mentions.add(id);
         }
         return token;
       });
       const text = source
-        .replace(/(^|\s)@(?:web_search|fetch_url|agent)\b/gi, '$1')
+        .replace(/(^|\s)@(?:web_search|fetch_url|deep_research|agent)\b/gi, '$1')
         .replace(/\s{2,}/g, ' ')
         .trim();
       return { text: text || source.trim(), mentions };
@@ -6257,7 +6774,7 @@
       return escapeHtml(text)
         .replace(/\n/g, '<br>')
         .replace(
-          /(^|[\s>])(@(?:web_search|fetch_url|agent))\b/gi,
+          /(^|[\s>])(@(?:web_search|fetch_url|deep_research|agent))\b/gi,
           (_, lead, token) => {
             const id = token.slice(1).toLowerCase();
             return lead + '<span class="mention" data-mention="' + id + '">' + token + '</span>';
@@ -6318,13 +6835,13 @@
         ? settings.attachmentsMode
         : 'auto';
       if (mode === 'off') {
-        return 'Attachments disabled in Preferences → Attachments';
+        return 'Attachments disabled in Settings → Attachments';
       }
       if (mode === 'auto' && !attachmentsSupported && !settings.attachmentTextFallback) {
-        return 'This model does not report attachment support. Go to Preferences → Attachments to configure.';
+        return 'This model does not report attachment support. Go to Settings → Attachments to configure.';
       }
       if (mode === 'auto' && !attachmentsSupported && settings.attachmentTextFallback && !textFallbackContextOk()) {
-        return 'Context window looks too small for text extraction. Go to Preferences → Attachments to configure.';
+        return 'Context window looks too small for text extraction. Go to Settings → Attachments to configure.';
       }
       return '';
     }
@@ -6333,17 +6850,11 @@
       const meta = selectedModelMeta();
       attachmentsSupported = meta.attachmentsSupported;
       modelContextLength = meta.contextLength;
-      const enabled = attachmentsUiEnabled() && serverReady && !diskEncryptionLocked();
-      const reason = attachDisabledReason();
-      if (!btnAttach) return;
-      btnAttach.classList.toggle('is-disabled', !enabled);
-      btnAttach.setAttribute('aria-disabled', enabled ? 'false' : 'true');
-      btnAttach.title = enabled
-        ? 'Attach files'
-        : (reason || 'Go to Preferences → Attachments to configure');
       renderPendingAttachments();
       updateSendEnabled();
       syncMicButton();
+      renderPlusMenu();
+      syncPlusButton();
     }
 
     function voiceInputSupported() {
@@ -6735,7 +7246,7 @@
         }
         if (att.kind === 'image') {
           if (!(settings.attachmentTextFallback && settings.attachmentOcr && textFallbackContextOk())) {
-            throw new Error('Image attachments need a vision model, or OCR enabled in Preferences → Attachments.');
+            throw new Error('Image attachments need a vision model, or OCR enabled in Settings → Attachments.');
           }
           const text = truncateAttachmentText(await ocrAttachmentImage(att), maxChars);
           if (!text) throw new Error('OCR found no text in ' + (att.name || 'image'));
@@ -6750,9 +7261,9 @@
         // Non-image files: extract to text (native PDF document APIs are provider-specific).
         if (!settings.attachmentTextFallback || !textFallbackContextOk()) {
           if (attachmentsSupported) {
-            throw new Error('Non-image files need text extraction. Enable it in Preferences → Attachments.');
+            throw new Error('Non-image files need text extraction. Enable it in Settings → Attachments.');
           }
-          throw new Error('This model cannot take that file. Enable text extraction in Preferences → Attachments.');
+          throw new Error('This model cannot take that file. Enable text extraction in Settings → Attachments.');
         }
         const text = truncateAttachmentText(await extractAttachmentText(att), maxChars);
         if (!text) throw new Error('No extractable text in ' + (att.name || 'file'));
@@ -6839,16 +7350,26 @@
 
     function resolveTurnSkills(mentionIds) {
       const mentioned = mentionIds instanceof Set ? mentionIds : new Set(mentionIds || []);
-      const webSearch = (!!settings.agentMode && !!settings.skillWebSearch)
+      const deepAllowed = !!settings.skillDeepResearch;
+      const deepFromMention = deepAllowed && mentioned.has('deep_research');
+      const savedDeep = deepAllowed && DEEP_RESEARCH_MODES.includes(settings.deepResearch)
+        ? settings.deepResearch
+        : 'off';
+      const deepOutput = savedDeep !== 'off'
+        ? savedDeep
+        : (deepFromMention ? 'long' : null);
+      const deep = !!deepOutput;
+      const webSearch = deep
+        || (!!settings.agentMode && !!settings.skillWebSearch)
         || mentioned.has('web_search');
-      const fetchUrl = (!!settings.agentMode && !!settings.skillFetchUrl)
+      const fetchUrl = deep
+        || (!!settings.agentMode && !!settings.skillFetchUrl)
         || mentioned.has('fetch_url');
-      const useAgent = webSearch
+      const useAgent = deep
+        || webSearch
         || fetchUrl
         || (!!settings.agentMode && userSkills.some((skill) => skill.enabled));
-      return {
-        useAgent,
-        skills: {
+      const skills = {
           web_search: webSearch,
           web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
             ? settings.webSearchDepth
@@ -6867,8 +7388,27 @@
             ? settings.webSearchRecency
             : 'any',
           fetch_url: fetchUrl,
-        },
       };
+      if (deep) {
+        skills.web_search_depth = 'deep';
+        skills.web_search_max_results = Math.max(skills.web_search_max_results, 10);
+      }
+      return {
+        useAgent,
+        skills,
+        deepResearch: deep,
+        deepResearchOutput: deepOutput || 'long',
+        forceTools: resolveForcedTools(mentioned),
+      };
+    }
+
+    function resolveForcedTools(mentionIds) {
+      if (!settings.agentMode) return [];
+      const mentioned = mentionIds instanceof Set ? mentionIds : new Set(mentionIds || []);
+      const forced = [];
+      if (mentioned.has('web_search') && settings.skillWebSearch !== false) forced.push('web_search');
+      if (mentioned.has('fetch_url') && settings.skillFetchUrl !== false) forced.push('fetch_url');
+      return forced;
     }
 
     function getMentionContext(textarea) {
@@ -6906,6 +7446,19 @@
       return parseCapabilityMentions(mentionInput?.value || '').mentions;
     }
 
+    function mentionOptionDescription(item) {
+      if (!item) return '';
+      if (item.id === 'web_search' || item.id === 'fetch_url') {
+        if (settings.agentMode) {
+          return item.id === 'web_search'
+            ? 'Required: must search before answering'
+            : 'Required: must fetch a page before answering';
+        }
+        return 'Stays enabled for this chat until removed';
+      }
+      return item.description;
+    }
+
     function renderMentionMenu() {
       if (!mentionState || mentionState.items.length === 0) {
         closeMentionMenu();
@@ -6921,7 +7474,7 @@
         btn.setAttribute('aria-selected', index === mentionState.activeIndex ? 'true' : 'false');
         btn.innerHTML =
           '<span class="mention-option-name">' + escapeHtml(item.label) + '</span>' +
-          '<span class="mention-option-desc">' + escapeHtml(item.description) + '</span>';
+          '<span class="mention-option-desc">' + escapeHtml(mentionOptionDescription(item)) + '</span>';
         btn.addEventListener('mousedown', (event) => {
           event.preventDefault(); // keep focus in textarea
           insertMention(item);
@@ -6940,9 +7493,11 @@
         return;
       }
       const excluded = activeMentionExcludeIds();
-      const items = MENTION_OPTIONS.filter(
-        (item) => item.label.startsWith(ctx.query) && !excluded.has(item.id)
-      );
+      const items = MENTION_OPTIONS.filter((item) => {
+        if (!item.label.startsWith(ctx.query) || excluded.has(item.id)) return false;
+        if (item.id === 'deep_research' && settings.skillDeepResearch === false) return false;
+        return true;
+      });
       if (items.length === 0) {
         closeMentionMenu();
         return;
@@ -6960,19 +7515,20 @@
     /** Promote completed @capability tokens in the textarea into chips (strip text). */
     function promoteTypedMentions() {
       const value = composerInput.value;
-      if (!/(^|\s)@(?:web_search|fetch_url)\b/i.test(value)) return;
+      if (!/(^|\s)@(?:web_search|fetch_url|deep_research)\b/i.test(value)) return;
       const cursor = composerInput.selectionStart;
       const before = value.slice(0, cursor);
-      value.replace(/(^|\s)@(web_search|fetch_url)\b/gi, (_, _lead, name) => {
+      value.replace(/(^|\s)@(web_search|fetch_url|deep_research)\b/gi, (_, _lead, name) => {
         composerMentionIds.add(name.toLowerCase());
         return _;
       });
-      const next = value.replace(/(^|\s)@(?:web_search|fetch_url)\b/gi, '$1').replace(/[ \t]{2,}/g, ' ');
-      const beforeClean = before.replace(/(^|\s)@(?:web_search|fetch_url)\b/gi, '$1').replace(/[ \t]{2,}/g, ' ');
+      const next = value.replace(/(^|\s)@(?:web_search|fetch_url|deep_research)\b/gi, '$1').replace(/[ \t]{2,}/g, ' ');
+      const beforeClean = before.replace(/(^|\s)@(?:web_search|fetch_url|deep_research)\b/gi, '$1').replace(/[ \t]{2,}/g, ' ');
       composerInput.value = next;
       const nextPos = Math.min(beforeClean.length, next.length);
       composerInput.setSelectionRange(nextPos, nextPos);
       renderComposerMentions();
+      renderComposerModes();
     }
 
     function insertMention(item) {
@@ -6990,6 +7546,8 @@
         autoResize(composerInput);
         updateSendEnabled();
         renderComposerMentions();
+        renderComposerModes();
+        syncPlusButton();
       } else {
         const inserted = '@' + item.label + (after.startsWith(' ') ? '' : ' ');
         input.value = before + inserted + after;
@@ -7031,12 +7589,23 @@
 
     function renderComposerMentions() {
       composerMentions.innerHTML = '';
+      const agentOn = !!settings.agentMode;
       MENTION_IDS.forEach((id) => {
         if (!composerMentionIds.has(id)) return;
         const option = mentionOptionById(id);
+        const forced = agentOn && (id === 'web_search' || id === 'fetch_url');
         const chip = document.createElement('span');
-        chip.className = 'composer-mention-chip';
-        chip.innerHTML = '<span>@' + escapeHtml(option ? option.label : id) + '</span>';
+        chip.className = 'composer-mention-chip' + (forced ? ' is-forced' : '');
+        const label = document.createElement('span');
+        label.textContent = '@' + (option ? option.label : id);
+        chip.appendChild(label);
+        if (forced) {
+          const badge = document.createElement('span');
+          badge.className = 'chip-badge';
+          badge.textContent = 'required';
+          badge.title = 'Agent will use this skill before answering';
+          chip.appendChild(badge);
+        }
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.setAttribute('aria-label', 'Remove @' + id);
@@ -7044,11 +7613,14 @@
         remove.addEventListener('click', () => {
           composerMentionIds.delete(id);
           renderComposerMentions();
+          renderComposerModes();
+          syncPlusButton();
           composerInput.focus();
         });
         chip.appendChild(remove);
         composerMentions.appendChild(chip);
       });
+      syncPlusButton();
     }
 
     let userSkills = [];
@@ -7109,9 +7681,350 @@
 
     function syncComposerStreamUi() {
       const busy = isConvoBusy(activeId);
-      btnSend.classList.toggle('is-hidden', busy);
+      // Keep Send visible while streaming so the next message can be queued.
+      btnSend.classList.remove('is-hidden');
       btnStop.classList.toggle('is-hidden', !busy);
+      btnSend.title = busy ? 'Queue message' : 'Send message';
+      btnSend.setAttribute('aria-label', busy ? 'Queue message' : 'Send message');
       updateSendEnabled();
+      updateComposerHint();
+    }
+
+    function getOutboundQueue(convoId) {
+      if (!convoId) return [];
+      let queue = outboundQueues.get(convoId);
+      if (!queue) {
+        queue = [];
+        outboundQueues.set(convoId, queue);
+      }
+      return queue;
+    }
+
+    function clearOutboundQueue(convoId) {
+      if (!convoId) return;
+      if (editingQueueId && getOutboundQueue(convoId).some((item) => item.id === editingQueueId)) {
+        editingQueueId = null;
+      }
+      outboundQueues.delete(convoId);
+      if (activeId === convoId) renderOutboundQueue(conversations.find((c) => c.id === convoId));
+    }
+
+    function findQueuedItem(convoId, queueId) {
+      return getOutboundQueue(convoId).find((item) => item.id === queueId) || null;
+    }
+
+    function isQueuePausedForEdit(convoId) {
+      if (!convoId || !editingQueueId) return false;
+      const head = getOutboundQueue(convoId)[0];
+      return !!(head && head.id === editingQueueId);
+    }
+
+    function refreshQueuedBubble(row, item, { paused = false } = {}) {
+      if (!row || !item) return;
+      row.dataset.raw = item.editText || item.displayText || '';
+      const bubble = row.querySelector('.msg-bubble');
+      if (bubble && !row.classList.contains('is-editing')) {
+        bubble.innerHTML = formatUserMessageHtml({
+          content: item.displayText,
+          attachments: item.attachments,
+        });
+      }
+      const label = row.querySelector('.msg-queued-label');
+      if (label) {
+        label.textContent = paused ? 'Paused · editing' : 'Queued';
+        label.classList.toggle('is-paused', !!paused);
+      }
+    }
+
+    function buildQueuedBubble(item, { paused = false } = {}) {
+      const row = document.createElement('div');
+      row.className = 'msg msg-role-user msg-queued';
+      row.dataset.queueId = item.id;
+      row.dataset.raw = item.editText || item.displayText || '';
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+      bubble.innerHTML = formatUserMessageHtml({
+        content: item.displayText,
+        attachments: item.attachments,
+      });
+      const meta = document.createElement('div');
+      meta.className = 'msg-queued-meta';
+      meta.innerHTML =
+        '<span class="msg-queued-label' + (paused ? ' is-paused' : '') + '">' +
+          (paused ? 'Paused · editing' : 'Queued') +
+        '</span>' +
+        '<button type="button" class="msg-queued-action" data-queue-edit="' +
+          escapeHtml(item.id) +
+          '" aria-label="Edit queued message">Edit</button>' +
+        '<button type="button" class="msg-queued-action" data-queue-remove="' +
+          escapeHtml(item.id) +
+          '" aria-label="Remove queued message">Remove</button>';
+      row.appendChild(bubble);
+      row.appendChild(meta);
+      return row;
+    }
+
+    function renderOutboundQueue(convo) {
+      if (!chatThread) return;
+      const keepEditing = editingRow
+        && editingRow.classList.contains('msg-queued')
+        && editingRow.isConnected
+        && chatThread.contains(editingRow)
+        ? editingRow
+        : null;
+      const keepId = keepEditing?.dataset.queueId || null;
+      chatThread.querySelectorAll('.msg-queued').forEach((el) => {
+        if (keepId && el.dataset.queueId === keepId) return;
+        el.remove();
+      });
+      if (!convo || activeId !== convo.id) return;
+      const queue = getOutboundQueue(convo.id);
+      const pausedHead = isQueuePausedForEdit(convo.id);
+      for (const item of queue) {
+        if (keepId && item.id === keepId) {
+          refreshQueuedBubble(keepEditing, item, {
+            paused: pausedHead && item.id === editingQueueId,
+          });
+          chatThread.appendChild(keepEditing);
+          continue;
+        }
+        chatThread.appendChild(buildQueuedBubble(item, {
+          paused: pausedHead && item.id === editingQueueId,
+        }));
+      }
+    }
+
+    function enqueueOutbound(convo, item) {
+      getOutboundQueue(convo.id).push(item);
+      if (activeId === convo.id) {
+        showThread(convo);
+        const row = buildQueuedBubble(item);
+        chatThread.appendChild(row);
+        queueMicrotask(() => motionEnter(row, { y: 10 }));
+        scrollToBottom({ force: true });
+      }
+      updateComposerHint();
+      syncComposerStreamUi();
+    }
+
+    function removeQueuedOutbound(convoId, queueId) {
+      const queue = getOutboundQueue(convoId);
+      const next = queue.filter((item) => item.id !== queueId);
+      outboundQueues.set(convoId, next);
+      if (editingQueueId === queueId) {
+        if (editingRow?.dataset.queueId === queueId) {
+          editingRow = null;
+          mentionInput = composerInput;
+          closeMentionMenu();
+        }
+        editingQueueId = null;
+      }
+      if (activeId === convoId) {
+        const row = [...chatThread.querySelectorAll('.msg-queued')]
+          .find((el) => el.dataset.queueId === queueId);
+        if (row) row.remove();
+      }
+      updateComposerHint();
+      maybeSendNextQueued(convoId);
+    }
+
+    function beginQueuedMessageEdit(row) {
+      if (!row?.classList.contains('msg-queued') || row.classList.contains('is-editing')) return;
+      const queueId = row.dataset.queueId;
+      if (!queueId || !activeId) return;
+      const item = findQueuedItem(activeId, queueId);
+      if (!item) return;
+      if (editingRow && editingRow !== row) cancelMessageEdit();
+
+      const raw = item.editText || item.displayText || '';
+      const bubble = row.querySelector('.msg-bubble');
+      if (!bubble) return;
+
+      const editor = document.createElement('div');
+      editor.className = 'msg-edit';
+      const input = document.createElement('textarea');
+      input.className = 'msg-edit-input';
+      input.value = raw === '(attachment)' ? '' : raw;
+      input.setAttribute('aria-label', 'Edit queued message');
+      input.placeholder = 'Edit queued message… Type @ to mention';
+      const bar = document.createElement('div');
+      bar.className = 'msg-edit-bar';
+      const btnCancel = document.createElement('button');
+      btnCancel.type = 'button';
+      btnCancel.className = 'btn btn-ghost';
+      btnCancel.textContent = 'Cancel';
+      const btnSave = document.createElement('button');
+      btnSave.type = 'button';
+      btnSave.className = 'btn btn-primary';
+      btnSave.textContent = 'Save';
+      bar.appendChild(btnCancel);
+      bar.appendChild(btnSave);
+      editor.appendChild(input);
+      editor.appendChild(bar);
+
+      bubble.replaceWith(editor);
+      row.classList.add('is-editing');
+      editingRow = row;
+      editingQueueId = queueId;
+      mentionInput = input;
+      refreshQueuedBubble(row, item, { paused: isQueuePausedForEdit(activeId) });
+      updateComposerHint();
+
+      const commit = () => {
+        const next = input.value.trim();
+        if (!next && !(item.attachments && item.attachments.length)) return;
+        closeMentionMenu();
+        mentionInput = composerInput;
+        saveQueuedMessageEdit(row, next);
+      };
+      btnCancel.addEventListener('click', () => cancelMessageEdit());
+      btnSave.addEventListener('click', commit);
+      input.addEventListener('input', () => {
+        autoResize(input);
+        updateMentionMenu(input);
+      });
+      input.addEventListener('click', () => updateMentionMenu(input));
+      input.addEventListener('keyup', (event) => {
+        if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          updateMentionMenu(input);
+        }
+      });
+      input.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (document.activeElement !== input) closeMentionMenu();
+        }, 120);
+      });
+      input.addEventListener('keydown', (event) => {
+        if (handleMentionKeydown(event)) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelMessageEdit();
+          return;
+        }
+        if (event.key !== 'Enter') return;
+        if (settings.enterSends) {
+          if (!event.shiftKey) {
+            event.preventDefault();
+            commit();
+          }
+        } else if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          commit();
+        }
+      });
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      autoResize(input);
+      // If this item is already at the head, pause drain until save/cancel.
+      if (isQueuePausedForEdit(activeId)) updateComposerHint();
+    }
+
+    function saveQueuedMessageEdit(row, rawText) {
+      const queueId = row?.dataset.queueId;
+      if (!queueId || !activeId) return;
+      const item = findQueuedItem(activeId, queueId);
+      if (!item) return;
+
+      const mentioned = parseCapabilityMentions(rawText);
+      const text = mentioned.text;
+      const mentionIds = new Set(mentioned.mentions);
+      mentionIds.delete('agent');
+      const turn = resolveTurnSkills(mentionIds);
+      const displayText = displayTextWithMentions(text, mentioned.mentions)
+        || (item.attachments?.length ? '(attachment)' : '');
+      item.editText = rawText.trim() || displayText;
+      item.displayText = displayText;
+      item.apiText = userMessageApiContent({
+        content: displayText,
+        attachments: item.attachments || [],
+      });
+      item.turn = {
+        useAgent: turn.useAgent,
+        skills: turn.skills,
+        deepResearch: turn.deepResearch,
+        deepResearchOutput: turn.deepResearchOutput,
+        forceTools: turn.forceTools,
+      };
+
+      const editor = row.querySelector('.msg-edit');
+      const nextBubble = document.createElement('div');
+      nextBubble.className = 'msg-bubble';
+      nextBubble.innerHTML = formatUserMessageHtml({
+        content: item.displayText,
+        attachments: item.attachments,
+      });
+      if (editor) editor.replaceWith(nextBubble);
+      row.classList.remove('is-editing');
+      row.dataset.raw = item.editText;
+      editingRow = null;
+      editingQueueId = null;
+      mentionInput = composerInput;
+      closeMentionMenu();
+      refreshQueuedBubble(row, item, { paused: false });
+      updateComposerHint();
+      maybeSendNextQueued(activeId);
+      focusComposer();
+    }
+
+    function dispatchOutboundTurn(convo, item) {
+      const userMessage = {
+        role: 'user',
+        content: item.displayText || (item.attachments?.length ? '(attachment)' : ''),
+      };
+      if (item.attachments?.length) userMessage.attachments = item.attachments;
+      convo.messages.push(userMessage);
+      if (convo.messages.length === 1) {
+        convo.title = provisionalTitle(
+          item.displayText || (item.attachments?.[0]?.name || 'Attachment')
+        );
+      }
+      convo.updatedAt = Date.now();
+      saveConversations();
+      renderSidebar();
+      if (activeId === convo.id) {
+        showThread(convo);
+        // Drop the matching queued ghost if still present, then append the real bubble.
+        const ghost = [...chatThread.querySelectorAll('.msg-queued')]
+          .find((row) => row.dataset.queueId === item.id);
+        if (ghost) ghost.remove();
+        chatThread.appendChild(
+          buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage, { animate: true })
+        );
+        scrollToBottom({ force: true });
+      }
+      void runAssistantTurn(convo, {
+        useAgent: item.turn.useAgent,
+        text: item.apiText,
+        skills: item.turn.skills,
+        deepResearch: item.turn.deepResearch,
+        deepResearchOutput: item.turn.deepResearchOutput,
+        forceTools: item.turn.forceTools,
+      });
+    }
+
+    function maybeSendNextQueued(convoId) {
+      if (!convoId || isConvoBusy(convoId)) return;
+      const queue = getOutboundQueue(convoId);
+      if (!queue.length) {
+        updateComposerHint();
+        return;
+      }
+      if (isQueuePausedForEdit(convoId)) {
+        const convo = conversations.find((item) => item.id === convoId);
+        if (convo && activeId === convoId) renderOutboundQueue(convo);
+        updateComposerHint();
+        return;
+      }
+      const convo = conversations.find((item) => item.id === convoId);
+      if (!convo) {
+        outboundQueues.delete(convoId);
+        return;
+      }
+      const next = queue.shift();
+      outboundQueues.set(convoId, queue);
+      dispatchOutboundTurn(convo, next);
+      if (activeId === convoId) renderOutboundQueue(convo);
+      updateComposerHint();
     }
 
     function clearAllChats() {
@@ -7122,6 +8035,8 @@
       abortActiveSend();
       conversations = [];
       activeId = null;
+      outboundQueues.clear();
+      editingQueueId = null;
       saveStore();
       startDraft();
       renderSidebar();
@@ -7157,6 +8072,8 @@
       projects = [];
       activeId = null;
       activeProjectId = null;
+      outboundQueues.clear();
+      editingQueueId = null;
       saveStore();
       startDraft();
       renderSidebar();
@@ -7181,6 +8098,7 @@
       document.getElementById('settingWebSearchSafeSearch').value = settings.webSearchSafeSearch || 'moderate';
       document.getElementById('settingWebSearchRecency').value = settings.webSearchRecency || 'any';
       document.getElementById('settingSkillFetchUrl').checked = settings.skillFetchUrl;
+      document.getElementById('settingSkillDeepResearch').checked = settings.skillDeepResearch !== false;
       document.getElementById('settingAttachmentsMode').value = settings.attachmentsMode || 'auto';
       document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
       document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
@@ -7209,7 +8127,9 @@
         webSearchSafeSearch: document.getElementById('settingWebSearchSafeSearch').value,
         webSearchRecency: document.getElementById('settingWebSearchRecency').value,
         skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
+        skillDeepResearch: document.getElementById('settingSkillDeepResearch').checked,
         agentMode: settings.agentMode,
+        deepResearch: settings.deepResearch,
         attachmentsMode: document.getElementById('settingAttachmentsMode').value,
         attachmentTextFallback: document.getElementById('settingAttachmentTextFallback').checked,
         attachmentOcr: document.getElementById('settingAttachmentOcr').checked,
@@ -7232,17 +8152,22 @@
         btn.disabled = true;
         btn.classList.add('is-saved');
         btn.innerHTML = SETTINGS_SAVE_CHECK + '<span>Saved</span>';
-        btn.setAttribute('aria-label', 'Preferences saved');
+        btn.setAttribute('aria-label', 'Settings saved');
         return;
       }
       btn.classList.remove('is-saved');
       btn.innerHTML = '<span id="btnSettingsSaveLabel">Save</span>';
       btn.disabled = !dirty;
-      btn.setAttribute('aria-label', dirty ? 'Save preferences' : 'No changes to save');
+      btn.setAttribute('aria-label', dirty ? 'Save settings' : 'No changes to save');
     }
 
     function openSettings() {
       fillSettingsFormFromState();
+      setCapabilityAdvancedOpen(
+        document.getElementById('btnWebSearchAdvanced'),
+        document.getElementById('webSearchOptions'),
+        false
+      );
       refreshLocalDataPane();
       showSettingsPane('personalization');
       openBackdrop(settingsModal);
@@ -7251,9 +8176,18 @@
       loadUserSkills();
     }
 
+    function setCapabilityAdvancedOpen(toggle, panel, open) {
+      if (!toggle || !panel) return;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      panel.classList.toggle('is-collapsed', !open);
+      panel.hidden = !open;
+    }
+
     function syncWebSearchControls() {
       const enabled = document.getElementById('settingSkillWebSearch').checked;
       const options = document.getElementById('webSearchOptions');
+      const toggle = document.getElementById('btnWebSearchAdvanced');
+      if (toggle) toggle.disabled = !enabled;
       if (!options) return;
       options.querySelectorAll('input, select').forEach((control) => {
         control.disabled = !enabled;
@@ -7467,6 +8401,7 @@
         thinkMenuCloseTimer = 0;
       }
       if (open) {
+        setPlusMenuOpen(false);
         menu.classList.remove('is-hidden');
         btn.setAttribute('aria-expanded', 'true');
         void menu.offsetWidth;
@@ -7484,6 +8419,316 @@
         return;
       }
       thinkMenuCloseTimer = window.setTimeout(finish, 180);
+    }
+
+    let plusMenuCloseTimer = 0;
+
+    const PLUS_CHECK_SVG =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    function plusMenuIcons() {
+      return {
+        attach:
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+        search:
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/><path d="M3 12h18"/><path d="M3.6 8h16.8"/><path d="M3.6 16h16.8"/></svg>',
+        fetch:
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+        research:
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.5 14.5-6 6"/><path d="m14 6 4 4"/><path d="M15.2 4.8a2.2 2.2 0 0 1 3.1 3.1L10.5 15.7 7.3 12.5Z"/><path d="M4 20h5"/><path d="M6.5 17.5v5"/></svg>',
+        agent:
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>',
+      };
+    }
+
+    function renderPlusMenuItem({ id, iconClass, icon, title, desc, descHtml, badge, on, disabled, titleAttr }) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'plus-menu-item' + (on ? ' is-on' : '');
+      btn.dataset.plusAction = id;
+      btn.setAttribute('role', 'menuitem');
+      if (disabled) btn.disabled = true;
+      if (titleAttr) btn.title = titleAttr;
+      const descPart = descHtml
+        ? '<span class="plus-menu-desc">' + descHtml + '</span>'
+        : (desc
+          ? '<span class="plus-menu-desc">' + escapeHtml(desc) + '</span>'
+          : '');
+      const badgePart = badge
+        ? '<span class="plus-menu-badge">' + escapeHtml(badge) + '</span>'
+        : '';
+      btn.innerHTML =
+        '<span class="plus-menu-icon ' + iconClass + '" aria-hidden="true">' + icon + '</span>' +
+        '<span class="plus-menu-copy">' +
+          '<span class="plus-menu-title">' + escapeHtml(title) + '</span>' +
+          descPart +
+        '</span>' +
+        '<span class="plus-menu-trail">' +
+          badgePart +
+          '<span class="plus-menu-check" aria-hidden="true">' + PLUS_CHECK_SVG + '</span>' +
+        '</span>';
+      return btn;
+    }
+
+    function renderPlusMenu() {
+      if (!plusMenu) return;
+      const icons = plusMenuIcons();
+      const attachEnabled = attachmentsUiEnabled() && serverReady && !diskEncryptionLocked();
+      const attachReason = attachDisabledReason();
+      const researchAllowed = settings.skillDeepResearch !== false;
+      const agentOn = !!settings.agentMode;
+
+      plusMenu.innerHTML = '';
+      plusMenu.appendChild(renderPlusMenuItem({
+        id: 'agent',
+        iconClass: 'is-agent',
+        icon: icons.agent,
+        title: 'Agent mode',
+        desc: agentOn
+          ? 'All agent skills available when needed'
+          : 'Unlocks all agent skills when needed',
+        badge: 'Recommended',
+        on: agentOn,
+        disabled: false,
+      }));
+      plusMenu.appendChild(renderPlusMenuItem({
+        id: 'attach',
+        iconClass: 'is-attach',
+        icon: icons.attach,
+        title: 'Add photos & files',
+        desc: attachEnabled ? 'Upload from computer' : (attachReason || 'Configure in Settings'),
+        on: false,
+        disabled: false,
+        titleAttr: attachEnabled ? 'Attach files' : (attachReason || 'Go to Settings → Attachments'),
+      }));
+      if (settings.skillWebSearch !== false) {
+        plusMenu.appendChild(renderPlusMenuItem({
+          id: 'web_search',
+          iconClass: 'is-search',
+          icon: icons.search,
+          title: agentOn ? 'Require web search' : 'Web search',
+          desc: agentOn
+            ? 'Must search before answering'
+            : 'Keep enabled for this chat',
+          on: composerMentionIds.has('web_search'),
+          disabled: false,
+        }));
+      }
+      if (settings.skillFetchUrl !== false) {
+        plusMenu.appendChild(renderPlusMenuItem({
+          id: 'fetch_url',
+          iconClass: 'is-fetch',
+          icon: icons.fetch,
+          title: agentOn ? 'Require fetch URL' : 'Fetch URL',
+          desc: agentOn
+            ? 'Must open a page before answering'
+            : 'Keep enabled for this chat',
+          on: composerMentionIds.has('fetch_url'),
+          disabled: false,
+        }));
+      }
+      if (researchAllowed) {
+        plusMenu.appendChild(renderPlusMenuItem({
+          id: 'deep_research_long',
+          iconClass: 'is-research',
+          icon: icons.research,
+          title: 'Deep research · comprehensive',
+          desc: 'Detailed report from many sources',
+          on: settings.deepResearch === 'long',
+          disabled: false,
+        }));
+        plusMenu.appendChild(renderPlusMenuItem({
+          id: 'deep_research_brief',
+          iconClass: 'is-research',
+          icon: icons.research,
+          title: 'Deep research · concise',
+          desc: 'Brief answer from many sources',
+          on: settings.deepResearch === 'brief',
+          disabled: false,
+        }));
+      }
+    }
+
+    function renderComposerModes() {
+      if (!composerModes) return;
+      composerModes.innerHTML = '';
+      if (settings.agentMode) {
+        const chip = document.createElement('span');
+        chip.className = 'composer-mode-chip is-agent-available';
+        const forced = [];
+        if (composerMentionIds.has('web_search')) forced.push('web_search');
+        if (composerMentionIds.has('fetch_url')) forced.push('fetch_url');
+        const label = forced.length
+          ? 'Agent · required skills'
+          : 'Agent · skills when needed';
+        chip.innerHTML = '<span>' + escapeHtml(label) + '</span>';
+        chip.title = forced.length
+          ? 'Pinned skills are required this turn: ' + forced.join(', ')
+          : 'Recommended — all agent skills are available; the model uses them when needed';
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', 'Turn off agent mode');
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+          if (!requireUnlockedData()) return;
+          settings.agentMode = false;
+          saveSettings({ ...settings });
+        });
+        chip.appendChild(remove);
+        composerModes.appendChild(chip);
+      }
+      if (
+        settings.skillDeepResearch !== false
+        && (settings.deepResearch === 'long' || settings.deepResearch === 'brief')
+      ) {
+        const chip = document.createElement('span');
+        chip.className = 'composer-mode-chip';
+        const style = settings.deepResearch === 'brief' ? 'concise' : 'comprehensive';
+        chip.innerHTML = '<span>Research · ' + escapeHtml(style) + '</span>';
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', 'Turn off deep research');
+        remove.textContent = '×';
+        remove.addEventListener('click', () => setDeepResearch('off', true));
+        chip.appendChild(remove);
+        composerModes.appendChild(chip);
+      }
+    }
+
+    function plusMenuIsOpen() {
+      return !!(plusMenu && !plusMenu.classList.contains('is-hidden') && plusMenu.classList.contains('is-open'));
+    }
+
+    function placePlusMenu() {
+      if (!plusMenu || !composerCard) return;
+      plusMenu.classList.remove('is-above');
+      plusMenu.style.maxHeight = '';
+      const gap = 10;
+      const cardRect = composerCard.getBoundingClientRect();
+      const spaceBelow = Math.max(0, window.innerHeight - cardRect.bottom - gap);
+      const spaceAbove = Math.max(0, cardRect.top - gap);
+      const natural = plusMenu.scrollHeight;
+      const cap = Math.min(22 * 16, window.innerHeight - gap * 2);
+      const openAbove = spaceBelow < Math.min(natural, 12 * 16) && spaceAbove > spaceBelow;
+      if (openAbove) {
+        plusMenu.classList.add('is-above');
+        plusMenu.style.maxHeight = Math.min(cap, spaceAbove) + 'px';
+      } else {
+        plusMenu.style.maxHeight = Math.min(cap, Math.max(spaceBelow, 8 * 16)) + 'px';
+      }
+    }
+
+    function setPlusMenuOpen(open) {
+      if (!plusMenu || !btnPlus) return;
+      if (plusMenuCloseTimer) {
+        window.clearTimeout(plusMenuCloseTimer);
+        plusMenuCloseTimer = 0;
+      }
+      if (open) {
+        if (thinkMenuIsOpen()) setThinkMenuOpen(false);
+        renderPlusMenu();
+        plusMenu.classList.remove('is-hidden');
+        placePlusMenu();
+        btnPlus.setAttribute('aria-expanded', 'true');
+        btnPlus.title = 'Close';
+        btnPlus.setAttribute('aria-label', 'Close');
+        void plusMenu.offsetWidth;
+        requestAnimationFrame(() => plusMenu.classList.add('is-open'));
+        return;
+      }
+      plusMenu.classList.remove('is-open');
+      btnPlus.setAttribute('aria-expanded', 'false');
+      btnPlus.title = 'Add files and capabilities';
+      btnPlus.setAttribute('aria-label', 'Add files and capabilities');
+      const finish = () => {
+        plusMenu.classList.add('is-hidden');
+        plusMenu.classList.remove('is-above');
+        plusMenu.style.maxHeight = '';
+        plusMenuCloseTimer = 0;
+      };
+      if (prefersReducedMotion()) {
+        finish();
+        return;
+      }
+      plusMenuCloseTimer = window.setTimeout(finish, 180);
+    }
+
+    function toggleComposerMention(id) {
+      if (composerMentionIds.has(id)) composerMentionIds.delete(id);
+      else composerMentionIds.add(id);
+      renderComposerMentions();
+      renderComposerModes();
+      syncPlusButton();
+      renderPlusMenu();
+      composerInput.focus();
+    }
+
+    function handlePlusMenuAction(action) {
+      if (action === 'attach') {
+        const enabled = attachmentsUiEnabled() && serverReady && !diskEncryptionLocked();
+        setPlusMenuOpen(false);
+        if (!enabled) {
+          openSettings();
+          showSettingsPane('attachments');
+          return;
+        }
+        attachFileInput.click();
+        return;
+      }
+      if (action === 'web_search') {
+        if (settings.skillWebSearch === false) return;
+        toggleComposerMention('web_search');
+        setPlusMenuOpen(false);
+        return;
+      }
+      if (action === 'fetch_url') {
+        if (settings.skillFetchUrl === false) return;
+        toggleComposerMention('fetch_url');
+        setPlusMenuOpen(false);
+        return;
+      }
+      if (action === 'deep_research_long') {
+        if (settings.skillDeepResearch === false) return;
+        setDeepResearch(settings.deepResearch === 'long' ? 'off' : 'long', true);
+        setPlusMenuOpen(false);
+        return;
+      }
+      if (action === 'deep_research_brief') {
+        if (settings.skillDeepResearch === false) return;
+        setDeepResearch(settings.deepResearch === 'brief' ? 'off' : 'brief', true);
+        setPlusMenuOpen(false);
+        return;
+      }
+      if (action === 'agent') {
+        if (!requireUnlockedData()) return;
+        settings.agentMode = !settings.agentMode;
+        saveSettings({ ...settings });
+        setPlusMenuOpen(false);
+      }
+    }
+
+    function syncResearchControls() {
+      const allowed = settings.skillDeepResearch !== false;
+      if (!allowed && settings.deepResearch !== 'off') {
+        settings.deepResearch = 'off';
+      }
+      renderComposerModes();
+      renderPlusMenu();
+      syncPlusButton();
+    }
+
+    function setDeepResearch(mode, persist) {
+      if (settings.skillDeepResearch === false && mode !== 'off') return;
+      const value = DEEP_RESEARCH_MODES.includes(mode) ? mode : 'off';
+      settings.deepResearch = value;
+      syncResearchControls();
+      updateComposerHint();
+      if (persist) {
+        saveSettings({
+          ...settings,
+          deepResearch: value,
+        });
+      }
     }
 
     let thinkingSupported = false;
@@ -7542,8 +8787,13 @@
         syncSettingsSaveButton({ saved: true });
         return;
       }
-      saveSettings(readSettingsForm());
+      const next = readSettingsForm();
+      if (!next.skillDeepResearch) {
+        next.deepResearch = 'off';
+      }
+      saveSettings(next);
       syncThinkingEffortControls(settings.thinkingEffort);
+      syncResearchControls();
       syncAttachButton();
       syncSettingsSaveButton({ saved: true });
       const convo = conversations.find((item) => item.id === activeId);
@@ -7646,6 +8896,18 @@
           });
         } else if (part.type === 'tool') {
           html += agentStepHtml(part);
+        } else if (part.type === 'clarify') {
+          const header = 'Clarifying questions';
+          const detail = part.live
+            ? 'Waiting for your answers'
+            : (part.summary || 'Goal refined');
+          html += wrapTimelineStep(
+            '<div class="agent-step-card">' +
+              '<div class="agent-step-kind">' + escapeHtml(header) + '</div>' +
+              '<div class="agent-step-detail">' + escapeHtml(detail) + '</div>' +
+            '</div>',
+            { live: !!part.live, done: !part.live }
+          );
         } else if (part.type === 'notice') {
           const text = String(part.content || '').trim();
           if (!text) continue;
@@ -7779,7 +9041,7 @@
       if (!Array.isArray(parts)) return 0;
       return parts.reduce((count, part) => {
         if (!part) return count;
-        if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') return count + 1;
+        if (part.type === 'think' || part.type === 'tool' || part.type === 'clarify' || part.type === 'notice') return count + 1;
         return count;
       }, 0);
     }
@@ -7802,7 +9064,7 @@
           deferredNotices.push(part);
           continue;
         }
-        if (part.type === 'think' || part.type === 'tool' || part.type === 'notice') {
+        if (part.type === 'think' || part.type === 'tool' || part.type === 'clarify' || part.type === 'notice') {
           timelineParts.push(part);
         }
       }
@@ -7893,7 +9155,11 @@
       }
 
       if (isDesktopTraceLayout()) {
-        return finalHtml || '<div class="agent-final-answer"></div>';
+        if (finalHtml) return finalHtml;
+        if (message?.error) {
+          return '<div class="agent-final-answer msg-error">' + escapeHtml(message.error) + '</div>';
+        }
+        return '<div class="agent-final-answer msg-error">No response.</div>';
       }
 
       const collapsed = collapseTimeline !== null ? !!collapseTimeline : true;
@@ -8126,11 +9392,190 @@
       return parseThinkSegments(text).some((segment) => segment.type === 'think' && segment.open);
     }
 
-    function skillLabel(name) {
-      if (name === 'web_search') return 'Web search';
+    function skillLabel(name, args) {
+      if (name === 'web_search') {
+        return String(args?.kind || '').toLowerCase() === 'news' ? 'News search' : 'Web search';
+      }
       if (name === 'fetch_url') return 'Fetch URL';
+      if (name === 'ask_user') return 'Clarifying questions';
       if (name === 'activate_skill' || name === 'read_skill') return 'Activate skill';
       return name || 'Skill';
+    }
+
+    function findClarifyPart(stream, id) {
+      return (stream?.timeline || []).find((part) => part.type === 'clarify' && part.id === id) || null;
+    }
+
+    function buildClarifyFormHtml(part) {
+      const done = !part.live || !!part.answers;
+      const questions = Array.isArray(part.questions) ? part.questions : [];
+      if (done && part.summary) {
+        return (
+          '<div class="clarify-card is-done" data-clarify-id="' + escapeHtml(part.id) + '">' +
+            '<div class="clarify-card-head">' +
+              '<span class="clarify-card-kicker">Deep research</span>' +
+              '<span class="clarify-card-title">Goal refined</span>' +
+            '</div>' +
+            '<div class="clarify-summary">' + escapeHtml(part.summary).replace(/\n/g, '<br>') + '</div>' +
+          '</div>'
+        );
+      }
+      let body = '';
+      questions.forEach((q, qi) => {
+        const multi = !!q.multiSelect;
+        const inputType = multi ? 'checkbox' : 'radio';
+        const group = 'clarify-' + part.id + '-' + qi;
+        const selected = part.draft?.[qi] || { labels: [], custom: '', useCustom: false };
+        const options = Array.isArray(q.options) ? q.options : [];
+        let opts = '';
+        options.forEach((opt, oi) => {
+          const label = String(opt.label || '');
+          const checked = !selected.useCustom && selected.labels.includes(label);
+          opts +=
+            '<label class="clarify-option' + (checked ? ' is-selected' : '') + '">' +
+              '<input type="' + inputType + '" name="' + escapeHtml(group) + '" value="' + escapeHtml(label) + '"' +
+                (checked ? ' checked' : '') + (done ? ' disabled' : '') +
+                ' data-clarify-q="' + qi + '" data-clarify-opt="' + oi + '">' +
+              '<span>' +
+                '<div class="clarify-option-label">' + escapeHtml(label) + '</div>' +
+                (opt.description
+                  ? '<div class="clarify-option-desc">' + escapeHtml(String(opt.description)) + '</div>'
+                  : '') +
+              '</span>' +
+            '</label>';
+        });
+        opts +=
+          '<div class="clarify-other">' +
+            '<label class="clarify-other-toggle' + (selected.useCustom ? ' is-selected' : '') + '">' +
+              '<input type="' + inputType + '" name="' + escapeHtml(group) + '" value="__other__"' +
+                (selected.useCustom ? ' checked' : '') + (done ? ' disabled' : '') +
+                ' data-clarify-q="' + qi + '" data-clarify-other="1">' +
+              '<span class="clarify-option-label">Other</span>' +
+            '</label>' +
+            '<textarea class="clarify-other-input" rows="2" placeholder="Describe what you want instead…"' +
+              ' data-clarify-q="' + qi + '" data-clarify-custom="1"' +
+              (selected.useCustom ? '' : ' hidden') +
+              (done ? ' disabled' : '') + '>' +
+              escapeHtml(selected.custom || '') +
+            '</textarea>' +
+          '</div>';
+        body +=
+          '<div class="clarify-q" data-clarify-q="' + qi + '">' +
+            (q.header ? '<span class="clarify-q-chip">' + escapeHtml(String(q.header)) + '</span>' : '') +
+            '<div class="clarify-q-text">' + escapeHtml(String(q.question || '')) + '</div>' +
+            '<div class="clarify-options">' + opts + '</div>' +
+          '</div>';
+      });
+      return (
+        '<div class="clarify-card' + (done ? ' is-done' : '') + '" data-clarify-id="' + escapeHtml(part.id) + '">' +
+          '<div class="clarify-card-head">' +
+            '<span class="clarify-card-kicker">Deep research</span>' +
+            '<span class="clarify-card-title">A couple of quick questions before searching</span>' +
+          '</div>' +
+          body +
+          (done
+            ? ''
+            : '<div class="clarify-actions">' +
+                '<button type="button" class="clarify-submit" data-clarify-submit="' + escapeHtml(part.id) + '">Continue research</button>' +
+              '</div>') +
+        '</div>'
+      );
+    }
+
+    function mountClarifyForm(stream, part) {
+      if (!stream.dom?.answerEl) return;
+      let host = stream.dom.clarifyHost;
+      if (!host) {
+        host = document.createElement('div');
+        host.className = 'clarify-host';
+        stream.dom.clarifyHost = host;
+      }
+      host.innerHTML = buildClarifyFormHtml(part);
+      const answerEl = stream.dom.answerEl;
+      if (host.parentElement !== answerEl) {
+        answerEl.insertBefore(host, answerEl.firstChild);
+      }
+      syncClarifySubmitEnabled(host);
+    }
+
+    function preserveClarifyHost(answerEl) {
+      const host = answerEl?.querySelector?.(':scope > .clarify-host');
+      if (host) host.remove();
+      return host || null;
+    }
+
+    function restoreClarifyHost(answerEl, host) {
+      if (!answerEl || !host) return;
+      answerEl.insertBefore(host, answerEl.firstChild);
+    }
+
+    function syncClarifySubmitEnabled(host) {
+      if (!host) return;
+      const card = host.querySelector('.clarify-card');
+      if (!card || card.classList.contains('is-done')) return;
+      const submit = card.querySelector('[data-clarify-submit]');
+      if (!submit) return;
+      const questions = card.querySelectorAll('.clarify-q');
+      let ok = questions.length > 0;
+      questions.forEach((qEl) => {
+        const qi = Number(qEl.dataset.clarifyQ);
+        const otherOn = !!qEl.querySelector('input[data-clarify-other]:checked');
+        if (otherOn) {
+          const custom = qEl.querySelector('[data-clarify-custom]');
+          if (!String(custom?.value || '').trim()) ok = false;
+        } else if (!qEl.querySelector('input[data-clarify-opt]:checked')) {
+          ok = false;
+        }
+      });
+      submit.disabled = !ok;
+    }
+
+    function collectClarifyAnswers(part, host) {
+      const answers = {};
+      const questions = Array.isArray(part.questions) ? part.questions : [];
+      questions.forEach((q, qi) => {
+        const qEl = host.querySelector('.clarify-q[data-clarify-q="' + qi + '"]');
+        const key = String(q.question || ('q' + qi));
+        const otherOn = !!qEl?.querySelector('input[data-clarify-other]:checked');
+        if (otherOn) {
+          answers[key] = String(qEl.querySelector('[data-clarify-custom]')?.value || '').trim();
+          return;
+        }
+        const selected = [...(qEl?.querySelectorAll('input[data-clarify-opt]:checked') || [])]
+          .map((el) => el.value);
+        answers[key] = q.multiSelect ? selected : (selected[0] || '');
+      });
+      return answers;
+    }
+
+    async function submitClarifyForm(stream, clarifyId) {
+      const part = findClarifyPart(stream, clarifyId);
+      const host = stream.dom?.clarifyHost;
+      if (!part || !host || part.submitting) return;
+      const answers = collectClarifyAnswers(part, host);
+      part.submitting = true;
+      syncClarifySubmitEnabled(host);
+      const btn = host.querySelector('[data-clarify-submit]');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Submitting…';
+      }
+      try {
+        const response = await fetch('/api/chat/clarify', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: clarifyId, answers }),
+        });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => null);
+          throw new Error((problem && problem.error) || 'Could not submit answers');
+        }
+      } catch (error) {
+        part.submitting = false;
+        if (btn) btn.textContent = 'Continue research';
+        syncClarifySubmitEnabled(host);
+        showAttachHint(error?.message || 'Could not submit answers');
+      }
     }
 
     function skillDetailLabel(name) {
@@ -8156,10 +9601,15 @@
       );
     }
 
-    function agentStepHtml({ name, detail, result, note, live }) {
+    function agentStepHtml({ name, detail, result, note, live, kind }) {
+      let kindLabel = skillLabel(name, { kind });
+      const resultText = String(result || '');
+      if (name === 'ask_user' && !live && /ask_user\b/i.test(resultText)) {
+        kindLabel = 'Clarifying questions · rejected';
+      }
       return wrapTimelineStep(
         '<div class="agent-step-card">' +
-          '<div class="agent-step-kind">' + escapeHtml(skillLabel(name)) + '</div>' +
+          '<div class="agent-step-kind">' + escapeHtml(kindLabel) + '</div>' +
           (note
             ? '<div class="agent-step-note">' + escapeHtml(note) + '</div>'
             : '') +
@@ -8201,6 +9651,92 @@
       return mainView === 'chat' && !!getProject(activeProjectId);
     }
 
+    function currentRoutePath() {
+      if (mainView === 'projects') return '/projects';
+      if (activeId) return '/c/' + encodeURIComponent(activeId);
+      if (activeProjectId && getProject(activeProjectId)) {
+        return draftIncognito
+          ? '/p/' + encodeURIComponent(activeProjectId) + '/ghost'
+          : '/p/' + encodeURIComponent(activeProjectId);
+      }
+      return draftIncognito ? '/ghost' : '/';
+    }
+
+    function syncUrlFromState({ replace = false } = {}) {
+      if (suppressUrlSync) return;
+      const path = currentRoutePath();
+      if (window.location.pathname === path) return;
+      if (replace) history.replaceState({ tensorui: 1 }, '', path);
+      else history.pushState({ tensorui: 1 }, '', path);
+    }
+
+    function parseLocationRoute() {
+      const parts = (window.location.pathname || '/')
+        .split('/')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => {
+          try { return decodeURIComponent(part); }
+          catch { return part; }
+        });
+      if (parts.length === 0) return { kind: 'draft', incognito: false };
+      if (parts[0] === 'projects') return { kind: 'projects' };
+      if (parts[0] === 'ghost') return { kind: 'draft', incognito: true };
+      if (parts[0] === 'c' && parts[1]) return { kind: 'convo', id: parts[1] };
+      if (parts[0] === 'p' && parts[1]) {
+        return {
+          kind: 'project',
+          id: parts[1],
+          incognito: parts[2] === 'ghost',
+        };
+      }
+      return { kind: 'draft', incognito: false };
+    }
+
+    function applyLocationRoute() {
+      const route = parseLocationRoute();
+      const locked = diskEncryptionLocked();
+      suppressUrlSync = true;
+      try {
+        if (route.kind === 'projects') {
+          showProjectsView();
+        } else if (route.kind === 'convo') {
+          const convo = conversations.find((item) => item.id === route.id);
+          if (convo) {
+            selectConversation(convo.id);
+          } else if (locked) {
+            activeId = null;
+            draftIncognito = false;
+            showChatView();
+            showEmptyState();
+            renderSidebar();
+          } else {
+            startDraft({ incognito: false });
+          }
+        } else if (route.kind === 'project') {
+          if (getProject(route.id)) {
+            openProject(route.id, { incognito: !!route.incognito });
+          } else if (locked) {
+            activeId = null;
+            activeProjectId = null;
+            draftIncognito = !!route.incognito;
+            showChatView();
+            showEmptyState();
+            renderSidebar();
+          } else {
+            activeProjectId = null;
+            startDraft({ incognito: !!route.incognito });
+          }
+        } else {
+          activeProjectId = null;
+          startDraft({ incognito: !!route.incognito });
+        }
+      } finally {
+        suppressUrlSync = false;
+      }
+      if (!locked) syncUrlFromState({ replace: true });
+    }
+
     function leaveProject() {
       activeProjectId = null;
       activeId = null;
@@ -8208,6 +9744,7 @@
       showEmptyState();
       syncProjectChrome();
       renderSidebar();
+      syncUrlFromState();
       composerInput.focus();
     }
 
@@ -8335,13 +9872,35 @@
       attachHintUntil = 0;
       voiceHintUntil = 0;
       composerHint.classList.remove('is-warn');
+      const queueLen = activeId ? getOutboundQueue(activeId).length : 0;
+      if (queueLen > 0) {
+        if (isQueuePausedForEdit(activeId)) {
+          composerHint.textContent = 'Queue paused · save or cancel the edit to continue';
+          return;
+        }
+        const busy = isConvoBusy(activeId);
+        composerHint.textContent = queueLen === 1
+          ? (busy ? '1 message queued · sends when this reply finishes' : '1 message queued')
+          : (busy
+            ? queueLen + ' messages queued · sending in order'
+            : queueLen + ' messages queued');
+        return;
+      }
       const sendHint = settings.enterSends
         ? 'Shift+Enter for a new line'
         : 'Ctrl+Enter to send';
       const project = inProjectChat() ? getProject(activeProjectId) : null;
+      if (
+        settings.skillDeepResearch !== false
+        && (settings.deepResearch === 'long' || settings.deepResearch === 'brief')
+      ) {
+        composerHint.textContent = sendHint + ' · deep research ('
+          + (settings.deepResearch === 'brief' ? 'concise' : 'comprehensive') + ')';
+        return;
+      }
       composerHint.textContent = project
         ? sendHint + ' · chatting in ' + project.name
-        : sendHint + ' · @ to use a tool once';
+        : sendHint + ' · + for tools · @ to mention';
     }
 
     function bySidebarOrder(list = conversations) {
@@ -8616,6 +10175,7 @@
       btnProjectsNav.classList.add('is-active');
       renderProjectsPage();
       renderSidebar();
+      syncUrlFromState();
       closeMobileSidebar();
     }
 
@@ -8810,15 +10370,17 @@
       updateGreeting();
     }
 
-    function openProject(projectId) {
+    function openProject(projectId, { incognito = false } = {}) {
       const project = getProject(projectId);
       if (!project) return;
       activeProjectId = projectId;
       cancelMessageEdit();
       activeId = null;
+      draftIncognito = !!incognito;
       showChatView();
       showEmptyState();
       renderSidebar();
+      syncUrlFromState();
       closeMobileSidebar();
       composerInput.focus();
     }
@@ -9119,9 +10681,11 @@
 
     let editingRow = null;
 
-    function cancelMessageEdit() {
+    function cancelMessageEdit({ resumeQueue = true } = {}) {
       if (!editingRow) return;
       const row = editingRow;
+      const wasQueued = row.classList.contains('msg-queued');
+      const queueId = row.dataset.queueId || '';
       const raw = row.dataset.raw || '';
       const bubble = row.querySelector('.msg-bubble, .msg-edit');
       closeMentionMenu();
@@ -9129,11 +10693,28 @@
       if (bubble) {
         const next = document.createElement('div');
         next.className = 'msg-bubble';
-        next.innerHTML = formatUserHtml(raw);
+        if (wasQueued && activeId) {
+          const item = findQueuedItem(activeId, queueId);
+          next.innerHTML = formatUserMessageHtml({
+            content: item?.displayText || raw,
+            attachments: item?.attachments || [],
+          });
+        } else {
+          next.innerHTML = formatUserHtml(raw);
+        }
         bubble.replaceWith(next);
       }
       row.classList.remove('is-editing');
       editingRow = null;
+      if (wasQueued) {
+        editingQueueId = null;
+        if (activeId && queueId) {
+          const item = findQueuedItem(activeId, queueId);
+          if (item) refreshQueuedBubble(row, item, { paused: false });
+        }
+        updateComposerHint();
+        if (resumeQueue) maybeSendNextQueued(activeId);
+      }
     }
 
     function beginMessageEdit(row) {
@@ -9228,7 +10809,12 @@
 
       const mentioned = parseCapabilityMentions(rawText);
       const text = mentioned.text;
-      const turn = resolveTurnSkills(mentioned.mentions);
+      const mentionIds = new Set([
+        ...composerMentionIds,
+        ...mentioned.mentions,
+      ]);
+      mentionIds.delete('agent');
+      const turn = resolveTurnSkills(mentionIds);
       const displayText = displayTextWithMentions(text, mentioned.mentions);
 
       editingRow = null;
@@ -9263,7 +10849,14 @@
             : '',
         })))
         : text;
-      await runAssistantTurn(convo, { useAgent: turn.useAgent, text: apiText, skills: turn.skills });
+      await runAssistantTurn(convo, {
+        useAgent: turn.useAgent,
+        text: apiText,
+        skills: turn.skills,
+        deepResearch: turn.deepResearch,
+        deepResearchOutput: turn.deepResearchOutput,
+        forceTools: turn.forceTools,
+      });
     }
 
     function formatTokPerSec(n) {
@@ -9440,7 +11033,7 @@
     }
 
     function renderThread(convo) {
-      cancelMessageEdit();
+      cancelMessageEdit({ resumeQueue: false });
       chatThread.innerHTML = '';
       // Drop any DOM handles — rows were destroyed; streams recreate on paint/select.
       for (const stream of activeStreams.values()) {
@@ -9449,6 +11042,7 @@
       convo.messages.forEach((message, index) => {
         chatThread.appendChild(buildBubble(message.role, message.content, index, message));
       });
+      renderOutboundQueue(convo);
       let pick = null;
       for (let i = convo.messages.length - 1; i >= 0; i -= 1) {
         if (convo.messages[i]?.role === 'assistant') {
@@ -9460,6 +11054,7 @@
       syncTraceSelectionClasses();
       refreshTraceSidebar({ animate: false });
       scrollToBottom({ force: stickToBottom });
+      maybeSendNextQueued(convo.id);
     }
 
     function renderSidebar() {
@@ -9533,6 +11128,7 @@
     function selectConversation(id) {
       const convo = conversations.find((item) => item.id === id);
       if (!convo) return;
+      const previousId = activeId;
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = id;
       draftIncognito = !!convo.incognito;
@@ -9546,6 +11142,7 @@
       renderSidebar();
       showThread(convo);
       renderThread(convo);
+      if (previousId && previousId !== id) maybeSendNextQueued(previousId);
       const stream = activeStreams.get(id);
       if (stream) {
         // Reattach live streaming UI for this conversation.
@@ -9557,13 +11154,15 @@
         });
       }
       syncComposerStreamUi();
+      syncUrlFromState();
       closeMobileSidebar();
       composerInput.focus();
     }
 
     /** Return to the draft state — no conversation object until a message is sent. */
     function startDraft({ incognito = false } = {}) {
-      cancelMessageEdit();
+      const previousId = activeId;
+      cancelMessageEdit({ resumeQueue: false });
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = null;
       draftIncognito = !!incognito;
@@ -9572,13 +11171,18 @@
       resumeBottomIntent = false;
       selectedTraceMsgIndex = null;
       resetTraceAutoOpenState();
+      composerMentionIds.clear();
+      renderComposerMentions();
+      renderComposerModes();
       showChatView();
       renderSidebar();
       showEmptyState();
       syncComposerStreamUi();
       refreshTraceSidebar({ animate: false });
       setTraceSidebarOpen(false);
+      syncUrlFromState();
       closeMobileSidebar();
+      if (previousId) maybeSendNextQueued(previousId);
       composerInput.focus();
     }
 
@@ -9586,6 +11190,17 @@
       if (!confirm('Delete this conversation?')) return;
       abortStream(id);
       activeStreams.delete(id);
+      const deletingEdit = editingQueueId
+        && getOutboundQueue(id).some((item) => item.id === editingQueueId);
+      outboundQueues.delete(id);
+      if (deletingEdit) {
+        editingQueueId = null;
+        if (editingRow?.classList.contains('msg-queued')) {
+          editingRow = null;
+          mentionInput = composerInput;
+          closeMentionMenu();
+        }
+      }
       stickByConvo.delete(id);
       conversations = conversations.filter((item) => item.id !== id);
       saveConversations();
@@ -9714,7 +11329,6 @@
       const hasFiles = pendingAttachments.length > 0;
       btnSend.disabled = !serverReady
         || diskEncryptionLocked()
-        || isConvoBusy(activeId)
         || (!hasText && !hasFiles);
     }
 
@@ -10230,8 +11844,8 @@
 
     async function sendMessage() {
       const typed = composerInput.value.trim();
-      const queued = pendingAttachments.slice();
-      if ((!typed && !queued.length) || !serverReady || isConvoBusy(activeId)) return;
+      const queuedFiles = pendingAttachments.slice();
+      if ((!typed && !queuedFiles.length) || !serverReady) return;
       if (!requireUnlockedData()) return;
       stopVoiceInput({ silent: true });
       cancelMessageEdit();
@@ -10239,16 +11853,17 @@
 
       let prepared;
       try {
-        if (queued.length) {
+        if (queuedFiles.length) {
           attachHintUntil = 0;
           composerHint.textContent = 'Preparing attachments…';
           composerHint.classList.remove('is-warn');
-          prepared = await prepareAttachmentsForSend(queued);
+          prepared = await prepareAttachmentsForSend(queuedFiles);
         } else {
           prepared = [];
         }
       } catch (error) {
         showAttachHint(error?.message || 'Attachment prep failed');
+        focusComposer();
         return;
       }
 
@@ -10261,8 +11876,7 @@
       // Drop legacy chip id if somehow present.
       mentionIds.delete('agent');
       const turn = resolveTurnSkills(mentionIds);
-      // Keep @capability tokens in stored/displayed content so bubbles stay styled.
-      const displayText = displayTextWithMentions(text, mentionIds);
+      const displayText = displayTextWithMentions(text, mentioned.mentions);
       const storedAttachments = storedAttachmentsFromPrepared(prepared);
       const apiText = buildUserApiContent(text, prepared);
 
@@ -10280,40 +11894,47 @@
         };
         conversations.push(convo);
         activeId = id;
+        syncUrlFromState({ replace: true });
       }
 
-      const userMessage = {
-        role: 'user',
-        content: displayText || (storedAttachments.length ? '(attachment)' : ''),
-      };
-      if (storedAttachments.length) userMessage.attachments = storedAttachments;
-      convo.messages.push(userMessage);
-      if (convo.messages.length === 1) {
-        // Provisional slug for the sidebar; real title is generated after the
-        // first assistant reply so local servers aren't hit with two requests at once.
-        convo.title = provisionalTitle(text || displayText || (storedAttachments[0]?.name || 'Attachment'));
-      }
-      convo.updatedAt = Date.now();
-      saveConversations();
-      renderSidebar();
-
-      showThread(convo);
-      chatThread.appendChild(
-        buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage, { animate: true })
-      );
       composerInput.value = '';
       clearPendingAttachments();
-      composerMentionIds.clear();
       autoResize(composerInput);
       renderComposerMentions();
+      renderComposerModes();
       closeMentionMenu();
-      scrollToBottom({ force: true });
 
-      // Fire-and-forget so switching chats does not await this turn.
-      void runAssistantTurn(convo, {
-        useAgent: turn.useAgent,
-        text: apiText,
-        skills: turn.skills,
+      const outbound = {
+        id: newId('q'),
+        editText: typed,
+        displayText: displayText || (storedAttachments.length ? '(attachment)' : ''),
+        apiText,
+        attachments: storedAttachments,
+        turn: {
+          useAgent: turn.useAgent,
+          skills: turn.skills,
+          deepResearch: turn.deepResearch,
+          deepResearchOutput: turn.deepResearchOutput,
+          forceTools: turn.forceTools,
+        },
+      };
+
+      if (isConvoBusy(convo.id)) {
+        enqueueOutbound(convo, outbound);
+        focusComposer();
+        return;
+      }
+
+      dispatchOutboundTurn(convo, outbound);
+      focusComposer();
+    }
+
+    function focusComposer() {
+      if (!composerInput) return;
+      // Defer so a clicked Send button does not steal focus back.
+      queueMicrotask(() => {
+        if (document.activeElement === composerInput) return;
+        composerInput.focus({ preventScroll: true });
       });
     }
 
@@ -10360,6 +11981,8 @@
         thinkingOrb,
         enteredSteps: 0,
       };
+      const liveClarify = stream.timeline.find((part) => part.type === 'clarify');
+      if (liveClarify) mountClarifyForm(stream, liveClarify);
       return stream.dom;
     }
 
@@ -10403,6 +12026,9 @@
         if (part.type === 'tool') {
           return ['tool', part.name, part.detail, part.result, part.note || '', part.live ? '1' : '0'].join('\0');
         }
+        if (part.type === 'clarify') {
+          return ['clarify', part.id || '', part.live ? '1' : '0', part.summary || ''].join('\0');
+        }
         return [part.type, part.content || ''].join('\0');
       }).join('\n');
     }
@@ -10434,6 +12060,7 @@
       const dom = ensureStreamDom(convo, stream);
       if (!dom) return;
       const { row, statusEl, thinkingLabel, traceEl, answerEl, thinkingOrb } = dom;
+      const savedClarifyHost = preserveClarifyHost(answerEl);
       if (traceEl) {
         traceEl.innerHTML = '';
         traceEl.classList.add('is-hidden');
@@ -10505,11 +12132,15 @@
       }
 
       const toolLive = stream.timeline.some((part) => part.type === 'tool' && part.live);
-      if (toolLive || thinkingOpen || (streaming && stream.useAgent && !hasVisibleAnswer)) {
+      const clarifyLive = stream.timeline.some((part) => part.type === 'clarify' && part.live);
+      restoreClarifyHost(answerEl, savedClarifyHost || stream.dom?.clarifyHost);
+      if (toolLive || clarifyLive || thinkingOpen || (streaming && stream.useAgent && !hasVisibleAnswer)) {
         statusEl.classList.remove('is-hidden');
         thinkingOrb.play();
         if (toolLive) {
           // Label is set by the tool_call agent event.
+        } else if (clarifyLive) {
+          thinkingLabel.textContent = 'Waiting for your answers…';
         } else if (thinkingOpen) {
           thinkingLabel.textContent = 'Reasoning…';
         } else if (stream.useAgent) {
@@ -10540,7 +12171,7 @@
     }
 
     /** Stream an assistant reply; safe to leave the conversation while it runs. */
-    async function runAssistantTurn(convo, { useAgent, text, skills }) {
+    async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = false, deepResearchOutput = 'long', forceTools = [] }) {
       if (!serverReady || activeStreams.has(convo.id)) return;
       resetTraceAutoOpenState();
 
@@ -10564,6 +12195,22 @@
           : 'any',
         fetch_url: !!settings.skillFetchUrl,
       };
+      if (deepResearch) {
+        useAgent = true;
+        turnSkills.web_search = true;
+        turnSkills.fetch_url = true;
+        turnSkills.web_search_depth = 'deep';
+        turnSkills.web_search_max_results = Math.max(turnSkills.web_search_max_results || 6, 10);
+      }
+      const turnForceTools = Array.isArray(forceTools)
+        ? forceTools.filter((name) => name === 'web_search' || name === 'fetch_url')
+        : [];
+      if (deepResearch || !useAgent || !settings.agentMode) {
+        turnForceTools.length = 0;
+      } else {
+        if (turnForceTools.includes('web_search')) turnSkills.web_search = true;
+        if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
+      }
       const controller = new AbortController();
       const stream = {
         controller,
@@ -10596,7 +12243,9 @@
           if (isThinkingOpen(replyText)) {
             stream.dom.thinkingLabel.textContent = 'Reasoning…';
           } else if (useAgent) {
-            stream.dom.thinkingLabel.textContent = 'Writing answer';
+            stream.dom.thinkingLabel.textContent = deepResearch
+              ? (deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
+              : 'Writing answer';
           } else if (replyText && replyText.trim()) {
             stream.dom.thinkingLabel.textContent = 'Writing…';
           } else {
@@ -10639,11 +12288,12 @@
             type: 'tool',
             name: payload.name || 'skill',
             detail,
+            kind: args.kind ? String(args.kind) : '',
             result: '',
             note: '',
             live: true,
           });
-          if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name) + '…';
+          if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name, args) + '…';
         } else if (payload.phase === 'tool_result') {
           const tools = stream.timeline.filter((part) => part.type === 'tool');
           const last = tools[tools.length - 1];
@@ -10669,9 +12319,37 @@
           }
           if (stream.dom) {
             stream.dom.thinkingLabel.textContent = note
-              ? skillLabel(payload.name) + ' · ' + note
+              ? skillLabel(payload.name, last) + ' · ' + note
               : 'Reading results';
           }
+        } else if (payload.phase === 'clarify') {
+          commitStreamBuffer(stream, typer);
+          if (stream.dom) stream.dom.row.dataset.raw = '';
+          const clarifyPart = {
+            type: 'clarify',
+            id: String(payload.id || ''),
+            questions: Array.isArray(payload.questions) ? payload.questions : [],
+            draft: {},
+            answers: null,
+            summary: '',
+            live: true,
+            submitting: false,
+          };
+          stream.timeline.push(clarifyPart);
+          if (stream.dom) {
+            stream.dom.thinkingLabel.textContent = 'Waiting for your answers…';
+            mountClarifyForm(stream, clarifyPart);
+          }
+        } else if (payload.phase === 'clarify_done') {
+          const part = findClarifyPart(stream, String(payload.id || ''));
+          if (part) {
+            part.live = false;
+            part.submitting = false;
+            part.answers = payload.answers || {};
+            part.summary = String(payload.summary || '').trim();
+            mountClarifyForm(stream, part);
+          }
+          if (stream.dom) stream.dom.thinkingLabel.textContent = 'Researching…';
         } else if (payload.phase === 'status' && payload.message) {
           if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
         } else if (payload.phase === 'notice' && payload.message) {
@@ -10706,10 +12384,15 @@
         messages: apiMessages,
         agent: useAgent,
         skills: turnSkills,
+        force_tools: turnForceTools,
         ...(thinkingSupported && activeThinkingEffort !== 'auto'
           ? { thinking_effort: activeThinkingEffort }
           : {}),
       };
+      if (deepResearch) {
+        requestBody.deep_research = true;
+        requestBody.deep_research_output = deepResearchOutput === 'brief' ? 'brief' : 'long';
+      }
       if (remote) {
         requestBody.remote_base = remote.base;
         requestBody.model = remote.model;
@@ -10809,9 +12492,14 @@
       if (!assistantText && !stream.errorMessage) {
         assistantText = memoryOnlyAssistantFallback(extracted);
       }
+      const visibleAnswer = streamingAnswerText(assistantText).trim();
+      // Think-only finals used to persist a blank desktop bubble while Activity looked fine.
+      if (!visibleAnswer && !stream.errorMessage && stream.timeline.length) {
+        stream.errorMessage = 'No user-visible answer after tools. Try again.';
+      }
 
       stream.timeline.forEach((part) => {
-        if (part.type === 'tool') part.live = false;
+        if (part.type === 'tool' || part.type === 'clarify') part.live = false;
       });
       // Seal any leftover buffer so a final think/answer round joins the timeline
       // only as live content (not duplicated into parts).
@@ -10828,6 +12516,15 @@
               ...(part.note ? { note: part.note } : {}),
               live: false,
             }
+            : part.type === 'clarify'
+              ? {
+                type: 'clarify',
+                id: part.id,
+                questions: part.questions || [],
+                answers: part.answers || null,
+                summary: part.summary || '',
+                live: false,
+              }
             : part.type === 'notice'
               ? {
                 type: 'notice',
@@ -10839,7 +12536,8 @@
         : null;
 
       if (viewing && dom) {
-        if (stream.errorMessage && !assistantText) {
+        const savedClarify = preserveClarifyHost(dom.answerEl);
+        if (stream.errorMessage && !visibleAnswer) {
           const errHtml = '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>';
           dom.answerEl.innerHTML = isDesktopTraceLayout()
             ? errHtml
@@ -10853,15 +12551,13 @@
               '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>'
             );
           }
-        } else if (!assistantText) {
+        } else if (!visibleAnswer) {
           if (isDesktopTraceLayout()) {
-            dom.answerEl.innerHTML = stream.timeline.length
-              ? ''
-              : '<span class="msg-error">No response.</span>';
+            dom.answerEl.innerHTML = '<span class="msg-error">No response.</span>';
           } else {
             const committed = renderCommittedParts(stream.timeline);
             dom.answerEl.innerHTML = committed
-              ? committed
+              ? committed + '<span class="msg-error">No response.</span>'
               : '<span class="msg-error">No response.</span>';
           }
         } else {
@@ -10869,20 +12565,27 @@
           dom = stream.dom;
         }
         if (dom) {
+          restoreClarifyHost(dom.answerEl, savedClarify || dom.clarifyHost);
+          const doneClarify = stream.timeline.find((part) => part.type === 'clarify');
+          if (doneClarify) mountClarifyForm(stream, doneClarify);
           dom.thinkingOrb.stop();
           dom.statusEl.classList.add('is-hidden');
           delete dom.row.dataset.streamId;
         }
       }
 
-      if (assistantText || persistedParts || memoryNotices.length) {
+      if (assistantText || persistedParts || memoryNotices.length || stream.errorMessage) {
         const message = {
           role: 'assistant',
-          content: assistantText || '',
+          content: visibleAnswer ? assistantText : '',
           model: turnModel || finalStats?.upstreamModel || '',
         };
         if (persistedParts) message.parts = persistedParts;
         if (memoryNotices.length) message.memoryNotices = memoryNotices;
+        if (stream.errorMessage && !visibleAnswer) {
+          message.error = stream.errorMessage;
+          if (!message.content) message.content = stream.errorMessage;
+        }
         if (finalStats?.tokensPerSec != null) message.tokensPerSec = finalStats.tokensPerSec;
         if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
         if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
@@ -10890,7 +12593,7 @@
         const msgIndex = convo.messages.length - 1;
         if (dom && dom.row.isConnected) {
           dom.row.dataset.msgIndex = String(msgIndex);
-          dom.row.dataset.raw = assistantText || '';
+          dom.row.dataset.raw = message.content || '';
           settleAssistantRow(dom.row, message, { animateCollapse: true });
         }
         convo.updatedAt = Date.now();
@@ -10931,9 +12634,35 @@
         }
         composerInput.focus();
       }
+      maybeSendNextQueued(convo.id);
     }
 
     chatThread.addEventListener('click', (event) => {
+      const queueRemove = event.target.closest('[data-queue-remove]');
+      if (queueRemove && chatThread.contains(queueRemove)) {
+        event.preventDefault();
+        const queueId = queueRemove.getAttribute('data-queue-remove');
+        if (activeId && queueId) removeQueuedOutbound(activeId, queueId);
+        return;
+      }
+      const queueEdit = event.target.closest('[data-queue-edit]');
+      if (queueEdit && chatThread.contains(queueEdit)) {
+        event.preventDefault();
+        const queueId = queueEdit.getAttribute('data-queue-edit');
+        const row = queueId
+          ? [...chatThread.querySelectorAll('.msg-queued')].find((el) => el.dataset.queueId === queueId)
+          : null;
+        if (row) beginQueuedMessageEdit(row);
+        return;
+      }
+      const clarifySubmit = event.target.closest('[data-clarify-submit]');
+      if (clarifySubmit && chatThread.contains(clarifySubmit)) {
+        event.preventDefault();
+        const clarifyId = clarifySubmit.getAttribute('data-clarify-submit');
+        const stream = activeStream();
+        if (stream && clarifyId) void submitClarifyForm(stream, clarifyId);
+        return;
+      }
       const foldToggle = event.target.closest('.agent-timeline-fold-toggle');
       if (foldToggle && chatThread.contains(foldToggle)) {
         event.preventDefault();
@@ -10949,7 +12678,7 @@
         copyCodeBlock(btn);
         return;
       }
-      if (event.target.closest('.msg-action, a, button, summary, details, input, textarea')) {
+      if (event.target.closest('.msg-action, a, button, summary, details, input, textarea, .clarify-card')) {
         return;
       }
       const row = event.target.closest('.msg-role-assistant');
@@ -10959,17 +12688,81 @@
       selectTraceMessage(index, { animate: true, ensureOpen: false });
     });
 
+    chatThread.addEventListener('change', (event) => {
+      const input = event.target.closest('.clarify-card input');
+      if (!input || !chatThread.contains(input)) return;
+      const card = input.closest('.clarify-card');
+      const host = card?.closest('.clarify-host');
+      const clarifyId = card?.dataset.clarifyId;
+      const stream = activeStream();
+      const part = stream && clarifyId ? findClarifyPart(stream, clarifyId) : null;
+      if (!part || !part.live) return;
+      const qi = Number(input.dataset.clarifyQ);
+      if (!Number.isFinite(qi)) return;
+      if (!part.draft) part.draft = {};
+      const qEl = card.querySelector('.clarify-q[data-clarify-q="' + qi + '"]');
+      const multi = !!part.questions?.[qi]?.multiSelect;
+      if (input.dataset.clarifyOther) {
+        if (input.checked) {
+          if (!multi) {
+            qEl?.querySelectorAll('input[data-clarify-opt]').forEach((el) => { el.checked = false; });
+          }
+          part.draft[qi] = {
+            labels: [],
+            custom: String(qEl?.querySelector('[data-clarify-custom]')?.value || ''),
+            useCustom: true,
+          };
+        }
+      } else if (input.dataset.clarifyOpt != null) {
+        const other = qEl?.querySelector('input[data-clarify-other]');
+        if (other && !multi) other.checked = false;
+        const labels = [...(qEl?.querySelectorAll('input[data-clarify-opt]:checked') || [])].map((el) => el.value);
+        part.draft[qi] = {
+          labels,
+          custom: String(part.draft[qi]?.custom || ''),
+          useCustom: false,
+        };
+      }
+      mountClarifyForm(stream, part);
+      const custom = host?.querySelector('.clarify-q[data-clarify-q="' + qi + '"] [data-clarify-custom]');
+      if (part.draft[qi]?.useCustom && custom) {
+        custom.focus();
+        custom.selectionStart = custom.value.length;
+      }
+    });
+
+    chatThread.addEventListener('input', (event) => {
+      const custom = event.target.closest('[data-clarify-custom]');
+      if (!custom || !chatThread.contains(custom)) return;
+      const card = custom.closest('.clarify-card');
+      const host = card?.closest('.clarify-host');
+      const clarifyId = card?.dataset.clarifyId;
+      const stream = activeStream();
+      const part = stream && clarifyId ? findClarifyPart(stream, clarifyId) : null;
+      if (!part || !part.live) return;
+      const qi = Number(custom.dataset.clarifyQ);
+      if (!Number.isFinite(qi)) return;
+      if (!part.draft) part.draft = {};
+      part.draft[qi] = {
+        labels: [],
+        custom: custom.value,
+        useCustom: true,
+      };
+      syncClarifySubmitEnabled(host);
+    });
+
     btnSend.addEventListener('click', sendMessage);
     btnStop.addEventListener('click', () => {
       if (activeId) abortStream(activeId);
     });
-    btnAttach.addEventListener('click', () => {
-      if (btnAttach.getAttribute('aria-disabled') === 'true') {
-        openSettings();
-        showSettingsPane('attachments');
-        return;
-      }
-      attachFileInput.click();
+    btnPlus?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setPlusMenuOpen(!plusMenuIsOpen());
+    });
+    plusMenu?.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-plus-action]');
+      if (!item || item.disabled) return;
+      handlePlusMenuAction(item.dataset.plusAction);
     });
     btnMic?.addEventListener('click', () => {
       if (btnMic.getAttribute('aria-disabled') === 'true') {
@@ -11024,11 +12817,6 @@
       void addFilesToPending(files);
     });
     document.getElementById('settingAttachmentTextFallback').addEventListener('change', syncAttachmentFallbackControls);
-    btnAgent.addEventListener('click', () => {
-      if (!requireUnlockedData()) return;
-      settings.agentMode = !settings.agentMode;
-      saveSettings({ ...settings });
-    });
     document.getElementById('btnThink').addEventListener('click', (event) => {
       event.stopPropagation();
       setThinkMenuOpen(!thinkMenuIsOpen());
@@ -11040,14 +12828,23 @@
       setThinkMenuOpen(false);
     });
     document.addEventListener('click', (event) => {
-      const wrap = document.getElementById('composerThinkWrap');
-      if (!wrap || wrap.contains(event.target)) return;
-      if (thinkMenuIsOpen()) setThinkMenuOpen(false);
+      const thinkWrap = document.getElementById('composerThinkWrap');
+      const plusWrap = document.getElementById('composerPlusWrap');
+      if (thinkWrap && !thinkWrap.contains(event.target) && thinkMenuIsOpen()) {
+        setThinkMenuOpen(false);
+      }
+      const clickedPlus = (plusWrap && plusWrap.contains(event.target))
+        || (plusMenu && plusMenu.contains(event.target));
+      if (!clickedPlus && plusMenuIsOpen()) {
+        setPlusMenuOpen(false);
+      }
     });
     document.getElementById('settingThinkingEffort').addEventListener('change', (event) => {
       setThinkingEffort(event.target.value, true);
     });
     syncThinkingEffortControls(settings.thinkingEffort);
+    syncResearchControls();
+    renderPlusMenu();
     syncComposerThinkVisibility(null);
     syncAttachButton();
     syncMicButton();
@@ -11335,6 +13132,12 @@
       syncSettingsSaveButton();
     });
     document.getElementById('settingSkillWebSearch').addEventListener('change', syncWebSearchControls);
+    document.getElementById('btnWebSearchAdvanced')?.addEventListener('click', () => {
+      const toggle = document.getElementById('btnWebSearchAdvanced');
+      const panel = document.getElementById('webSearchOptions');
+      if (!toggle || toggle.disabled) return;
+      setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+    });
     document.getElementById('btnSkillCreate').addEventListener('click', () => {
       openSkillEditor({
         name: '',
@@ -11901,9 +13704,12 @@
       await initLocalData();
       updateGreeting();
       syncAgentButton();
+      syncResearchControls();
       renderSidebar();
-      // Fresh visit always opens a blank chat; history stays in the sidebar.
-      startDraft();
+      applyLocationRoute();
+      window.addEventListener('popstate', () => {
+        applyLocationRoute();
+      });
       pollState();
       setInterval(pollState, 2000);
       loadUserSkills();

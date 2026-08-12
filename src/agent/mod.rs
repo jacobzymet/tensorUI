@@ -4,14 +4,21 @@
 pub mod chat;
 pub mod skills;
 
-use std::{io::ErrorKind, process::Stdio, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    io::ErrorKind,
+    process::Stdio,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::timeout;
 
 use crate::{
     anthropic::{self, AnthropicSseTranslator},
@@ -25,14 +32,57 @@ use crate::{
 /// the model may be looping. There is no hard tool-round ceiling — Stop is the
 /// escape hatch.
 const TOOL_LOOP_NOTICE_AFTER: usize = 25;
+const DEEP_RESEARCH_TOOL_LOOP_NOTICE_AFTER: usize = 40;
+const DEEP_RESEARCH_MIN_RESULTS: usize = 10;
+/// Soft cap: after this many web_search calls, stop offering tools and demand a final answer.
+const DEEP_RESEARCH_BRIEF_SEARCH_CAP: usize = 4;
+const DEEP_RESEARCH_LONG_SEARCH_CAP: usize = 10;
 /// How many times we nudge after a blank visible reply before giving up.
 const MAX_EMPTY_RETRIES: usize = 2;
+/// Extra nudges once research already has sources and only the write-up is missing.
+const MAX_ANSWER_RETRIES: usize = 4;
+const CLARIFY_WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+fn clarify_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<Value>>> {
+    static WAITERS: OnceLock<Mutex<HashMap<String, oneshot::Sender<Value>>>> = OnceLock::new();
+    WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn submit_clarify_answers(id: &str, answers: Value) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("clarify id is required".into());
+    }
+    let sender = clarify_waiters()
+        .lock()
+        .map_err(|_| "clarify waiters lock poisoned".to_string())?
+        .remove(id)
+        .ok_or_else(|| "No pending clarification for that id (it may have expired).".to_string())?;
+    sender
+        .send(answers)
+        .map_err(|_| "Research turn is no longer waiting for answers.".to_string())
+}
+
+struct ClarifyWaitGuard {
+    id: String,
+}
+
+impl Drop for ClarifyWaitGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = clarify_waiters().lock() {
+            map.remove(&self.id);
+        }
+    }
+}
 const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const DEFAULT_SEARCH_RESULTS: usize = 6;
 const MAX_SEARCH_RESULTS: usize = 20;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
 const FETCH_URL_MAX_CHARS: usize = 8_000;
 const DDGS_TIMEOUT: Duration = Duration::from_secs(45);
+/// Retry flaky DDGS calls before handing a soft failure back to the model.
+const DDGS_ATTEMPTS: usize = 3;
+const DDGS_RETRY_DELAY_MS: u64 = 450;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentRequest {
@@ -42,7 +92,13 @@ pub struct AgentRequest {
     #[serde(default)]
     pub agent: bool,
     #[serde(default)]
+    pub deep_research: bool,
+    #[serde(default)]
+    pub deep_research_output: DeepResearchOutput,
+    #[serde(default)]
     pub skills: AgentSkills,
+    #[serde(default)]
+    pub force_tools: Vec<String>,
     #[serde(default)]
     pub chat_template_kwargs: Option<Value>,
     #[serde(default)]
@@ -51,6 +107,31 @@ pub struct AgentRequest {
     pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub reasoning: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DeepResearchOutput {
+    #[default]
+    Long,
+    Brief,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum WebSearchKind {
+    #[default]
+    Web,
+    News,
+}
+
+impl WebSearchKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Web => "web",
+            Self::News => "news",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -229,6 +310,34 @@ impl AgentSkills {
     }
 }
 
+impl AgentRequest {
+    fn apply_deep_research(&mut self) {
+        if !self.deep_research {
+            return;
+        }
+        self.agent = true;
+        self.skills.web_search = true;
+        self.skills.fetch_url = true;
+        self.skills.web_search_depth = WebSearchDepth::Deep;
+        if self.skills.web_search_max_results < DEEP_RESEARCH_MIN_RESULTS {
+            self.skills.web_search_max_results = DEEP_RESEARCH_MIN_RESULTS;
+        }
+    }
+
+    fn normalize_force_tools(&mut self) {
+        let mut seen = HashSet::new();
+        self.force_tools.retain(|name| {
+            let allowed = match name.as_str() {
+                "web_search" => self.skills.web_search,
+                "fetch_url" => self.skills.fetch_url,
+                "ask_user" => self.deep_research,
+                _ => false,
+            };
+            allowed && seen.insert(name.clone())
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ToolCall {
     id: String,
@@ -252,6 +361,10 @@ impl StreamedTurn {
         } else {
             format!("<think>{}</think>\n{}", self.reasoning, self.content)
         }
+    }
+
+    fn visible_text(&self) -> String {
+        strip_think_blocks(&self.content).trim().to_string()
     }
 }
 
@@ -329,53 +442,267 @@ async fn run_agent_loop(
     user_skills: &[UserSkill],
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
 ) -> Result<(), StreamFail> {
-    inject_agent_system_prompt(&mut request.messages, &request.skills, user_skills);
+    request.apply_deep_research();
+    request.normalize_force_tools();
+    inject_agent_system_prompt(
+        &mut request.messages,
+        &request.skills,
+        user_skills,
+        request.deep_research,
+        request.deep_research_output,
+        &request.force_tools,
+    );
     send_sse(
         tx,
         sse_agent(json!({
             "phase": "status",
-            "message": "Agent mode"
+            "message": if request.deep_research {
+                "Deep research"
+            } else if !request.force_tools.is_empty() {
+                "Agent · required skills"
+            } else {
+                "Agent mode"
+            }
         })),
     )
     .await?;
 
     let mut tool_rounds = 0usize;
     let mut empty_retries = 0usize;
+    let mut force_retries = 0usize;
     let mut loop_notice_sent = false;
+    let mut pending_force: HashSet<String> = request.force_tools.iter().cloned().collect();
+    let mut await_clarify = request.deep_research;
+    let mut deep_searches = 0usize;
+    let search_cap = deep_research_search_cap(request.deep_research_output);
 
     loop {
+        let force_final = request.deep_research
+            && deep_searches > 0
+            && (deep_searches >= search_cap || empty_retries > 0);
+        let mut pending_list = pending_force_list(&pending_force, &request.force_tools);
+        if await_clarify {
+            pending_list = vec!["ask_user".into()];
+        } else if force_final {
+            pending_list.clear();
+        } else if request.deep_research && deep_searches == 0 && !pending_list.iter().any(|n| n == "web_search")
+        {
+            // After clarify (or if clarify somehow skipped), require at least one search.
+            pending_list = vec!["web_search".into()];
+        }
+        let allow_tools = !force_final;
+        let status_message = if await_clarify && tool_rounds == 0 && empty_retries == 0 {
+            "Refining research goal…".to_string()
+        } else if force_final {
+            "Writing answer…".to_string()
+        } else if request.deep_research {
+            if tool_rounds == 0 && empty_retries == 0 && force_retries == 0 {
+                "Researching…".to_string()
+            } else {
+                "Still researching…".to_string()
+            }
+        } else if !pending_list.is_empty() {
+            format!("Required: {}", pending_list.join(", "))
+        } else if tool_rounds == 0 && empty_retries == 0 {
+            "Processing…".to_string()
+        } else {
+            "Continuing…".to_string()
+        };
         send_sse(
             tx,
             sse_agent(json!({
                 "phase": "status",
-                "message": if tool_rounds == 0 && empty_retries == 0 {
-                    "Processing…"
-                } else {
-                    "Continuing…"
-                }
+                "message": status_message
             })),
         )
         .await?;
 
-        let turn = stream_once(api_base, api_key, style, request, user_skills, tx).await?;
+        let turn = stream_once(
+            api_base,
+            api_key,
+            style,
+            request,
+            user_skills,
+            &pending_list,
+            allow_tools,
+            tx,
+        )
+        .await?;
 
         if let Some(call) = turn.tool.clone() {
+            if force_final && call.name != "ask_user" {
+                tool_rounds += 1;
+                let err = "Enough research for now — write the final answer in normal reply text (not thinking). Do not call tools.";
+                let mut clear = json!({ "phase": "content_clear" });
+                if !turn.content.trim().is_empty() {
+                    clear["text"] = json!(turn.content);
+                }
+                if !turn.reasoning.trim().is_empty() {
+                    clear["reasoning"] = json!(turn.reasoning);
+                }
+                send_sse(tx, sse_agent(clear)).await?;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "tool_call",
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    })),
+                )
+                .await?;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "tool_result",
+                        "name": call.name,
+                        "ok": false,
+                        "preview": err,
+                        "result": err,
+                    })),
+                )
+                .await?;
+                append_openai_tool_exchange(&mut request.messages, &turn, &call, err);
+                continue;
+            }
+            if call.name == "ask_user" {
+                if !request.deep_research {
+                    return Err(StreamFail::Other(
+                        "Capability 'ask_user' is only available in deep research.".into(),
+                    ));
+                }
+                tool_rounds += 1;
+                let mut clear = json!({ "phase": "content_clear" });
+                if !turn.content.trim().is_empty() {
+                    clear["text"] = json!(turn.content);
+                }
+                if !turn.reasoning.trim().is_empty() {
+                    clear["reasoning"] = json!(turn.reasoning);
+                }
+                send_sse(tx, sse_agent(clear)).await?;
+
+                let questions = normalize_ask_user_questions(&call.arguments);
+                if questions.is_empty() {
+                    let err = ask_user_format_error(&call.arguments);
+                    send_sse(
+                        tx,
+                        sse_agent(json!({
+                            "phase": "tool_call",
+                            "name": "ask_user",
+                            "arguments": call.arguments,
+                        })),
+                    )
+                    .await?;
+                    send_sse(
+                        tx,
+                        sse_agent(json!({
+                            "phase": "tool_result",
+                            "name": "ask_user",
+                            "ok": false,
+                            "preview": err,
+                            "result": err,
+                        })),
+                    )
+                    .await?;
+                    append_openai_tool_exchange(&mut request.messages, &turn, &call, &err);
+                    continue;
+                }
+
+                let clarify_id = new_tool_call_id();
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "clarify",
+                        "id": clarify_id,
+                        "questions": questions,
+                    })),
+                )
+                .await?;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "status",
+                        "message": "Waiting for your answers…"
+                    })),
+                )
+                .await?;
+
+                let answers = wait_for_clarify_answers(&clarify_id, tx).await?;
+                let summary = format_clarify_answers_for_model(&questions, &answers);
+                await_clarify = false;
+                pending_force.insert("web_search".into());
+                force_retries = 0;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "clarify_done",
+                        "id": clarify_id,
+                        "answers": answers,
+                        "summary": summary,
+                    })),
+                )
+                .await?;
+                append_openai_tool_exchange(&mut request.messages, &turn, &call, &summary);
+                continue;
+            }
+
+            if await_clarify {
+                let err = "Deep research requires ask_user first (1–2 clarifying questions) before web_search or fetch_url.";
+                tool_rounds += 1;
+                let mut clear = json!({ "phase": "content_clear" });
+                if !turn.content.trim().is_empty() {
+                    clear["text"] = json!(turn.content);
+                }
+                if !turn.reasoning.trim().is_empty() {
+                    clear["reasoning"] = json!(turn.reasoning);
+                }
+                send_sse(tx, sse_agent(clear)).await?;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "tool_call",
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    })),
+                )
+                .await?;
+                send_sse(
+                    tx,
+                    sse_agent(json!({
+                        "phase": "tool_result",
+                        "name": call.name,
+                        "ok": false,
+                        "preview": err,
+                        "result": err,
+                    })),
+                )
+                .await?;
+                append_openai_tool_exchange(&mut request.messages, &turn, &call, err);
+                continue;
+            }
+
             if !capability_allowed(&call.name, &request.skills, user_skills) {
                 return Err(StreamFail::Other(format!(
                     "Capability '{}' is not enabled.",
                     call.name
                 )));
             }
+            pending_force.remove(&call.name);
+            force_retries = 0;
 
             tool_rounds += 1;
-            if !loop_notice_sent && tool_rounds >= TOOL_LOOP_NOTICE_AFTER {
+            let loop_after = if request.deep_research {
+                DEEP_RESEARCH_TOOL_LOOP_NOTICE_AFTER
+            } else {
+                TOOL_LOOP_NOTICE_AFTER
+            };
+            if !loop_notice_sent && tool_rounds >= loop_after {
                 loop_notice_sent = true;
                 send_sse(
                     tx,
                     sse_agent(json!({
                         "phase": "notice",
                         "message": format!(
-                            "{TOOL_LOOP_NOTICE_AFTER} tool steps so far — the model may be stuck looping. Press Stop if this isn't making progress."
+                            "{loop_after} tool steps so far — the model may be stuck looping. Press Stop if this isn't making progress."
                         ),
                     })),
                 )
@@ -402,16 +729,32 @@ async fn run_agent_loop(
             )
             .await?;
 
-            let outcome = execute_tool(&call, &request.skills, user_skills)
-                .await
-                .map_err(StreamFail::Other)?;
+            let outcome = match execute_tool(&call, &request.skills, user_skills).await {
+                Ok(outcome) => outcome,
+                Err(err) if call.name == "web_search" || call.name == "fetch_url" => {
+                    // Never abort the whole turn on a single lookup miss — feed it
+                    // back so the model can reformulate and continue researching.
+                    let guidance = if call.name == "web_search" {
+                        format!(
+                            "{err}\n\nSearch failed. Do not stop. Try again with a different query (drop speculative dates), another backend, or kind=news vs web."
+                        )
+                    } else {
+                        format!("{err}\n\nFetch failed. Try a different URL from prior search results, or search again.")
+                    };
+                    ToolOutcome::soft_failure(guidance)
+                }
+                Err(err) => return Err(StreamFail::Other(err)),
+            };
+            if call.name == "web_search" && outcome.ok {
+                deep_searches += 1;
+            }
             let preview = outcome.ui_text.chars().take(240).collect::<String>();
             // Cap the UI payload; the model still receives the full `result` below.
             let ui_result: String = outcome.ui_text.chars().take(32_000).collect();
             let mut payload = json!({
                 "phase": "tool_result",
                 "name": call.name,
-                "ok": true,
+                "ok": outcome.ok,
                 "preview": preview,
                 "result": ui_result,
             });
@@ -420,14 +763,84 @@ async fn run_agent_loop(
             }
             send_sse(tx, sse_agent(payload)).await?;
 
-            append_openai_tool_exchange(&mut request.messages, &turn, &call, &outcome.text);
+            let mut model_result = outcome.text;
+            if request.deep_research {
+                model_result.push_str(&deep_research_continue_note(
+                    request.deep_research_output,
+                    deep_searches,
+                    search_cap,
+                ));
+            }
+            append_openai_tool_exchange(&mut request.messages, &turn, &call, &model_result);
             continue;
         }
 
-        // Reasoning-only / empty visible replies used to end the turn blank in the UI.
-        // Nudge the model to either call a tool or answer plainly.
-        if turn.content.trim().is_empty() {
-            if empty_retries >= MAX_EMPTY_RETRIES {
+        let needs_deep_search = request.deep_research && deep_searches == 0;
+        if await_clarify || !pending_force.is_empty() || needs_deep_search {
+            if force_retries >= MAX_EMPTY_RETRIES {
+                return Err(StreamFail::Other(if await_clarify {
+                    "Deep research did not ask clarifying questions before answering.".into()
+                } else if needs_deep_search {
+                    "Deep research finished without searching the web.".into()
+                } else {
+                    format!(
+                        "Agent did not use required skill(s): {}.",
+                        pending_force_list(&pending_force, &request.force_tools).join(", ")
+                    )
+                }));
+            }
+            force_retries += 1;
+            let pending = if await_clarify {
+                vec!["ask_user".into()]
+            } else if needs_deep_search {
+                vec!["web_search".into()]
+            } else {
+                pending_force_list(&pending_force, &request.force_tools)
+            };
+            send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
+            send_sse(
+                tx,
+                sse_agent(json!({
+                    "phase": "status",
+                    "message": if await_clarify {
+                        "Waiting to refine the research goal…".into()
+                    } else {
+                        format!("Waiting for: {}", pending.join(", "))
+                    }
+                })),
+            )
+            .await?;
+            request.messages.push(json!({
+                "role": "assistant",
+                "content": turn.assistant_text(),
+            }));
+            request.messages.push(json!({
+                "role": "user",
+                "content": if await_clarify {
+                    "Before any search, call ask_user with 1–2 clarifying multiple-choice questions so the user can refine the research goal. Do not write the final report yet."
+                        .into()
+                } else if needs_deep_search {
+                    "Deep research requires live web evidence. Call web_search now (prefer kind=news and a recent recency when the topic is current). Do not answer from memory alone."
+                        .into()
+                } else {
+                    format!(
+                        "Required before answering: call {} at least once. Do not give a final answer until each has been used.",
+                        pending.join(" and ")
+                    )
+                },
+            }));
+            continue;
+        }
+
+        // Reasoning-only / think-only / blank replies used to end the turn empty in the UI.
+        // Nudge the model to either call a tool or write a user-visible answer.
+        if turn.visible_text().is_empty() {
+            let answer_budget = if request.deep_research && deep_searches > 0 {
+                MAX_ANSWER_RETRIES
+            } else {
+                MAX_EMPTY_RETRIES
+            };
+            if empty_retries >= answer_budget {
                 return Err(StreamFail::Other(
                     "Agent produced no user-visible answer.".into(),
                 ));
@@ -438,7 +851,7 @@ async fn run_agent_loop(
                 tx,
                 sse_agent(json!({
                     "phase": "status",
-                    "message": "Retrying…"
+                    "message": "Waiting for final answer…"
                 })),
             )
             .await?;
@@ -448,7 +861,13 @@ async fn run_agent_loop(
             }));
             request.messages.push(json!({
                 "role": "user",
-                "content": "You did not produce a user-visible answer or a tool call. Call a tool if you need a capability, or answer the user directly.",
+                "content": if request.deep_research && deep_searches > 0 {
+                    "Stop calling tools. Write the final answer now in the normal reply text (not inside thinking/reasoning). Lead with the conclusion, use the sources you already found, and cite them as markdown links."
+                } else if request.deep_research {
+                    "You did not produce a user-visible answer or a tool call. Continue with ask_user or web_search, or write the final answer in normal reply text (not inside thinking)."
+                } else {
+                    "You did not produce a user-visible answer or a tool call. Call a tool if you need a capability, or answer the user directly in normal reply text (not inside thinking)."
+                },
             }));
             continue;
         }
@@ -458,16 +877,45 @@ async fn run_agent_loop(
     }
 }
 
+fn pending_force_list(pending: &HashSet<String>, preferred_order: &[String]) -> Vec<String> {
+    let mut list: Vec<String> = preferred_order
+        .iter()
+        .filter(|name| pending.contains(name.as_str()))
+        .cloned()
+        .collect();
+    for name in pending {
+        if !list.iter().any(|item| item == name) {
+            list.push(name.clone());
+        }
+    }
+    list
+}
+
+fn tool_choice_for_pending(pending: &[String]) -> Value {
+    match pending {
+        [] => json!("auto"),
+        [name] => json!({
+            "type": "function",
+            "function": { "name": name }
+        }),
+        _ => json!("required"),
+    }
+}
+
 fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill]) -> bool {
     match name {
         "web_search" => skills.web_search,
         "fetch_url" => skills.fetch_url,
+        "ask_user" => true,
         "activate_skill" | "read_skill" => !user_skills.is_empty(),
         _ => false,
     }
 }
 
 pub fn should_run_agent(request: &AgentRequest, user_skills: &[UserSkill]) -> bool {
+    if request.deep_research {
+        return true;
+    }
     request.agent && (request.skills.any_enabled() || !user_skills.is_empty())
 }
 
@@ -475,8 +923,17 @@ fn inject_agent_system_prompt(
     messages: &mut Vec<Value>,
     skills: &AgentSkills,
     user_skills: &[UserSkill],
+    deep_research: bool,
+    deep_research_output: DeepResearchOutput,
+    force_tools: &[String],
 ) {
-    let block = agent_system_block(skills, user_skills);
+    let mut block = agent_system_block(skills, user_skills, deep_research, force_tools);
+    if deep_research {
+        if !block.is_empty() {
+            block.push_str("\n\n");
+        }
+        block.push_str(&deep_research_system_block(deep_research_output));
+    }
     if block.is_empty() {
         return;
     }
@@ -494,12 +951,38 @@ fn inject_agent_system_prompt(
     messages.insert(0, json!({ "role": "system", "content": block }));
 }
 
-fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String {
+fn agent_system_block(
+    skills: &AgentSkills,
+    user_skills: &[UserSkill],
+    deep_research: bool,
+    force_tools: &[String],
+) -> String {
     let mut lines: Vec<String> = vec![
-        "You are running in agent mode with tools.".into(),
+        if deep_research {
+            "You are running in agent mode with tools, in Deep Research."
+        } else {
+            "You are running in agent mode with tools."
+        }
+        .into(),
         "Call a tool when it helps; do not invent tool results. After a tool result, call another tool or answer normally.".into(),
         "Put planning and status updates in reasoning/thinking, not in user-visible text. Do not narrate tool steps in the reply (for example \"Let me search…\", \"Digging deeper…\", \"Checking sources…\"). After tools finish, write the final answer only.".into(),
     ];
+    if !force_tools.is_empty() {
+        lines.push(format!(
+            "Required tools for this turn: {}. You MUST call each of these at least once before giving a final answer. Prefer calling a required tool first.",
+            force_tools.join(", ")
+        ));
+    } else if deep_research {
+        lines.push(
+            "Do not answer from memory alone. After clarifying with the user, investigate with web_search (and fetch_url when useful) before writing the final answer."
+                .into(),
+        );
+    } else {
+        lines.push(
+            "Enabled tools are available whenever they would improve accuracy or freshness. Use them when needed; skip them for pure reasoning or when the user already provided enough."
+                .into(),
+        );
+    }
     if skills.web_search {
         let depth = skills.web_search_depth;
         let depth_note = match depth.scrape_plan() {
@@ -516,7 +999,7 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
             value => format!("past {}", value.as_str()),
         };
         let mut web_line = format!(
-            "Tool web_search — search the public web via DDGS (engine: {}, region: {}, SafeSearch: {}, recency: {}, up to {} results). {depth_note}",
+            "Tool web_search — search the public web via DDGS (engine: {}, region: {}, SafeSearch: {}, recency: {}, up to {} results). {depth_note} Optional arguments: backend (auto, duckduckgo, brave, bing, google, mojeek, startpage, yahoo, yandex, wikipedia), recency (any, day, week, month, year), kind (web or news).",
             skills.web_search_backend.as_str(),
             skills.search_region(),
             skills.web_search_safesearch.as_str(),
@@ -555,6 +1038,59 @@ fn agent_system_block(skills: &AgentSkills, user_skills: &[UserSkill]) -> String
         lines.push(crate::skills::user_skills_catalog_block(user_skills));
     }
     lines.join("\n")
+}
+
+fn deep_research_system_block(output: DeepResearchOutput) -> String {
+    let output_line = match output {
+        DeepResearchOutput::Long => {
+            "Final answer: write a comprehensive, well-structured report. Open with a short overview, then cover findings in depth, note disagreements and uncertainty, and close with caveats or open questions. Cite sources inline as markdown links. Do not pad with filler."
+        }
+        DeepResearchOutput::Brief => {
+            "Final answer: write a brief, dense answer that still uses everything you found. Lead with the conclusion, then the essential evidence and caveats. Cite sources inline as markdown links. No preamble about your process."
+        }
+    };
+    [
+        "Deep Research instructions:",
+        "Before any web_search or fetch_url, you MUST call ask_user once with valid arguments. Prefer 2 questions when the ask is broad.",
+        "ask_user shape (required): {\"questions\":[{\"header\":\"Scope\",\"question\":\"Which angle matters most?\",\"options\":[{\"label\":\"Legal status\",\"description\":\"Charges, custody, rulings\"},{\"label\":\"Timeline\",\"description\":\"What happened when\"}],\"multiSelect\":false}]}.",
+        "Rules: 1–2 questions; each needs question text + 2–4 options; each option needs a label (description optional). Do not invent an \"Other\" option — the UI adds that. multiSelect may be true when several choices can apply.",
+        "Purpose of ask_user: refine scope, audience, timeframe, geography, or emphasis — not status updates.",
+        "After the user answers, investigate thoroughly before writing the final report. Prefer many targeted searches over one broad query.",
+        "Search strategy:",
+        "- Start broad, then fan out: synonyms, alternate phrasings, opposing views, primary sources, documentation, papers, forums, and official pages.",
+        "- Use slightly unconventional but legitimate tactics: site: filters, quoted phrases, related entities, historical vs current wording, and queries aimed at critics or primary data — not spammy keyword stuffing or near-duplicate queries.",
+        "- Vary methods: try different engines via web_search.backend (google, bing, duckduckgo, wikipedia, brave, and others), recency windows when freshness matters, and kind=news for current events.",
+        "- After promising hits, fetch_url the best pages instead of trusting snippets.",
+        "- Cross-check important claims across independent sources. If sources conflict, say so.",
+        "- Keep going until coverage is solid for the question's scope. A narrow fact can finish after a few searches; a multi-faceted question should run many.",
+        output_line,
+    ]
+    .join("\n")
+}
+
+fn deep_research_search_cap(output: DeepResearchOutput) -> usize {
+    match output {
+        DeepResearchOutput::Brief => DEEP_RESEARCH_BRIEF_SEARCH_CAP,
+        DeepResearchOutput::Long => DEEP_RESEARCH_LONG_SEARCH_CAP,
+    }
+}
+
+fn deep_research_continue_note(
+    output: DeepResearchOutput,
+    deep_searches: usize,
+    search_cap: usize,
+) -> String {
+    if deep_searches >= search_cap {
+        return "\n\nDeep research: you have enough sources. Do not search again. Write the final answer NOW in normal user-visible reply text (not inside thinking/reasoning). Cite sources as markdown links.".into();
+    }
+    match output {
+        DeepResearchOutput::Long => {
+            "\n\nDeep research: if important angles remain, search again with a different query, engine, recency, or news search, or fetch_url a promising page. If coverage is solid, write the comprehensive final report now in the normal user-visible reply (not inside thinking/reasoning).".into()
+        }
+        DeepResearchOutput::Brief => {
+            "\n\nDeep research: prefer a few strong searches, then write the concise final answer in the normal user-visible reply (not inside thinking/reasoning). Only search again if a critical gap remains.".into()
+        }
+    }
 }
 
 pub fn inject_skill_catalog_into_messages(messages: &mut Vec<Value>, user_skills: &[UserSkill]) {
@@ -596,6 +1132,8 @@ async fn stream_once(
     style: ApiStyle,
     request: &AgentRequest,
     user_skills: &[UserSkill],
+    pending_force: &[String],
+    allow_tools: bool,
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
 ) -> Result<StreamedTurn, StreamFail> {
     let model = request
@@ -610,11 +1148,11 @@ async fn stream_once(
         "messages": request.messages,
     });
     if let Some(object) = payload.as_object_mut() {
-        let tools = openai_tools_payload(&request.skills, user_skills);
-        if !tools.is_empty() {
-            object.insert("tools".into(), Value::Array(tools));
-            if style == ApiStyle::Openai {
-                object.insert("tool_choice".into(), json!("auto"));
+        if allow_tools {
+            let tools = openai_tools_payload(&request.skills, user_skills, request.deep_research);
+            if !tools.is_empty() {
+                object.insert("tools".into(), Value::Array(tools));
+                object.insert("tool_choice".into(), tool_choice_for_pending(pending_force));
             }
         }
         if let Some(kwargs) = &request.chat_template_kwargs {
@@ -917,12 +1455,75 @@ fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) 
     }
 }
 
-fn openai_tools_payload(skills: &AgentSkills, user_skills: &[UserSkill]) -> Vec<Value> {
+fn openai_tools_payload(
+    skills: &AgentSkills,
+    user_skills: &[UserSkill],
+    deep_research: bool,
+) -> Vec<Value> {
     let mut tools = Vec::new();
+    if deep_research {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "ask_user",
+                "description": "Ask the user 1–2 clarifying multiple-choice questions before deep research. Call once. Arguments MUST be: {\"questions\":[{\"header\":\"Scope\",\"question\":\"…?\",\"options\":[{\"label\":\"A\",\"description\":\"…\"},{\"label\":\"B\",\"description\":\"…\"}],\"multiSelect\":false}]}. Each question needs 2–4 options; options are objects with label (required) and description (optional). Do not search until after the user answers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "questions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 2,
+                            "description": "1–2 multiple-choice questions",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "header": {
+                                        "type": "string",
+                                        "description": "Short chip label (max ~12 characters), e.g. Scope, Audience, Time"
+                                    },
+                                    "question": {
+                                        "type": "string",
+                                        "description": "Full question shown to the user"
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "minItems": 2,
+                                        "maxItems": 4,
+                                        "description": "2–4 choices; each is {label, description?}",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "label": { "type": "string" },
+                                                "description": { "type": "string" }
+                                            },
+                                            "required": ["label"]
+                                        }
+                                    },
+                                    "multiSelect": {
+                                        "type": "boolean",
+                                        "description": "If true, user may pick multiple options"
+                                    }
+                                },
+                                "required": ["question", "options"]
+                            }
+                        }
+                    },
+                    "required": ["questions"]
+                }
+            }
+        }));
+    }
     if skills.web_search {
-        let mut description = String::from(
-            "Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.",
-        );
+        let mut description = if deep_research {
+            String::from(
+                "Search the public web or news and read result pages. Vary query wording, engine (backend), recency, and kind=news while investigating. Prefer many distinct searches over repeating the same query.",
+            )
+        } else {
+            String::from(
+                "Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.",
+            )
+        };
         if skills.fetch_url {
             description.push_str(
                 " After you get results, you may call fetch_url on promising result URLs if you need more detail than snippets/excerpts.",
@@ -939,6 +1540,18 @@ fn openai_tools_payload(skills: &AgentSkills, user_skills: &[UserSkill]) -> Vec<
                         "query": {
                             "type": "string",
                             "description": "Search terms"
+                        },
+                        "backend": {
+                            "type": "string",
+                            "description": "Optional engine override: auto, duckduckgo, brave, bing, google, mojeek, startpage, yahoo, yandex, wikipedia"
+                        },
+                        "recency": {
+                            "type": "string",
+                            "description": "Optional recency: any, day, week, month, year"
+                        },
+                        "kind": {
+                            "type": "string",
+                            "description": "web (default) or news"
                         }
                     },
                     "required": ["query"]
@@ -1054,6 +1667,231 @@ fn sse_agent(payload: Value) -> Vec<u8> {
     format!("event: agent\ndata: {payload}\n\n").into_bytes()
 }
 
+async fn wait_for_clarify_answers(
+    clarify_id: &str,
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+) -> Result<Value, StreamFail> {
+    let (answer_tx, mut answer_rx) = oneshot::channel();
+    {
+        let mut map = clarify_waiters()
+            .lock()
+            .map_err(|_| StreamFail::Other("clarify waiters lock poisoned".into()))?;
+        map.insert(clarify_id.to_string(), answer_tx);
+    }
+    let _guard = ClarifyWaitGuard {
+        id: clarify_id.to_string(),
+    };
+
+    let started = std::time::Instant::now();
+    loop {
+        if tx.is_closed() {
+            return Err(StreamFail::Other("Clarification cancelled.".into()));
+        }
+        if started.elapsed() >= CLARIFY_WAIT_TIMEOUT {
+            return Err(StreamFail::Other(
+                "Timed out waiting for clarifying answers.".into(),
+            ));
+        }
+        match timeout(Duration::from_millis(400), &mut answer_rx).await {
+            Ok(Ok(answers)) => return Ok(answers),
+            Ok(Err(_)) => {
+                return Err(StreamFail::Other("Clarification cancelled.".into()));
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+fn coerce_ask_user_args(args: &Value) -> Value {
+    if args.get("questions").is_some() {
+        return args.clone();
+    }
+    if let Some(raw) = args.get("raw").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+            return coerce_ask_user_args(&parsed);
+        }
+        if let Some(start) = raw.find('{') {
+            if let Some(end) = raw.rfind('}') {
+                if end > start {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&raw[start..=end]) {
+                        return coerce_ask_user_args(&parsed);
+                    }
+                }
+            }
+        }
+    }
+    if args.as_array().is_some() {
+        return json!({ "questions": args });
+    }
+    if args.get("question").is_some() || args.get("prompt").is_some() || args.get("text").is_some()
+    {
+        return json!({ "questions": [args] });
+    }
+    args.clone()
+}
+
+fn option_label_description(opt: &Value) -> Option<(String, String)> {
+    match opt {
+        Value::String(s) => {
+            let label = s.trim();
+            if label.is_empty() {
+                None
+            } else {
+                Some((label.to_string(), String::new()))
+            }
+        }
+        Value::Object(map) => {
+            let label = ["label", "text", "name", "title", "value"]
+                .iter()
+                .find_map(|key| {
+                    map.get(*key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                })?;
+            let description = ["description", "desc", "detail", "subtitle"]
+                .iter()
+                .find_map(|key| {
+                    map.get(*key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            Some((label, description))
+        }
+        _ => None,
+    }
+}
+
+fn normalize_ask_user_questions(args: &Value) -> Vec<Value> {
+    let args = coerce_ask_user_args(args);
+    let Some(raw) = args.get("questions") else {
+        return Vec::new();
+    };
+    let items: Vec<&Value> = match raw {
+        Value::Array(list) => list.iter().take(2).collect(),
+        Value::Object(_) => vec![raw],
+        _ => return Vec::new(),
+    };
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let question = ["question", "prompt", "text", "q"]
+                .iter()
+                .find_map(|key| {
+                    item.get(*key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                })?;
+            let options_raw = ["options", "choices", "answers", "choices_list"]
+                .iter()
+                .find_map(|key| item.get(*key).and_then(|v| v.as_array()))?;
+            let options = options_raw
+                .iter()
+                .filter_map(|opt| {
+                    let (label, description) = option_label_description(opt)?;
+                    Some(json!({
+                        "label": label,
+                        "description": description,
+                    }))
+                })
+                .take(4)
+                .collect::<Vec<_>>();
+            if options.len() < 2 {
+                return None;
+            }
+            let header = ["header", "title", "label", "id"]
+                .iter()
+                .find_map(|key| {
+                    item.get(*key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.chars().take(12).collect::<String>())
+                })
+                .unwrap_or_else(|| "Question".into());
+            let multi = item
+                .get("multiSelect")
+                .or_else(|| item.get("multi_select"))
+                .or_else(|| item.get("allow_multiple"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(json!({
+                "header": header,
+                "question": question,
+                "options": options,
+                "multiSelect": multi,
+            }))
+        })
+        .collect()
+}
+
+fn ask_user_format_error(args: &Value) -> String {
+    let hint = "Retry ask_user with {\"questions\":[{\"header\":\"Scope\",\"question\":\"…?\",\"options\":[{\"label\":\"A\",\"description\":\"…\"},{\"label\":\"B\",\"description\":\"…\"}]}]} — 1–2 questions, each with 2–4 options that have a label.";
+    let coerced = coerce_ask_user_args(args);
+    if coerced.get("questions").is_none() {
+        return format!("ask_user missing questions array. {hint}");
+    }
+    format!("ask_user questions were incomplete (need question text + at least 2 labeled options each). {hint}")
+}
+
+fn format_clarify_answers_for_model(questions: &[Value], answers: &Value) -> String {
+    let mut lines = vec!["User clarifying answers:".to_string()];
+    if let Some(map) = answers.as_object() {
+        for (idx, question) in questions.iter().enumerate() {
+            let key = question
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let header = question
+                .get("header")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Question");
+            let value = map
+                .get(key)
+                .or_else(|| map.get(&idx.to_string()))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let rendered = match value {
+                Value::String(s) => s,
+                Value::Array(items) => items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                other => other.to_string(),
+            };
+            let rendered = rendered.trim();
+            if rendered.is_empty() {
+                lines.push(format!("- {header}: (no answer)"));
+            } else {
+                lines.push(format!("- {header} ({key}): {rendered}"));
+            }
+        }
+        if map.contains_key("response") {
+            if let Some(extra) = map.get("response").and_then(|v| v.as_str()) {
+                let extra = extra.trim();
+                if !extra.is_empty() {
+                    lines.push(format!("- Additional note: {extra}"));
+                }
+            }
+        }
+    } else if let Some(text) = answers.as_str() {
+        lines.push(text.to_string());
+    } else {
+        lines.push(answers.to_string());
+    }
+    lines.push(
+        "Proceed with deep research using these preferences. Call web_search / fetch_url as needed."
+            .into(),
+    );
+    lines.join("\n")
+}
+
 fn strip_think_blocks(text: &str) -> String {
     let mut out = text.to_string();
     for (open, close) in [("<think>", "</think>"), ("<thinking>", "</thinking>")] {
@@ -1097,6 +1935,8 @@ struct ToolOutcome {
     ui_text: String,
     /// Short UI-facing note (e.g. search backend fallback).
     note: Option<String>,
+    /// False when the tool failed softly and the model should try another approach.
+    ok: bool,
 }
 
 impl ToolOutcome {
@@ -1106,6 +1946,7 @@ impl ToolOutcome {
             ui_text: text.clone(),
             text,
             note: None,
+            ok: true,
         }
     }
 
@@ -1118,6 +1959,17 @@ impl ToolOutcome {
             text: text.into(),
             ui_text: ui_text.into(),
             note: Some(note.into()),
+            ok: true,
+        }
+    }
+
+    fn soft_failure(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            ui_text: text.clone(),
+            text,
+            note: Some("retry with a different query".into()),
+            ok: false,
         }
     }
 }
@@ -1136,7 +1988,8 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let (result, note) = ddgs_web_search(query, skills).await?;
+            let (search_skills, kind) = search_call_overrides(skills, &call.arguments);
+            let (result, note) = ddgs_web_search(query, &search_skills, kind).await?;
             let ui_result = result.clone();
             let mut model_result = result;
             if skills.fetch_url {
@@ -1211,36 +2064,91 @@ struct DdgsSearchHit {
     snippet: String,
 }
 
-async fn ddgs_web_search(query: &str, skills: &AgentSkills) -> Result<(String, String), String> {
+fn parse_enum_arg<T: for<'de> Deserialize<'de>>(args: &Value, key: &str) -> Option<T> {
+    let raw = args.get(key)?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    serde_json::from_value(json!(raw.to_ascii_lowercase())).ok()
+}
+
+fn search_call_overrides(skills: &AgentSkills, args: &Value) -> (AgentSkills, WebSearchKind) {
+    let mut next = skills.clone();
+    if let Some(backend) = parse_enum_arg::<WebSearchBackend>(args, "backend") {
+        next.web_search_backend = backend;
+    }
+    if let Some(recency) = parse_enum_arg::<WebSearchRecency>(args, "recency") {
+        next.web_search_recency = recency;
+    }
+    let kind = parse_enum_arg::<WebSearchKind>(args, "kind").unwrap_or_default();
+    (next, kind)
+}
+
+async fn ddgs_web_search(
+    query: &str,
+    skills: &AgentSkills,
+    kind: WebSearchKind,
+) -> Result<(String, String), String> {
     let result_count = skills.search_result_count();
-    let hits = ddgs_search_hits(query, skills).await?;
-    if hits.is_empty() {
-        return Err("DDGS returned no linked results.".to_string());
+    let mut last_error = None::<String>;
+
+    for attempt in 1..=DDGS_ATTEMPTS {
+        match ddgs_search_hits(query, skills, kind).await {
+            Ok(hits) if !hits.is_empty() => {
+                let kind_label = kind.label();
+                let mut out = format!(
+                    "{} search results for {query:?} (DDGS, {kind_label}, {}, {}, {}):\n",
+                    if kind == WebSearchKind::News {
+                        "News"
+                    } else {
+                        "Web"
+                    },
+                    skills.web_search_backend.as_str(),
+                    skills.search_region(),
+                    skills.web_search_safesearch.as_str(),
+                );
+                for (index, hit) in hits.iter().take(result_count).enumerate() {
+                    out.push_str(&format!(
+                        "\n{}. {}\n   URL: {}\n   {}\n",
+                        index + 1,
+                        hit.title,
+                        hit.url,
+                        hit.snippet
+                    ));
+                }
+                append_scraped_pages(&mut out, &hits, skills.web_search_depth).await;
+                return Ok((
+                    out,
+                    format!(
+                        "via DDGS · {kind_label} · {}",
+                        skills.web_search_backend.as_str()
+                    ),
+                ));
+            }
+            Ok(_) => {
+                last_error = Some("No results found.".into());
+            }
+            Err(error) => {
+                last_error = Some(error);
+            }
+        }
+        if attempt < DDGS_ATTEMPTS {
+            tokio::time::sleep(Duration::from_millis(DDGS_RETRY_DELAY_MS * attempt as u64)).await;
+        }
     }
 
-    let mut out = format!(
-        "Web search results for {query:?} (DDGS, {}, {}, {}):\n",
-        skills.web_search_backend.as_str(),
-        skills.search_region(),
-        skills.web_search_safesearch.as_str(),
-    );
-    for (index, hit) in hits.iter().take(result_count).enumerate() {
-        out.push_str(&format!(
-            "\n{}. {}\n   URL: {}\n   {}\n",
-            index + 1,
-            hit.title,
-            hit.url,
-            hit.snippet
-        ));
-    }
-    append_scraped_pages(&mut out, &hits, skills.web_search_depth).await;
-    Ok((
-        out,
-        format!("via DDGS · {}", skills.web_search_backend.as_str()),
+    let detail = last_error.unwrap_or_else(|| "unknown search error".into());
+    // Soft failure: caller / agent loop should keep going with a reformulated query.
+    Err(format!(
+        "DDGS search failed after {DDGS_ATTEMPTS} attempts: {detail}"
     ))
 }
 
-async fn ddgs_search_hits(query: &str, skills: &AgentSkills) -> Result<Vec<SearchHit>, String> {
+async fn ddgs_search_hits(
+    query: &str,
+    skills: &AgentSkills,
+    kind: WebSearchKind,
+) -> Result<Vec<SearchHit>, String> {
     let result_count = skills.search_result_count();
     let request = serde_json::to_vec(&json!({
         "protocol": 1,
@@ -1250,6 +2158,7 @@ async fn ddgs_search_hits(query: &str, skills: &AgentSkills) -> Result<Vec<Searc
         "region": skills.search_region(),
         "safesearch": skills.web_search_safesearch.as_str(),
         "recency": skills.web_search_recency.as_str(),
+        "kind": kind.label(),
     }))
     .map_err(|error| format!("Could not encode DDGS request: {error}"))?;
 
@@ -2175,7 +3084,7 @@ mod tests {
             fetch_url: true,
             ..AgentSkills::default()
         };
-        let tools = openai_tools_payload(&skills, &[]);
+        let tools = openai_tools_payload(&skills, &[], false);
         let names: Vec<&str> = tools
             .iter()
             .filter_map(|t| t.pointer("/function/name").and_then(|v| v.as_str()))
@@ -2266,5 +3175,155 @@ mod tests {
         assert!(!scrapeable_url("ftp://example.com/a"));
         assert!(!scrapeable_url("https://example.com/doc.pdf"));
         assert!(scrapeable_url("https://example.com/article"));
+    }
+
+    #[test]
+    fn deep_research_enables_agent_and_search() {
+        let mut request: AgentRequest = serde_json::from_value(json!({
+            "messages": [{"role": "user", "content": "hi"}],
+            "deep_research": true,
+            "deep_research_output": "brief"
+        }))
+        .unwrap();
+        assert!(should_run_agent(&request, &[]));
+        request.apply_deep_research();
+        assert!(request.skills.web_search);
+        assert!(request.skills.fetch_url);
+        assert_eq!(request.skills.web_search_depth, WebSearchDepth::Deep);
+        assert!(request.skills.web_search_max_results >= DEEP_RESEARCH_MIN_RESULTS);
+        assert_eq!(request.deep_research_output, DeepResearchOutput::Brief);
+    }
+
+    #[test]
+    fn web_search_accepts_per_call_overrides() {
+        let skills = AgentSkills::default();
+        let args = json!({
+            "query": "x",
+            "backend": "google",
+            "recency": "week",
+            "kind": "news"
+        });
+        let (next, kind) = search_call_overrides(&skills, &args);
+        assert_eq!(next.web_search_backend, WebSearchBackend::Google);
+        assert_eq!(next.web_search_recency, WebSearchRecency::Week);
+        assert_eq!(kind, WebSearchKind::News);
+    }
+
+    #[test]
+    fn web_search_tool_exposes_search_method_args() {
+        let skills = AgentSkills {
+            web_search: true,
+            ..AgentSkills::default()
+        };
+        let tools = openai_tools_payload(&skills, &[], true);
+        let search = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "web_search")
+            .expect("web_search tool");
+        let props = &search["function"]["parameters"]["properties"];
+        assert!(props.get("backend").is_some());
+        assert!(props.get("recency").is_some());
+        assert!(props.get("kind").is_some());
+        let description = search["function"]["description"].as_str().unwrap();
+        assert!(description.contains("kind=news"));
+    }
+
+    #[test]
+    fn agent_request_deserializes_without_force_tools() {
+        let request: AgentRequest = serde_json::from_value(json!({
+            "messages": [{"role": "user", "content": "hi"}],
+            "agent": true,
+            "skills": { "web_search": true },
+            "deep_research": true
+        }))
+        .expect("force_tools should default");
+        assert!(request.force_tools.is_empty());
+        assert!(should_run_agent(&request, &[]));
+    }
+
+    #[test]
+    fn normalize_force_tools_keeps_enabled_only() {
+        let mut request: AgentRequest = serde_json::from_value(json!({
+            "messages": [{ "role": "user", "content": "hi" }],
+            "agent": true,
+            "skills": { "web_search": true, "fetch_url": false },
+            "force_tools": ["web_search", "fetch_url", "web_search", "nope"]
+        }))
+        .unwrap();
+        request.normalize_force_tools();
+        assert_eq!(request.force_tools, vec!["web_search".to_string()]);
+    }
+
+    #[test]
+    fn tool_choice_requires_forced_skills() {
+        assert_eq!(tool_choice_for_pending(&[]), json!("auto"));
+        assert_eq!(
+            tool_choice_for_pending(&["web_search".into()]),
+            json!({
+                "type": "function",
+                "function": { "name": "web_search" }
+            })
+        );
+        assert_eq!(
+            tool_choice_for_pending(&["web_search".into(), "fetch_url".into()]),
+            json!("required")
+        );
+    }
+
+    #[test]
+    fn visible_text_ignores_think_only_content() {
+        let turn = StreamedTurn {
+            content: "<think>planning only</think>".into(),
+            reasoning: String::new(),
+            tool: None,
+        };
+        assert!(turn.visible_text().is_empty());
+        let turn = StreamedTurn {
+            content: "<think>plan</think>\nAndrew Tate is…".into(),
+            reasoning: String::new(),
+            tool: None,
+        };
+        assert!(turn.visible_text().contains("Andrew Tate"));
+    }
+
+    #[test]
+    fn ask_user_accepts_common_alternate_shapes() {
+        let string_opts = json!({
+            "questions": [{
+                "header": "Scope",
+                "question": "What should we cover?",
+                "options": ["Romania case", "UK proceedings", "Overview"]
+            }]
+        });
+        let normalized = normalize_ask_user_questions(&string_opts);
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0]["options"].as_array().unwrap().len(), 3);
+        assert_eq!(normalized[0]["options"][0]["label"], "Romania case");
+
+        let top_level = json!({
+            "prompt": "How recent?",
+            "choices": [
+                {"text": "Past week"},
+                {"name": "Past year"}
+            ]
+        });
+        assert_eq!(normalize_ask_user_questions(&top_level).len(), 1);
+
+        let raw = json!({
+            "raw": "{\"questions\":[{\"question\":\"Focus?\",\"options\":[{\"label\":\"A\"},{\"label\":\"B\"}]}]}"
+        });
+        assert_eq!(normalize_ask_user_questions(&raw).len(), 1);
+    }
+
+    #[test]
+    fn agent_prompt_marks_required_tools() {
+        let skills = AgentSkills {
+            web_search: true,
+            ..AgentSkills::default()
+        };
+        let block = agent_system_block(&skills, &[], false, &["web_search".into()]);
+        assert!(block.contains("Required tools for this turn: web_search"));
+        let optional = agent_system_block(&skills, &[], false, &[]);
+        assert!(optional.contains("Use them when needed"));
     }
 }
