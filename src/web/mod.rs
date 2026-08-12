@@ -429,7 +429,10 @@ async fn chat_completions(
     apply_thinking_control(&mut body, thinking_model.as_ref());
     let key = (!token.trim().is_empty()).then_some(token.as_str());
     let wants_agent = body.get("agent").and_then(|v| v.as_bool()).unwrap_or(false)
-        || body.get("deep_research").and_then(|v| v.as_bool()).unwrap_or(false);
+        || body
+            .get("deep_research")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
         Ok(request) if agent::should_run_agent(&request, &user_skills) => {
             if request.messages.is_empty() {
@@ -471,7 +474,9 @@ struct ClarifyAnswersBody {
     answers: serde_json::Value,
 }
 
-async fn chat_clarify(Json(body): Json<ClarifyAnswersBody>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn chat_clarify(
+    Json(body): Json<ClarifyAnswersBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     agent::submit_clarify_answers(&body.id, body.answers).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }

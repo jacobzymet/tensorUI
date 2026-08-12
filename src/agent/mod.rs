@@ -485,7 +485,9 @@ async fn run_agent_loop(
             pending_list = vec!["ask_user".into()];
         } else if force_final {
             pending_list.clear();
-        } else if request.deep_research && deep_searches == 0 && !pending_list.iter().any(|n| n == "web_search")
+        } else if request.deep_research
+            && deep_searches == 0
+            && !pending_list.iter().any(|n| n == "web_search")
         {
             // After clarify (or if clarify somehow skipped), require at least one search.
             pending_list = vec!["web_search".into()];
@@ -741,7 +743,9 @@ async fn run_agent_loop(
                             "{err}\n\nSearch failed. Do not stop. Try again with a different query (drop speculative dates), another backend, or kind=news vs web."
                         )
                     } else {
-                        format!("{err}\n\nFetch failed. Try a different URL from prior search results, or search again.")
+                        format!(
+                            "{err}\n\nFetch failed. Try a different URL from prior search results, or search again."
+                        )
                     };
                     ToolOutcome::soft_failure(guidance)
                 }
@@ -1155,7 +1159,8 @@ async fn stream_once(
     });
     if let Some(object) = payload.as_object_mut() {
         if tools.allow_tools {
-            let tool_defs = openai_tools_payload(&request.skills, user_skills, request.deep_research);
+            let tool_defs =
+                openai_tools_payload(&request.skills, user_skills, request.deep_research);
             if !tool_defs.is_empty() {
                 object.insert("tools".into(), Value::Array(tool_defs));
                 object.insert(
@@ -1786,14 +1791,12 @@ fn normalize_ask_user_questions(args: &Value) -> Vec<Value> {
     items
         .into_iter()
         .filter_map(|item| {
-            let question = ["question", "prompt", "text", "q"]
-                .iter()
-                .find_map(|key| {
-                    item.get(*key)
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                })?;
+            let question = ["question", "prompt", "text", "q"].iter().find_map(|key| {
+                item.get(*key)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })?;
             let options_raw = ["options", "choices", "answers", "choices_list"]
                 .iter()
                 .find_map(|key| item.get(*key).and_then(|v| v.as_array()))?;
@@ -1843,7 +1846,9 @@ fn ask_user_format_error(args: &Value) -> String {
     if coerced.get("questions").is_none() {
         return format!("ask_user missing questions array. {hint}");
     }
-    format!("ask_user questions were incomplete (need question text + at least 2 labeled options each). {hint}")
+    format!(
+        "ask_user questions were incomplete (need question text + at least 2 labeled options each). {hint}"
+    )
 }
 
 fn format_clarify_answers_for_model(questions: &[Value], answers: &Value) -> String {
