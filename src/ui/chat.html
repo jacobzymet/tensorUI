@@ -8464,7 +8464,7 @@
 
     function createConvoItem(convo, { nested = false } = {}) {
       const item = document.createElement('div');
-      item.className = 'convo-item' + (convo.id === activeId ? ' is-active' : '');
+      item.className = 'convo-item' + (convo.id === activeId && mainView !== 'projects' ? ' is-active' : '');
       if (convo.incognito) item.classList.add('is-incognito');
       item.dataset.convoId = convo.id;
       if (nested) item.classList.add('is-nested');
