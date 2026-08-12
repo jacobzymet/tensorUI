@@ -523,8 +523,10 @@ async fn run_agent_loop(
             style,
             request,
             user_skills,
-            &pending_list,
-            allow_tools,
+            StreamOnceTools {
+                pending_force: &pending_list,
+                allow_tools,
+            },
             tx,
         )
         .await?;
@@ -1126,14 +1128,18 @@ struct AccumToolCall {
 /// we re-synthesize XML for `extract_tool_call`. Once a tool starts we stop
 /// forwarding further content deltas, after first forwarding any preface text
 /// (including content that shares a delta with `tool_calls`).
+struct StreamOnceTools<'a> {
+    pending_force: &'a [String],
+    allow_tools: bool,
+}
+
 async fn stream_once(
     api_base: &str,
     api_key: Option<&str>,
     style: ApiStyle,
     request: &AgentRequest,
     user_skills: &[UserSkill],
-    pending_force: &[String],
-    allow_tools: bool,
+    tools: StreamOnceTools<'_>,
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
 ) -> Result<StreamedTurn, StreamFail> {
     let model = request
@@ -1148,11 +1154,14 @@ async fn stream_once(
         "messages": request.messages,
     });
     if let Some(object) = payload.as_object_mut() {
-        if allow_tools {
-            let tools = openai_tools_payload(&request.skills, user_skills, request.deep_research);
-            if !tools.is_empty() {
-                object.insert("tools".into(), Value::Array(tools));
-                object.insert("tool_choice".into(), tool_choice_for_pending(pending_force));
+        if tools.allow_tools {
+            let tool_defs = openai_tools_payload(&request.skills, user_skills, request.deep_research);
+            if !tool_defs.is_empty() {
+                object.insert("tools".into(), Value::Array(tool_defs));
+                object.insert(
+                    "tool_choice".into(),
+                    tool_choice_for_pending(tools.pending_force),
+                );
             }
         }
         if let Some(kwargs) = &request.chat_template_kwargs {
@@ -1710,14 +1719,12 @@ fn coerce_ask_user_args(args: &Value) -> Value {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
             return coerce_ask_user_args(&parsed);
         }
-        if let Some(start) = raw.find('{') {
-            if let Some(end) = raw.rfind('}') {
-                if end > start {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(&raw[start..=end]) {
-                        return coerce_ask_user_args(&parsed);
-                    }
-                }
-            }
+        if let Some(start) = raw.find('{')
+            && let Some(end) = raw.rfind('}')
+            && end > start
+            && let Ok(parsed) = serde_json::from_str::<Value>(&raw[start..=end])
+        {
+            return coerce_ask_user_args(&parsed);
         }
     }
     if args.as_array().is_some() {
@@ -1872,12 +1879,10 @@ fn format_clarify_answers_for_model(questions: &[Value], answers: &Value) -> Str
                 lines.push(format!("- {header} ({key}): {rendered}"));
             }
         }
-        if map.contains_key("response") {
-            if let Some(extra) = map.get("response").and_then(|v| v.as_str()) {
-                let extra = extra.trim();
-                if !extra.is_empty() {
-                    lines.push(format!("- Additional note: {extra}"));
-                }
+        if let Some(extra) = map.get("response").and_then(|v| v.as_str()) {
+            let extra = extra.trim();
+            if !extra.is_empty() {
+                lines.push(format!("- Additional note: {extra}"));
             }
         }
     } else if let Some(text) = answers.as_str() {
