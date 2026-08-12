@@ -1177,9 +1177,12 @@
     .chat-shell.trace-collapsed:not(.is-projects) .trace-expand-fab {
       display: inline-flex;
     }
+    .msg-role-assistant.is-trace-selected {
+      outline: none;
+    }
     .msg-role-assistant.is-trace-selected > .msg-bubble {
-      border-color: color-mix(in oklch, var(--color-accent) 42%, var(--color-rule));
-      box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 18%, transparent);
+      /* Flat prose — selection is shown via the trace panel, not a bubble outline. */
+      box-shadow: none;
     }
     .msg-role-assistant {
       cursor: text;
@@ -2077,14 +2080,15 @@
       color: var(--color-ink);
       background: var(--surface-hover);
     }
-    /* Assistant turns are a quiet reading surface, not a competing card. */
+    /* Assistant turns read as plain prose (ChatGPT/Claude-style), not a bubble. */
     .msg-role-assistant .msg-bubble {
       width: 100%;
-      background: color-mix(in oklch, var(--color-paper-2) 92%, var(--color-paper-3));
-      border: 1px solid color-mix(in oklch, var(--color-rule) 55%, transparent);
+      padding: 0.15rem 0;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
       color: var(--color-ink-2);
-      border-bottom-left-radius: var(--radius-sm);
-      box-shadow: var(--shadow-1);
     }
     .msg-bubble > :first-child { margin-top: 0; }
     .msg-bubble > :last-child { margin-bottom: 0; }
