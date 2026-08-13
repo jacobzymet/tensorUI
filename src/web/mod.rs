@@ -124,6 +124,10 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             axum::routing::patch(update_provider).delete(delete_provider),
         )
         .route("/api/providers/{id}/activate", post(activate_provider))
+        .route("/api/local-llms", get(local_llms_status))
+        .route("/api/local-llms/cache", get(local_llms_cache))
+        .route("/api/local-llms/start", post(local_llms_start))
+        .route("/api/local-llms/stop", post(local_llms_stop))
         .route("/api/focus", post(focus))
         .route("/api/data", get(data_info).post(set_storage_mode))
         .route("/api/data/open", post(open_data_dir))
@@ -156,6 +160,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/admin", get(|| async { Redirect::permanent("/settings") }))
         .route("/chat", get(|| async { Redirect::permanent("/") }))
         .route("/orb.js", get(orb_script))
+        .route("/prompts.js", get(prompts_script))
         .route("/highlight.min.js", get(highlight_script))
         .route("/marked.min.js", get(marked_script))
         .route("/purify.min.js", get(purify_script))
@@ -212,6 +217,13 @@ async fn orb_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         ORB_JS,
+    )
+}
+
+async fn prompts_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        crate::prompts::frontend_js(),
     )
 }
 
@@ -711,6 +723,103 @@ async fn activate_provider(
     };
     schedule_provider_cache_warm(Arc::clone(&app));
     Ok(Json(response))
+}
+
+#[derive(Debug, Serialize)]
+struct LocalLlmsStatusResponse {
+    install: crate::local_llm::LlamaServerInstall,
+    running: Option<crate::local_llm::RunningLocalLlm>,
+    default_threads: u32,
+    default_port: u16,
+    cache_dir: Option<String>,
+    state: AppState,
+}
+
+#[derive(Debug, Serialize)]
+struct LocalLlmsCacheResponse {
+    cache_dir: Option<String>,
+    models: Vec<crate::local_llm::CachedModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartLocalLlmBody {
+    #[serde(default)]
+    hf: Option<String>,
+    #[serde(default)]
+    model_path: Option<String>,
+    #[serde(default = "default_true")]
+    mmap: bool,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    threads: Option<u32>,
+}
+
+async fn local_llms_status(State(app): State<SharedApp>) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
+    let mut app = app.lock().map_err(|_| ApiError::lock())?;
+    let install = crate::local_llm::detect_llama_server();
+    let running = app.local_llm.status();
+    let cache_dir = crate::local_llm::llama_cache_dir()
+        .ok()
+        .map(|p| p.display().to_string());
+    let default_threads = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(4)
+        .saturating_sub(2)
+        .max(1);
+    Ok(Json(LocalLlmsStatusResponse {
+        install,
+        running,
+        default_threads,
+        default_port: 8080,
+        cache_dir,
+        state: AppState::from_app(&app),
+    }))
+}
+
+async fn local_llms_cache(
+    State(_app): State<SharedApp>,
+) -> Result<Json<LocalLlmsCacheResponse>, ApiError> {
+    let models = crate::local_llm::list_cached_models().map_err(ApiError::bad_request)?;
+    let cache_dir = crate::local_llm::llama_cache_dir()
+        .ok()
+        .map(|p| p.display().to_string());
+    Ok(Json(LocalLlmsCacheResponse { cache_dir, models }))
+}
+
+async fn local_llms_start(
+    State(app): State<SharedApp>,
+    Json(body): Json<StartLocalLlmBody>,
+) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
+    {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        let meta = crate::local_llm::start_local_llm(
+            &mut app.local_llm,
+            crate::local_llm::StartLocalLlm {
+                hf: body.hf,
+                model_path: body.model_path,
+                mmap: body.mmap,
+                port: body.port,
+                threads: body.threads,
+                host: Some("127.0.0.1".into()),
+            },
+        )
+        .map_err(ApiError::bad_request)?;
+        app.ensure_local_llama_provider(&meta.base_url)
+            .map_err(ApiError::bad_request)?;
+    }
+    schedule_provider_cache_warm(Arc::clone(&app));
+    local_llms_status(State(app)).await
+}
+
+async fn local_llms_stop(
+    State(app): State<SharedApp>,
+) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
+    {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        app.local_llm.stop().map_err(ApiError::bad_request)?;
+    }
+    local_llms_status(State(app)).await
 }
 
 #[derive(Debug, Serialize)]

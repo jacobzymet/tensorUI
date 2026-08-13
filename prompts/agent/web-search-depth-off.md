@@ -1,0 +1,1 @@
+Returns titles, URLs, and snippets only (page fetch depth is off).

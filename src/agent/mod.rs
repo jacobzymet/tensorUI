@@ -536,7 +536,7 @@ async fn run_agent_loop(
         if let Some(call) = turn.tool.clone() {
             if force_final && call.name != "ask_user" {
                 tool_rounds += 1;
-                let err = "Enough research for now — write the final answer in normal reply text (not thinking). Do not call tools.";
+                let err = crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_FORCE_FINAL);
                 let mut clear = json!({ "phase": "content_clear" });
                 if !turn.content.trim().is_empty() {
                     clear["text"] = json!(turn.content);
@@ -823,15 +823,15 @@ async fn run_agent_loop(
             request.messages.push(json!({
                 "role": "user",
                 "content": if await_clarify {
-                    "Before any search, call ask_user with 1–2 clarifying multiple-choice questions so the user can refine the research goal. Do not write the final report yet."
-                        .into()
+                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_ASK_USER_FIRST)
+                        .to_string()
                 } else if needs_deep_search {
-                    "Deep research requires live web evidence. Call web_search now (prefer kind=news and a recent recency when the topic is current). Do not answer from memory alone."
-                        .into()
+                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_MUST_SEARCH)
+                        .to_string()
                 } else {
-                    format!(
-                        "Required before answering: call {} at least once. Do not give a final answer until each has been used.",
-                        pending.join(" and ")
+                    crate::prompts::fill(
+                        crate::prompts::agent::NUDGE_REQUIRED_TOOLS,
+                        &[("tools", &pending.join(" and "))],
                     )
                 },
             }));
@@ -868,11 +868,12 @@ async fn run_agent_loop(
             request.messages.push(json!({
                 "role": "user",
                 "content": if request.deep_research && deep_searches > 0 {
-                    "Stop calling tools. Write the final answer now in the normal reply text (not inside thinking/reasoning). Lead with the conclusion, use the sources you already found, and cite them as markdown links."
+                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_STOP_AND_ANSWER)
+                        .to_string()
                 } else if request.deep_research {
-                    "You did not produce a user-visible answer or a tool call. Continue with ask_user or web_search, or write the final answer in normal reply text (not inside thinking)."
+                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_EMPTY_DEEP).to_string()
                 } else {
-                    "You did not produce a user-visible answer or a tool call. Call a tool if you need a capability, or answer the user directly in normal reply text (not inside thinking)."
+                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_EMPTY).to_string()
                 },
             }));
             continue;
@@ -963,115 +964,96 @@ fn agent_system_block(
     deep_research: bool,
     force_tools: &[String],
 ) -> String {
+    use crate::prompts::{agent, fill, trim_prompt};
+
     let mut lines: Vec<String> = vec![
-        if deep_research {
-            "You are running in agent mode with tools, in Deep Research."
+        trim_prompt(if deep_research {
+            agent::INTRO_DEEP_RESEARCH
         } else {
-            "You are running in agent mode with tools."
-        }
-        .into(),
-        "Call a tool when it helps; do not invent tool results. After a tool result, call another tool or answer normally.".into(),
-        "Put planning and status updates in reasoning/thinking, not in user-visible text. Do not narrate tool steps in the reply (for example \"Let me search…\", \"Digging deeper…\", \"Checking sources…\"). After tools finish, write the final answer only.".into(),
+            agent::INTRO
+        })
+        .to_string(),
+        trim_prompt(agent::CORE).to_string(),
     ];
     if !force_tools.is_empty() {
-        lines.push(format!(
-            "Required tools for this turn: {}. You MUST call each of these at least once before giving a final answer. Prefer calling a required tool first.",
-            force_tools.join(", ")
+        lines.push(fill(
+            agent::REQUIRED_TOOLS,
+            &[("tools", &force_tools.join(", "))],
         ));
     } else if deep_research {
-        lines.push(
-            "Do not answer from memory alone. After clarifying with the user, investigate with web_search (and fetch_url when useful) before writing the final answer."
-                .into(),
-        );
+        lines.push(trim_prompt(agent::POLICY_DEEP_RESEARCH).to_string());
     } else {
-        lines.push(
-            "Enabled tools are available whenever they would improve accuracy or freshness. Use them when needed; skip them for pure reasoning or when the user already provided enough."
-                .into(),
-        );
+        lines.push(trim_prompt(agent::POLICY_OPTIONAL).to_string());
     }
     if skills.web_search {
         let depth = skills.web_search_depth;
         let depth_note = match depth.scrape_plan() {
-            None => {
-                "Returns titles, URLs, and snippets only (page fetch depth is off).".to_string()
+            None => trim_prompt(agent::WEB_SEARCH_DEPTH_OFF).to_string(),
+            Some((pages, chars)) => {
+                let pages = pages.to_string();
+                let chars = chars.to_string();
+                fill(
+                    agent::WEB_SEARCH_DEPTH_ON,
+                    &[
+                        ("pages", &pages),
+                        ("chars", &chars),
+                        ("depth", depth.label()),
+                    ],
+                )
             }
-            Some((pages, chars)) => format!(
-                "Also opens up to {pages} result pages and extracts ~{chars} characters of text each (depth: {}).",
-                depth.label()
-            ),
         };
         let recency_note = match skills.web_search_recency {
             WebSearchRecency::Any => "any date".to_string(),
             value => format!("past {}", value.as_str()),
         };
-        let mut web_line = format!(
-            "Tool web_search — search the public web via DDGS (engine: {}, region: {}, SafeSearch: {}, recency: {}, up to {} results). {depth_note} Optional arguments: backend (auto, duckduckgo, brave, bing, google, mojeek, startpage, yahoo, yandex, wikipedia), recency (any, day, week, month, year), kind (web or news).",
-            skills.web_search_backend.as_str(),
-            skills.search_region(),
-            skills.web_search_safesearch.as_str(),
-            recency_note,
-            skills.search_result_count(),
+        let max_results = skills.search_result_count().to_string();
+        let region = skills.search_region();
+        let mut web_line = fill(
+            agent::WEB_SEARCH,
+            &[
+                ("backend", skills.web_search_backend.as_str()),
+                ("region", &region),
+                ("safesearch", skills.web_search_safesearch.as_str()),
+                ("recency", &recency_note),
+                ("max_results", &max_results),
+                ("depth_note", &depth_note),
+            ],
         );
         if skills.fetch_url {
-            web_line.push_str(
-                " After results arrive, you may call fetch_url on promising http(s) URLs if you need more detail than the snippets/excerpts already provide."
-            );
+            web_line.push(' ');
+            web_line.push_str(trim_prompt(agent::WEB_SEARCH_FOLLOW_FETCH));
         }
         lines.push(web_line);
     }
     if skills.fetch_url {
-        let mut fetch_line = format!(
-            "Tool fetch_url — open one http(s) URL and extract readable text (~{FETCH_URL_MAX_CHARS} characters)."
-        );
+        let max_chars = FETCH_URL_MAX_CHARS.to_string();
+        let mut fetch_line = fill(agent::FETCH_URL, &[("max_chars", &max_chars)]);
+        fetch_line.push(' ');
         if skills.web_search {
-            fetch_line.push_str(
-                " Useful after web_search when a specific result page deserves a fuller read, or when the user already gave a concrete URL."
-            );
+            fetch_line.push_str(trim_prompt(agent::FETCH_URL_WITH_SEARCH));
         } else {
-            fetch_line.push_str(" Prefer when the user already gave a concrete URL.");
+            fetch_line.push_str(trim_prompt(agent::FETCH_URL_ALONE));
         }
         lines.push(fetch_line);
     }
     if skills.web_search || skills.fetch_url {
-        lines.push(
-            "When your answer uses facts from web_search or fetch_url, cite them inline: wrap the specific claim or phrase in a markdown link to that source URL, e.g. [the claim](https://example.com/page). Cite only URLs from tool results. Prefer linking the supporting words in the sentence over a separate sources list unless the user asked for one.".into(),
-        );
+        lines.push(trim_prompt(agent::CITATIONS).to_string());
     }
     if !user_skills.is_empty() {
-        lines.push(
-            "Tool activate_skill — load a skill's full SKILL.md. read_skill is an alias.".into(),
-        );
+        lines.push(trim_prompt(agent::SKILLS_ACTIVATE).to_string());
         lines.push(crate::skills::user_skills_catalog_block(user_skills));
     }
     lines.join("\n")
 }
 
 fn deep_research_system_block(output: DeepResearchOutput) -> String {
+    use crate::prompts::{agent, fill, trim_prompt};
+
     let output_line = match output {
-        DeepResearchOutput::Long => {
-            "Final answer: write a comprehensive, well-structured report. Open with a short overview, then cover findings in depth, note disagreements and uncertainty, and close with caveats or open questions. Cite sources inline as markdown links. Do not pad with filler."
-        }
-        DeepResearchOutput::Brief => {
-            "Final answer: write a brief, dense answer that still uses everything you found. Lead with the conclusion, then the essential evidence and caveats. Cite sources inline as markdown links. No preamble about your process."
-        }
+        DeepResearchOutput::Long => trim_prompt(agent::DEEP_RESEARCH_OUTPUT_LONG),
+        DeepResearchOutput::Brief => trim_prompt(agent::DEEP_RESEARCH_OUTPUT_BRIEF),
     };
-    [
-        "Deep Research instructions:",
-        "Before any web_search or fetch_url, you MUST call ask_user once with valid arguments. Prefer 2 questions when the ask is broad.",
-        "ask_user shape (required): {\"questions\":[{\"header\":\"Scope\",\"question\":\"Which angle matters most?\",\"options\":[{\"label\":\"Legal status\",\"description\":\"Charges, custody, rulings\"},{\"label\":\"Timeline\",\"description\":\"What happened when\"}],\"multiSelect\":false}]}.",
-        "Rules: 1–2 questions; each needs question text + 2–4 options; each option needs a label (description optional). Do not invent an \"Other\" option — the UI adds that. multiSelect may be true when several choices can apply.",
-        "Purpose of ask_user: refine scope, audience, timeframe, geography, or emphasis — not status updates.",
-        "After the user answers, investigate thoroughly before writing the final report. Prefer many targeted searches over one broad query.",
-        "Search strategy:",
-        "- Start broad, then fan out: synonyms, alternate phrasings, opposing views, primary sources, documentation, papers, forums, and official pages.",
-        "- Use slightly unconventional but legitimate tactics: site: filters, quoted phrases, related entities, historical vs current wording, and queries aimed at critics or primary data — not spammy keyword stuffing or near-duplicate queries.",
-        "- Vary methods: try different engines via web_search.backend (google, bing, duckduckgo, wikipedia, brave, and others), recency windows when freshness matters, and kind=news for current events.",
-        "- After promising hits, fetch_url the best pages instead of trusting snippets.",
-        "- Cross-check important claims across independent sources. If sources conflict, say so.",
-        "- Keep going until coverage is solid for the question's scope. A narrow fact can finish after a few searches; a multi-faceted question should run many.",
-        output_line,
-    ]
-    .join("\n")
+    fill(agent::DEEP_RESEARCH, &[("output_line", output_line)])
 }
 
 fn deep_research_search_cap(output: DeepResearchOutput) -> usize {
@@ -1086,17 +1068,17 @@ fn deep_research_continue_note(
     deep_searches: usize,
     search_cap: usize,
 ) -> String {
-    if deep_searches >= search_cap {
-        return "\n\nDeep research: you have enough sources. Do not search again. Write the final answer NOW in normal user-visible reply text (not inside thinking/reasoning). Cite sources as markdown links.".into();
-    }
-    match output {
-        DeepResearchOutput::Long => {
-            "\n\nDeep research: if important angles remain, search again with a different query, engine, recency, or news search, or fetch_url a promising page. If coverage is solid, write the comprehensive final report now in the normal user-visible reply (not inside thinking/reasoning).".into()
+    use crate::prompts::{agent, trim_prompt};
+
+    let body = if deep_searches >= search_cap {
+        trim_prompt(agent::CONTINUE_ENOUGH)
+    } else {
+        match output {
+            DeepResearchOutput::Long => trim_prompt(agent::CONTINUE_LONG),
+            DeepResearchOutput::Brief => trim_prompt(agent::CONTINUE_BRIEF),
         }
-        DeepResearchOutput::Brief => {
-            "\n\nDeep research: prefer a few strong searches, then write the concise final answer in the normal user-visible reply (not inside thinking/reasoning). Only search again if a critical gap remains.".into()
-        }
-    }
+    };
+    format!("\n\n{body}")
 }
 
 pub fn inject_skill_catalog_into_messages(messages: &mut Vec<Value>, user_skills: &[UserSkill]) {
@@ -1105,7 +1087,8 @@ pub fn inject_skill_catalog_into_messages(messages: &mut Vec<Value>, user_skills
         return;
     }
     let note = format!(
-        "{block}\n\nTo load full skill instructions you need agent mode (toggle Agent, or @web_search / @fetch_url), which exposes activate_skill."
+        "{block}\n\n{}",
+        crate::prompts::trim_prompt(crate::prompts::agent::SKILLS_NEED_AGENT)
     );
     if let Some(first) = messages.first_mut()
         && first.get("role").and_then(|r| r.as_str()) == Some("system")
@@ -1474,13 +1457,15 @@ fn openai_tools_payload(
     user_skills: &[UserSkill],
     deep_research: bool,
 ) -> Vec<Value> {
-    let mut tools = Vec::new();
+    use crate::prompts::{tools, trim_prompt};
+
+    let mut tools_out = Vec::new();
     if deep_research {
-        tools.push(json!({
+        tools_out.push(json!({
             "type": "function",
             "function": {
                 "name": "ask_user",
-                "description": "Ask the user 1–2 clarifying multiple-choice questions before deep research. Call once. Arguments MUST be: {\"questions\":[{\"header\":\"Scope\",\"question\":\"…?\",\"options\":[{\"label\":\"A\",\"description\":\"…\"},{\"label\":\"B\",\"description\":\"…\"}],\"multiSelect\":false}]}. Each question needs 2–4 options; options are objects with label (required) and description (optional). Do not search until after the user answers.",
+                "description": trim_prompt(tools::ASK_USER),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1530,20 +1515,15 @@ fn openai_tools_payload(
     }
     if skills.web_search {
         let mut description = if deep_research {
-            String::from(
-                "Search the public web or news and read result pages. Vary query wording, engine (backend), recency, and kind=news while investigating. Prefer many distinct searches over repeating the same query.",
-            )
+            trim_prompt(tools::WEB_SEARCH_DEEP).to_string()
         } else {
-            String::from(
-                "Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.",
-            )
+            trim_prompt(tools::WEB_SEARCH).to_string()
         };
         if skills.fetch_url {
-            description.push_str(
-                " After you get results, you may call fetch_url on promising result URLs if you need more detail than snippets/excerpts.",
-            );
+            description.push(' ');
+            description.push_str(trim_prompt(tools::WEB_SEARCH_FETCH_SUFFIX));
         }
-        tools.push(json!({
+        tools_out.push(json!({
             "type": "function",
             "function": {
                 "name": "web_search",
@@ -1575,11 +1555,11 @@ fn openai_tools_payload(
     }
     if skills.fetch_url {
         let description = if skills.web_search {
-            "Open one specific http(s) URL and extract readable page text. Use after web_search for a fuller read of a promising result, or when the user already gave a concrete URL."
+            trim_prompt(tools::FETCH_URL_WITH_SEARCH)
         } else {
-            "Open one specific http(s) URL and extract readable page text. Prefer when the user already gave a concrete URL."
+            trim_prompt(tools::FETCH_URL)
         };
-        tools.push(json!({
+        tools_out.push(json!({
             "type": "function",
             "function": {
                 "name": "fetch_url",
@@ -1599,11 +1579,11 @@ fn openai_tools_payload(
     }
     if !user_skills.is_empty() {
         let names: Vec<String> = user_skills.iter().map(|skill| skill.name.clone()).collect();
-        tools.push(json!({
+        tools_out.push(json!({
             "type": "function",
             "function": {
                 "name": "activate_skill",
-                "description": "Load a skill's full SKILL.md instructions into context. Only activate skills that match the user's request.",
+                "description": trim_prompt(tools::ACTIVATE_SKILL),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1620,7 +1600,7 @@ fn openai_tools_payload(
             }
         }));
     }
-    tools
+    tools_out
 }
 
 fn tool_call_from_native(slots: &[Option<AccumToolCall>]) -> Option<ToolCall> {

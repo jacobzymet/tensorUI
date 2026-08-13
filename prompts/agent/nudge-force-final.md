@@ -1,0 +1,1 @@
+Enough research for now — write the final answer in normal reply text (not thinking). Do not call tools.

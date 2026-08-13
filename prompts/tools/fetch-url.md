@@ -1,0 +1,1 @@
+Open one specific http(s) URL and extract readable page text. Prefer when the user already gave a concrete URL.

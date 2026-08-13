@@ -1,0 +1,1 @@
+Overlap with long-term memory is fine — still keep a project copy of anything useful here. Use long-term memory for facts that should apply everywhere; use project memory liberally for this project's working context.

@@ -1,0 +1,1 @@
+Tool fetch_url — open one http(s) URL and extract readable text (~{{max_chars}} characters).

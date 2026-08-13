@@ -1,0 +1,1 @@
+This project is project-only: do not rely on or write long-term (global) memory.

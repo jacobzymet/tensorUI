@@ -1,0 +1,1 @@
+Deep research: prefer a few strong searches, then write the concise final answer in the normal user-visible reply (not inside thinking/reasoning). Only search again if a critical gap remains.

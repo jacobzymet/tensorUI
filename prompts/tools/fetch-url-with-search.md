@@ -1,0 +1,1 @@
+Open one specific http(s) URL and extract readable page text. Use after web_search for a fuller read of a promising result, or when the user already gave a concrete URL.

@@ -1,0 +1,1 @@
+Tool web_search — search the public web via DDGS (engine: {{backend}}, region: {{region}}, SafeSearch: {{safesearch}}, recency: {{recency}}, up to {{max_results}} results). {{depth_note}} Optional arguments: backend (auto, duckduckgo, brave, bing, google, mojeek, startpage, yahoo, yandex, wikipedia), recency (any, day, week, month, year), kind (web or news).

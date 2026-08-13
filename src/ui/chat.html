@@ -5296,6 +5296,7 @@
   </div>
 
   <script src="/orb.js"></script>
+  <script src="/prompts.js"></script>
   <script src="/highlight.min.js"></script>
   <script src="/marked.min.js"></script>
   <script src="/purify.min.js"></script>
@@ -6504,6 +6505,8 @@
     }
 
     function buildSystemPrompt(projectIdOverride, { excludeConvoId = null } = {}) {
+      const P = window.TENSORUI_PROMPTS || {};
+      const fill = window.fillPrompt || ((t) => t);
       const parts = [];
       const name = settings.name.trim();
       const about = settings.about.trim();
@@ -6515,58 +6518,48 @@
       );
       const projectOnly = !!(project && project.memoryMode === 'project_only');
 
-      if (name) parts.push('The user\'s name is ' + name + '.');
-      if (about) parts.push('About the user:\n' + about);
+      if (name) parts.push(fill(P['chat.userName'], { name }));
+      if (about) parts.push(fill(P['chat.userAbout'], { about }));
 
       // ChatGPT-style: project instructions override global custom instructions.
       if (project) {
         const projectInstructions = project.instructions.trim();
         if (projectInstructions) {
-          parts.push(
-            'Project "' + project.name + '" instructions (override global custom instructions for this project):\n' +
-            projectInstructions
-          );
+          parts.push(fill(P['chat.projectInstructions'], {
+            name: project.name,
+            instructions: projectInstructions,
+          }));
         } else if (instructions) {
-          parts.push('Follow these instructions:\n' + instructions);
+          parts.push(fill(P['chat.globalInstructions'], { instructions }));
         }
       } else if (instructions) {
-        parts.push('Follow these instructions:\n' + instructions);
+        parts.push(fill(P['chat.globalInstructions'], { instructions }));
       }
 
       if (!projectOnly) {
-        parts.push(
-          'Long-term memory — durable facts shared across all chats and projects.\n' +
-          'When you learn a lasting personal fact, preference, or identity detail that should apply everywhere (not just one project), you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):\n' +
-          '<global_memory_update>\n…updated memory text…\n</global_memory_update>\n' +
-          'Critical: planning or deciding to update memory in reasoning/thinking is not enough — the <global_memory_update>…</global_memory_update> tags must appear in the actual reply text (before or after your user-visible answer). Without those tags, nothing is saved.\n' +
-          'If nothing new belongs in long-term memory, do not emit that tag.\n' +
-          'Keep concise durable notes. Skip ephemeral task details.\n' +
-          'Current long-term memory:\n' + (globalMemory || '(empty)')
-        );
+        parts.push(fill(P['chat.globalMemory'], {
+          memory: globalMemory || '(empty)',
+        }));
       }
 
       if (project) {
         const memory = project.memory.trim();
-        parts.push(
-          'Project memory for "' + project.name + '" — shared notes for every chat in this project. Be liberal: prefer writing project memory whenever anything useful might help future chats here.\n' +
-          'Store freely: goals, background, constraints, preferences, decisions, plans, status, people/orgs, tools, jargon, open questions, and any user facts that matter in this project (even if also personal/global). Bias toward saving; when unsure, update.\n' +
-          'Skip only truly ephemeral one-off chatter with no future value (typos, greetings, one-shot formatting).\n' +
-          'When anything above appears or changes, you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):\n' +
-          '<memory_update>\n…updated memory text…\n</memory_update>\n' +
-          'Critical: reasoning about a memory update is not enough — the <memory_update>…</memory_update> tags must appear in the actual reply text. Without those tags, nothing is saved.\n' +
-          'Only omit the tag when the turn added zero lasting project-relevant signal.\n' +
-          (projectOnly
-            ? 'This project is project-only: do not rely on or write long-term (global) memory.\n'
-            : 'Overlap with long-term memory is fine — still keep a project copy of anything useful here. Use long-term memory for facts that should apply everywhere; use project memory liberally for this project\'s working context.\n') +
-          'Current project memory:\n' + (memory || '(empty)')
-        );
+        const scopeNote = projectOnly
+          ? (P['chat.projectMemoryScopeProjectOnly'] || '')
+          : (P['chat.projectMemoryScopeDefault'] || '');
+        parts.push(fill(P['chat.projectMemory'], {
+          name: project.name,
+          scope_note: scopeNote,
+          memory: memory || '(empty)',
+        }));
 
         const continuity = buildProjectContinuityDigest(project.id, excludeConvoId);
         if (continuity) parts.push(continuity);
       }
 
       if (parts.length === 0) return null;
-      return 'You are a helpful assistant.\n\n' + parts.join('\n\n');
+      const base = P['chat.base'] || 'You are a helpful assistant.';
+      return base + '\n\n' + parts.join('\n\n');
     }
 
     function messagePlainExcerpt(message, maxChars) {
@@ -6631,11 +6624,12 @@
         remaining -= block.length + 2;
       }
       if (!blocks.length) return null;
-      return (
+      const P = window.TENSORUI_PROMPTS || {};
+      const fill = window.fillPrompt || ((t) => t);
+      return fill(P['chat.projectContinuity'] || (
         'Other chats in this project (for multi-chat continuity — prior context from sibling chats, not the current conversation):\n' +
-        'Use these when the user refers to earlier work in the project. Do not invent details that are not present.\n\n' +
-        blocks.join('\n\n')
-      );
+        'Use these when the user refers to earlier work in the project. Do not invent details that are not present.\n\n{{blocks}}'
+      ), { blocks: blocks.join('\n\n') });
     }
 
     /**

@@ -1,0 +1,1 @@
+Search the public web or news and read result pages. Vary query wording, engine (backend), recency, and kind=news while investigating. Prefer many distinct searches over repeating the same query.

@@ -1,0 +1,1 @@
+Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.

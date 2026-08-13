@@ -1,0 +1,2 @@
+Call a tool when it helps; do not invent tool results. After a tool result, call another tool or answer normally.
+Put planning and status updates in reasoning/thinking, not in user-visible text. Do not narrate tool steps in the reply (for example "Let me search…", "Digging deeper…", "Checking sources…"). After tools finish, write the final answer only.

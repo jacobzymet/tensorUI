@@ -1,0 +1,1 @@
+Deep research: you have enough sources. Do not search again. Write the final answer NOW in normal user-visible reply text (not inside thinking/reasoning). Cite sources as markdown links.

@@ -1,0 +1,1 @@
+You did not produce a user-visible answer or a tool call. Call a tool if you need a capability, or answer the user directly in normal reply text (not inside thinking).

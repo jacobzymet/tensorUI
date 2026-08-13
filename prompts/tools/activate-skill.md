@@ -1,0 +1,1 @@
+Load a skill's full SKILL.md instructions into context. Only activate skills that match the user's request.

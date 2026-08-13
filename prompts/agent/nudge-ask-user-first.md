@@ -1,0 +1,1 @@
+Before any search, call ask_user with 1–2 clarifying multiple-choice questions so the user can refine the research goal. Do not write the final report yet.

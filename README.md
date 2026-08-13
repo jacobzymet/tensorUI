@@ -64,6 +64,8 @@ By default everything lives in the OS app data folder for **tensorUI**:
 
 Pass `--config PATH` to use a different `config.toml` (chats/preferences still sit beside it).
 
+LLM system/tool prompts are markdown under [`prompts/`](prompts/) in this repo (compile-time `include_str!`) — see that folder’s README.
+
 ### Encryption at rest
 
 In **Chat → Settings → Local Data**, enable encryption with a passphrase. tensorUI then:

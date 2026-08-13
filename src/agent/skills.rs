@@ -377,13 +377,16 @@ pub fn user_skills_catalog_block(skills: &[UserSkill]) -> String {
     if skills.is_empty() {
         return String::new();
     }
-    let mut lines = vec!["available skills:".into()];
+    let mut lines = vec![crate::prompts::trim_prompt(
+        crate::prompts::agent::SKILLS_CATALOG_INTRO,
+    )
+    .to_string()];
     for skill in skills {
         lines.push(skill.catalog_line());
     }
     lines.push(String::new());
     lines.push(
-        "These are progressive-disclosure skills: you only see name/description here. When a skill is relevant, activate it with activate_skill before following its instructions. Do not activate skills that are unrelated to the user's request.".into(),
+        crate::prompts::trim_prompt(crate::prompts::agent::SKILLS_CATALOG_FOOTER).to_string(),
     );
     lines.join("\n")
 }

@@ -1,0 +1,1 @@
+Tool activate_skill — load a skill's full SKILL.md. read_skill is an alias.

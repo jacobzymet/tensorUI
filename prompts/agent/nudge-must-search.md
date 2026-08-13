@@ -1,0 +1,1 @@
+Deep research requires live web evidence. Call web_search now (prefer kind=news and a recent recency when the topic is current). Do not answer from memory alone.

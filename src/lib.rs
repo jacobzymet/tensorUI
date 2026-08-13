@@ -5,6 +5,8 @@ pub mod attachments;
 pub mod config;
 pub mod crypto;
 pub mod http;
+pub mod local_llm;
+pub mod prompts;
 pub mod providers;
 pub mod store;
 pub mod system;

@@ -715,6 +715,179 @@
         flex-wrap: nowrap;
       }
     }
+    .local-llm-launch {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .local-llm-launch-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .local-llm-launch-row .field-input {
+      flex: 1 1 16rem;
+      min-width: 0;
+    }
+    .local-llm-launch-row .btn {
+      flex: 0 0 auto;
+      align-self: stretch;
+      min-height: var(--control-h);
+    }
+    .local-llm-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem 1rem;
+    }
+    .local-llm-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      cursor: pointer;
+      color: var(--color-ink-2);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      user-select: none;
+    }
+    .local-llm-toggle input {
+      accent-color: var(--color-accent);
+    }
+    .local-llm-advanced {
+      border: 0;
+      padding: 0;
+      margin: 0;
+    }
+    .local-llm-advanced > summary {
+      list-style: none;
+      cursor: pointer;
+      color: var(--color-muted);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      width: fit-content;
+    }
+    .local-llm-advanced > summary::-webkit-details-marker { display: none; }
+    .local-llm-advanced > summary:hover { color: var(--color-ink); }
+    .local-llm-advanced[open] > summary { margin-bottom: 0.55rem; color: var(--color-ink-2); }
+    .local-llm-advanced-grid {
+      display: grid;
+      gap: 0.65rem;
+      grid-template-columns: repeat(auto-fit, minmax(7.5rem, 9rem));
+    }
+    .local-llm-empty {
+      display: grid;
+      gap: 0.85rem;
+      justify-items: start;
+      padding: 0.35rem 0.1rem 0.15rem;
+    }
+    .local-llm-empty p {
+      margin: 0;
+      color: var(--color-muted);
+      font-size: var(--text-sm);
+      line-height: 1.5;
+      max-width: 36rem;
+    }
+    .local-llm-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      border-radius: var(--radius-xl);
+      border: 1px solid color-mix(in oklch, var(--color-ok) 40%, var(--color-rule));
+      background: color-mix(in oklch, var(--color-ok) 9%, var(--color-paper));
+      margin-bottom: 0.85rem;
+    }
+    .local-llm-status-copy {
+      min-width: 0;
+      display: grid;
+      gap: 0.15rem;
+    }
+    .local-llm-status-copy strong {
+      color: var(--color-ink);
+      font-size: var(--text-sm);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .local-llm-status-copy span {
+      color: var(--color-muted);
+      font-size: var(--text-xs);
+      overflow-wrap: anywhere;
+    }
+    .local-llm-ready {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 0 0 0.85rem;
+      color: var(--color-muted);
+      font-size: var(--text-xs);
+    }
+    .local-llm-ready::before {
+      content: "";
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: var(--color-ok);
+      flex: 0 0 auto;
+    }
+    .local-llm-cache-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 1.15rem 0 0.55rem;
+    }
+    .local-llm-cache-head .field-label { margin: 0; }
+    .local-llm-cache-head .setting-hint { margin: 0; }
+    .local-llm-cache-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.35rem;
+    }
+    .local-llm-cache-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 0.8rem;
+      border-radius: var(--radius-lg);
+      border: 1px solid transparent;
+      background: color-mix(in oklch, var(--color-paper-2) 70%, transparent);
+      transition: background var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
+    }
+    .local-llm-cache-item:hover {
+      border-color: var(--color-rule);
+      background: var(--color-paper-2);
+    }
+    .local-llm-cache-item-copy {
+      min-width: 0;
+      display: grid;
+      gap: 0.1rem;
+    }
+    .local-llm-cache-item-copy strong {
+      color: var(--color-ink);
+      font-size: var(--text-sm);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .local-llm-cache-item-copy span {
+      color: var(--color-muted);
+      font-size: var(--text-xs);
+    }
+    .local-llm-cache-item .btn {
+      flex: 0 0 auto;
+    }
+    .local-llm-launch.is-disabled {
+      opacity: 0.55;
+      pointer-events: none;
+    }
     .form-actions {
       display: flex;
       flex-wrap: wrap;
@@ -1042,6 +1215,7 @@
       <div class="sidebar-nav">
         <p class="sidebar-label">Server</p>
         <button type="button" class="nav-jump is-active" data-jump="providers">Providers</button>
+        <button type="button" class="nav-jump" data-jump="local-llms">Local LLMs</button>
       </div>
       <div class="sidebar-footer">
         <div class="sidebar-footer-row">
@@ -1119,6 +1293,69 @@
                   </div>
                 </div>
                 <p id="providerError" class="text-error is-hidden" role="alert"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="local-llms">
+            <div class="section-head">
+              <div>
+                <h2>Local LLMs</h2>
+                <p class="section-lede">Start a GGUF model on this machine. Use <code>org/repo:quant</code> from Hugging Face.</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div id="localLlmMissing" class="local-llm-empty is-hidden" role="status">
+                <p id="localLlmInstallDetail">Checking for llama-server…</p>
+                <a class="btn btn-primary" id="localLlmInstallLink" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">Install llama.cpp</a>
+              </div>
+
+              <div id="localLlmBody" class="is-hidden">
+                <p id="localLlmReady" class="local-llm-ready" title="">llama-server ready</p>
+
+                <div id="localLlmRunning" class="local-llm-status is-hidden" aria-live="polite">
+                  <div class="local-llm-status-copy">
+                    <strong id="localLlmRunningTitle">Running</strong>
+                    <span id="localLlmRunningDetail">—</span>
+                  </div>
+                  <button type="button" class="btn btn-danger" id="btnStopLocalLlm">Stop</button>
+                </div>
+
+                <div id="localLlmControls" class="local-llm-launch">
+                  <div class="local-llm-launch-row">
+                    <input class="field-input" id="localLlmHf" type="text" maxlength="256" placeholder="ggml-org/gpt-oss-120b-GGUF:Q4_K_M" autocomplete="off" spellcheck="false" aria-label="Hugging Face model">
+                    <button type="button" class="btn btn-primary" id="btnStartLocalLlm">Start</button>
+                  </div>
+                  <div class="local-llm-meta-row">
+                    <label class="local-llm-toggle" title="CPU memory-map profile for high RAM efficiency">
+                      <input type="checkbox" id="localLlmMmap" checked>
+                      <span>Memory-map (CPU Inference, High RAM Efficiency)</span>
+                    </label>
+                    <details class="local-llm-advanced">
+                      <summary>Port &amp; threads</summary>
+                      <div class="local-llm-advanced-grid">
+                        <div>
+                          <label class="field-label" for="localLlmPort">Port</label>
+                          <input class="field-input" id="localLlmPort" type="number" min="1" max="65535" value="8080">
+                        </div>
+                        <div>
+                          <label class="field-label" for="localLlmThreads">Threads</label>
+                          <input class="field-input" id="localLlmThreads" type="number" min="1" max="256" value="14">
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                  <p id="localLlmError" class="text-error is-hidden" role="alert"></p>
+                </div>
+
+                <div id="localLlmCacheWrap" class="local-llm-cache">
+                  <div class="local-llm-cache-head">
+                    <div class="field-label">On this device</div>
+                    <p id="localLlmCacheHint" class="setting-hint">Cached GGUFs</p>
+                  </div>
+                  <ul id="localLlmCacheList" class="local-llm-cache-list" aria-live="polite"></ul>
+                  <p id="localLlmCacheEmpty" class="manager-empty">No cached models yet — start one above to download.</p>
+                </div>
               </div>
             </div>
           </section>
@@ -1715,6 +1952,176 @@
         }
       }
 
+      function formatBytes(n) {
+        const value = Number(n) || 0;
+        if (value < 1024) return value + ' B';
+        if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+        if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+        return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+      }
+
+      function setLocalLlmError(message) {
+        const el = document.getElementById('localLlmError');
+        if (!el) return;
+        if (!message) {
+          el.classList.add('is-hidden');
+          el.textContent = '';
+          return;
+        }
+        el.textContent = message;
+        el.classList.remove('is-hidden');
+      }
+
+      function applyLocalLlmStatus(payload) {
+        const install = payload?.install || {};
+        const running = payload?.running || null;
+        const missing = document.getElementById('localLlmMissing');
+        const body = document.getElementById('localLlmBody');
+        const detail = document.getElementById('localLlmInstallDetail');
+        const ready = document.getElementById('localLlmReady');
+        const controls = document.getElementById('localLlmControls');
+        const runningBox = document.getElementById('localLlmRunning');
+        const runningTitle = document.getElementById('localLlmRunningTitle');
+        const runningDetail = document.getElementById('localLlmRunningDetail');
+
+        if (payload?.default_threads && document.getElementById('localLlmThreads') && !document.getElementById('localLlmThreads').dataset.touched) {
+          document.getElementById('localLlmThreads').value = String(payload.default_threads);
+        }
+        if (payload?.default_port && document.getElementById('localLlmPort') && !document.getElementById('localLlmPort').dataset.touched) {
+          document.getElementById('localLlmPort').value = String(payload.default_port);
+        }
+
+        if (install.installed) {
+          missing.classList.add('is-hidden');
+          body.classList.remove('is-hidden');
+          if (ready) {
+            ready.textContent = 'llama-server ready';
+            ready.title = [install.path, install.version].filter(Boolean).join(' · ');
+          }
+        } else {
+          body.classList.add('is-hidden');
+          missing.classList.remove('is-hidden');
+          detail.textContent = install.error
+            || 'Install llama.cpp and put llama-server on your PATH (or set TENSORUI_LLAMA_SERVER).';
+        }
+
+        if (running) {
+          runningBox.classList.remove('is-hidden');
+          controls.classList.add('is-disabled');
+          ready?.classList.add('is-hidden');
+          runningTitle.textContent = running.model || 'Local model';
+          runningDetail.textContent = [
+            running.base_url,
+            running.mmap ? 'memory-map' : 'standard',
+            running.threads + ' threads',
+          ].join(' · ');
+        } else {
+          runningBox.classList.add('is-hidden');
+          controls.classList.remove('is-disabled');
+          if (install.installed) ready?.classList.remove('is-hidden');
+        }
+
+        if (payload?.state) applyState(payload.state);
+      }
+
+      async function refreshLocalLlmCache() {
+        const list = document.getElementById('localLlmCacheList');
+        const empty = document.getElementById('localLlmCacheEmpty');
+        const hint = document.getElementById('localLlmCacheHint');
+        const wrap = document.getElementById('localLlmCacheWrap');
+        try {
+          const response = await fetch('/api/local-llms/cache');
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+          const models = Array.isArray(data.models) ? data.models : [];
+          if (hint) {
+            hint.textContent = data.cache_dir
+              ? data.cache_dir.replace(/^.*[\\/]/, '')
+              : 'Cached GGUFs';
+            if (data.cache_dir) hint.title = data.cache_dir;
+          }
+          if (!models.length) {
+            list.innerHTML = '';
+            empty.classList.remove('is-hidden');
+            wrap?.classList.remove('is-hidden');
+            return;
+          }
+          empty.classList.add('is-hidden');
+          list.innerHTML = models.map((model) => {
+            const label = model.hf_id || model.name;
+            const meta = formatBytes(model.size_bytes);
+            const useHf = model.hf_id
+              ? `data-hf="${escapeHtml(model.hf_id)}"`
+              : `data-path="${escapeHtml(model.path)}"`;
+            return `
+              <li class="local-llm-cache-item">
+                <div class="local-llm-cache-item-copy">
+                  <strong title="${escapeHtml(model.path)}">${escapeHtml(label)}</strong>
+                  <span>${escapeHtml(meta)}</span>
+                </div>
+                <button type="button" class="btn btn-ghost" data-local-run ${useHf}>Run</button>
+              </li>`;
+          }).join('');
+        } catch (error) {
+          empty.classList.remove('is-hidden');
+          empty.textContent = 'Could not read cache.';
+          empty.title = error.message || String(error);
+          list.innerHTML = '';
+        }
+      }
+
+      async function refreshLocalLlms() {
+        try {
+          const response = await fetch('/api/local-llms');
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+          applyLocalLlmStatus(data);
+          if (data?.install?.installed) await refreshLocalLlmCache();
+        } catch (error) {
+          const missing = document.getElementById('localLlmMissing');
+          const body = document.getElementById('localLlmBody');
+          const detail = document.getElementById('localLlmInstallDetail');
+          body?.classList.add('is-hidden');
+          missing?.classList.remove('is-hidden');
+          if (detail) detail.textContent = 'Could not check llama-server: ' + (error.message || error);
+        }
+      }
+
+      async function startLocalLlm(overrides = {}) {
+        setLocalLlmError('');
+        const hfInput = document.getElementById('localLlmHf');
+        const body = {
+          hf: overrides.hf != null ? overrides.hf : (hfInput?.value || '').trim(),
+          model_path: overrides.model_path || null,
+          mmap: !!document.getElementById('localLlmMmap')?.checked,
+          port: Number(document.getElementById('localLlmPort')?.value) || undefined,
+          threads: Number(document.getElementById('localLlmThreads')?.value) || undefined,
+        };
+        if (!body.hf && !body.model_path) {
+          setLocalLlmError('Enter a Hugging Face model as org/repo:quant.');
+          return;
+        }
+        if (!body.hf) delete body.hf;
+        if (!body.model_path) delete body.model_path;
+        const btn = document.getElementById('btnStartLocalLlm');
+        await withBusy(btn, 'Starting…', async () => {
+          try {
+            const response = await fetch('/api/local-llms/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            applyLocalLlmStatus(data);
+            await refreshLocalLlmCache();
+            await refreshState();
+          } catch (error) {
+            setLocalLlmError(error.message || String(error));
+          }
+        });
+      }
+
       const removeModal = {
         show(id, name) {
           pendingRemoveId = id;
@@ -1966,7 +2373,7 @@
 
       const content = document.getElementById('content');
       content.addEventListener('scroll', () => {
-        const sections = ['providers'];
+        const sections = ['providers', 'local-llms'];
         let current = sections[0];
         for (const id of sections) {
           const el = document.getElementById(id);
@@ -1982,9 +2389,59 @@
       applyTheme('dark');
       applyFonts(currentFonts);
       refreshState();
-      pollTimer = setInterval(refreshState, 1000);
+      refreshLocalLlms();
+      pollTimer = setInterval(() => {
+        refreshState();
+      }, 1000);
+      setInterval(() => {
+        refreshLocalLlms();
+      }, 5000);
       window.addEventListener('beforeunload', () => {
         if (pollTimer) clearInterval(pollTimer);
+      });
+
+      document.getElementById('localLlmThreads')?.addEventListener('input', () => {
+        document.getElementById('localLlmThreads').dataset.touched = '1';
+      });
+      document.getElementById('localLlmPort')?.addEventListener('input', () => {
+        document.getElementById('localLlmPort').dataset.touched = '1';
+      });
+      document.getElementById('localLlmHf')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          startLocalLlm();
+        }
+      });
+      document.getElementById('btnStartLocalLlm')?.addEventListener('click', () => {
+        startLocalLlm();
+      });
+      document.getElementById('btnStopLocalLlm')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btnStopLocalLlm');
+        setLocalLlmError('');
+        await withBusy(btn, 'Stopping…', async () => {
+          try {
+            const response = await fetch('/api/local-llms/stop', { method: 'POST' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            applyLocalLlmStatus(data);
+            await refreshState();
+          } catch (error) {
+            setLocalLlmError(error.message || String(error));
+          }
+        });
+      });
+      document.getElementById('localLlmCacheList')?.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-local-run]');
+        if (!btn) return;
+        const hf = btn.getAttribute('data-hf');
+        const path = btn.getAttribute('data-path');
+        if (hf) {
+          const input = document.getElementById('localLlmHf');
+          if (input) input.value = hf;
+          startLocalLlm({ hf });
+        } else if (path) {
+          startLocalLlm({ model_path: path, hf: '' });
+        }
       });
 
       document.getElementById('btnCheckUpdates')?.addEventListener('click', async () => {

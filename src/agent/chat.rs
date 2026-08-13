@@ -273,11 +273,14 @@ pub async fn generate_chat_title(
         "messages": [
             {
                 "role": "system",
-                "content": "Reply with a chat title only. Maximum 6 words. No quotes, markdown, punctuation, or explanation."
+                "content": crate::prompts::trim_prompt(crate::prompts::title::SYSTEM)
             },
             {
                 "role": "user",
-                "content": format!("Title this chat:\n\n{snippet}")
+                "content": crate::prompts::fill(
+                    crate::prompts::title::USER,
+                    &[("snippet", &snippet)]
+                )
             }
         ]
     });

@@ -1,0 +1,1 @@
+Also opens up to {{pages}} result pages and extracts ~{{chars}} characters of text each (depth: {{depth}}).

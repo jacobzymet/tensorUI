@@ -1,0 +1,1 @@
+Do not answer from memory alone. After clarifying with the user, investigate with web_search (and fetch_url when useful) before writing the final answer.

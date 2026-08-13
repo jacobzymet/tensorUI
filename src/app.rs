@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use crate::{
     config::Config,
     crypto,
+    local_llm::LocalLlmManager,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, RemoteModelOption,
         mask_token, normalize_provider_base, probe_provider_catalog, probe_provider_health,
@@ -22,6 +23,7 @@ pub struct App {
     pub remote_catalog: CatalogCache,
     /// Session key for disk encryption at rest. Cleared on lock / process exit.
     disk_key: Option<crypto::DiskKey>,
+    pub local_llm: LocalLlmManager,
 }
 
 impl App {
@@ -40,6 +42,7 @@ impl App {
             remote_health: HealthCache::default(),
             remote_catalog: CatalogCache::default(),
             disk_key: None,
+            local_llm: LocalLlmManager::default(),
         }
     }
 
@@ -48,6 +51,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        let _ = self.local_llm.stop();
         self.lock_disk_encryption();
     }
 
@@ -334,6 +338,32 @@ impl App {
     pub fn activate_provider(&mut self, id: &str) -> Result<(), String> {
         self.config.providers.set_active(id)?;
         self.persist_providers("provider activated")
+    }
+
+    /// Register or refresh the managed llama-server provider and make it default.
+    pub fn ensure_local_llama_provider(&mut self, base_url: &str) -> Result<(), String> {
+        let id = crate::local_llm::provider_id();
+        let name = crate::local_llm::provider_name();
+        let Some(normalized) = normalize_provider_base(base_url, ApiStyle::Openai) else {
+            return Err("Invalid local llama-server base URL.".into());
+        };
+        if let Some(provider) = self.config.providers.items.iter_mut().find(|p| p.id == id) {
+            provider.name = name.to_string();
+            provider.base = normalized;
+            provider.api_style = ApiStyle::Openai;
+            provider.token.clear();
+            self.config.providers.active_provider_id = id.to_string();
+        } else {
+            if self.config.providers.items.len() >= 32 {
+                return Err("Maximum of 32 providers reached.".into());
+            }
+            let mut provider =
+                crate::providers::Provider::new(name, normalized, "", ApiStyle::Openai);
+            provider.id = id.to_string();
+            self.config.providers.active_provider_id = id.to_string();
+            self.config.providers.items.push(provider);
+        }
+        self.persist_providers("local llama provider")
     }
 
     fn persist_providers(&mut self, _action: &str) -> Result<(), String> {

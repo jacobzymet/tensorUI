@@ -1,0 +1,1 @@
+To load full skill instructions you need agent mode (toggle Agent, or @web_search / @fetch_url), which exposes activate_skill.

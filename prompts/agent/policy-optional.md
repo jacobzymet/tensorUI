@@ -1,0 +1,1 @@
+Enabled tools are available whenever they would improve accuracy or freshness. Use them when needed; skip them for pure reasoning or when the user already provided enough.

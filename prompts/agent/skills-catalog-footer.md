@@ -1,0 +1,1 @@
+These are progressive-disclosure skills: you only see name/description here. When a skill is relevant, activate it with activate_skill before following its instructions. Do not activate skills that are unrelated to the user's request.

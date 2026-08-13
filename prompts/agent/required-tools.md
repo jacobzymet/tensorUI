@@ -1,0 +1,1 @@
+Required tools for this turn: {{tools}}. You MUST call each of these at least once before giving a final answer. Prefer calling a required tool first.

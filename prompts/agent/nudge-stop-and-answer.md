@@ -1,0 +1,1 @@
+Stop calling tools. Write the final answer now in the normal reply text (not inside thinking/reasoning). Lead with the conclusion, use the sources you already found, and cite them as markdown links.
