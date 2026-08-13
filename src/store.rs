@@ -67,6 +67,8 @@ impl From<anyhow::Error> for StoreError {
 }
 
 pub fn data_dir() -> PathBuf {
+    // Keep the on-disk folder as `tensorUI` forever — product branding (TensorMI Harness)
+    // must not move chats/config and orphan existing installs.
     ProjectDirs::from("", "", "tensorUI")
         .map(|dirs| dirs.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("tensorUI-data"))

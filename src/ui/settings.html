@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tensorUI | Server</title>
+  <title>TensorMI Harness | Server</title>
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1204,8 +1204,8 @@
     </button>
     <aside class="sidebar">
       <div class="sidebar-head">
-        <a class="wordmark" href="/" aria-label="tensorUI Server">
-          <span class="wordmark-brand">tensor<span>UI</span></span>
+        <a class="wordmark" href="/" aria-label="TensorMI Harness Server">
+          <span class="wordmark-brand">tensor<span>MI</span></span>
           <span class="wordmark-surface">Server</span>
         </a>
         <button type="button" class="btn btn-ghost btn-icon btn-toggle-sidebar" id="btnToggleSidebar" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded="true">
@@ -1375,7 +1375,7 @@
   <div id="removeProviderModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="removeProviderTitle">
     <div class="dialog">
       <h2 id="removeProviderTitle">Remove provider?</h2>
-      <p id="removeProviderBody">This removes the saved link from tensorUI. The remote host is unchanged.</p>
+      <p id="removeProviderBody">This removes the saved link from TensorMI Harness. The remote host is unchanged.</p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" id="btnCancelRemoveProvider">Cancel</button>
         <button type="button" class="btn btn-danger" id="btnConfirmRemoveProvider">Remove</button>
@@ -2126,7 +2126,7 @@
         show(id, name) {
           pendingRemoveId = id;
           document.getElementById('removeProviderBody').textContent =
-            'Remove “' + (name || 'this provider') + '” from tensorUI? The API host is unchanged.'
+            'Remove “' + (name || 'this provider') + '” from TensorMI Harness? The API host is unchanged.'
             + (activeProvider()?.id === id ? ' Its models leave Chat\u2019s picker, and another provider becomes the default.' : '');
           openBackdrop(document.getElementById('removeProviderModal'));
         },
@@ -2461,7 +2461,7 @@
             const latest = 'v' + String(status.latest).replace(/^v/i, '');
             const url = status.release_url || 'https://github.com/jacobzymet/tensorUI/releases';
             if (versionEl) versionEl.textContent = latest + ' available';
-            if (window.confirm('tensorUI ' + latest + ' is available. Open the release page?')) {
+            if (window.confirm('TensorMI Harness ' + latest + ' is available. Open the release page?')) {
               window.open(url, '_blank', 'noopener,noreferrer');
             }
           } else {

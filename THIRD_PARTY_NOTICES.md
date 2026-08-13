@@ -3,10 +3,10 @@
 ## thinking-orbs
 
 The dotted thought-orb animations in
-[`tensorUI/src/ui/orb.js`](src/ui/orb.js) are adapted from
+[`src/ui/orb.js`](src/ui/orb.js) are adapted from
 [thinking-orbs](https://github.com/Jakubantalik/thinking-orbs)
 ([demo](https://orbs.jakubantalik.com)), ported to plain canvas for the
-tensorUI chat UI.
+TensorMI Harness chat UI.
 
 ```
 MIT License
@@ -35,7 +35,7 @@ SOFTWARE.
 ## highlight.js
 
 Syntax highlighting for fenced code blocks in chat uses
-[`tensorUI/src/ui/vendor/highlight.min.js`](src/ui/vendor/highlight.min.js)
+[`src/ui/vendor/highlight.min.js`](src/ui/vendor/highlight.min.js)
 ([highlight.js](https://highlightjs.org/) v11.11.1).
 
 ```

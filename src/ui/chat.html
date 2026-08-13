@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tensorUI | Chat</title>
+  <title>TensorMI Harness | Chat</title>
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -2530,8 +2530,8 @@
       align-items: center;
       gap: 0.55rem;
       margin: 0 0 0.75rem;
-      padding: 0.3rem 0.85rem 0.3rem 0.4rem;
-      line-height: 1;
+      padding: 0.35rem 0.85rem 0.4rem 0.4rem;
+      line-height: 1.25;
       border-radius: var(--radius-pill);
       background: var(--color-paper-2);
       border: 1px solid var(--color-rule);
@@ -2542,7 +2542,8 @@
       --shimmer-dim: color-mix(in oklch, var(--color-ink-2) 48%, transparent);
       display: inline-flex;
       align-items: center;
-      line-height: 1;
+      line-height: 1.35;
+      padding: 0.05em 0 0.12em;
       font-size: var(--text-sm);
       font-weight: 500;
       letter-spacing: -0.01em;
@@ -3483,6 +3484,7 @@
     .composer-tools .btn-think,
     .composer-buttons .btn-mic,
     .composer-buttons .btn-send,
+    .composer-buttons .btn-branch,
     .composer-buttons #btnStop {
       height: 2.1rem;
       min-height: 2.1rem;
@@ -3767,12 +3769,166 @@
       background: var(--color-paper-3);
       color: var(--color-ink);
     }
+    /* Secondary to Send — quieter outline pill, same control height. */
+    .composer-buttons .btn-branch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0 0.7rem 0 0.6rem;
+      border-radius: var(--radius-pill);
+      border-color: var(--color-rule);
+      background: transparent;
+      color: var(--color-ink-2);
+      font-family: var(--font-body);
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      box-shadow: none;
+    }
+    .composer-buttons .btn-branch:hover:not(:disabled) {
+      background: var(--surface-hover);
+      border-color: var(--color-rule-2);
+      color: var(--color-ink);
+      box-shadow: none;
+      transform: none;
+    }
+    .composer-buttons .btn-branch:disabled {
+      opacity: 0.42;
+    }
+    .composer-buttons .btn-branch svg {
+      width: 0.9rem;
+      height: 0.9rem;
+      display: block;
+      flex: 0 0 auto;
+    }
+    .composer-buttons .btn-branch-label {
+      line-height: 1;
+    }
+    @media (max-width: 420px) {
+      .composer-buttons .btn-branch-label { display: none; }
+      .composer-buttons .btn-branch {
+        width: 2.1rem;
+        min-width: 2.1rem;
+        padding: 0;
+      }
+    }
     .composer-attachments {
       display: flex;
       flex-wrap: wrap;
       gap: 0.4rem;
     }
     .composer-attachments.is-hidden { display: none; }
+    .composer-reply {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin-bottom: 0.15rem;
+    }
+    .composer-reply.is-hidden { display: none; }
+    .composer-reply-chip {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: 0.45rem 0.55rem;
+      width: 100%;
+      padding: 0.45rem 0.45rem 0.45rem 0.65rem;
+      border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+      border-left: 3px solid var(--color-accent);
+      border-radius: var(--radius-md);
+      background: color-mix(in oklch, var(--color-ink) 4%, transparent);
+      color: var(--color-ink-2);
+      font-size: var(--text-sm);
+      line-height: 1.45;
+    }
+    .composer-reply-chip-label {
+      grid-column: 1;
+      font-size: var(--text-xs);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      padding-top: 0.1rem;
+    }
+    .composer-reply-chip-text {
+      grid-column: 2;
+      min-width: 0;
+      max-height: 4.5em;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      white-space: pre-wrap;
+    }
+    .composer-reply-chip button {
+      grid-column: 3;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      cursor: pointer;
+      width: 1.35rem;
+      height: 1.35rem;
+      border-radius: var(--radius-pill);
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0;
+    }
+    .composer-reply-chip button:hover {
+      color: var(--color-ink);
+      background: var(--surface-hover);
+    }
+    .selection-reply-bar {
+      position: fixed;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      gap: 0.15rem;
+      padding: 0.2rem;
+      border-radius: var(--radius-pill);
+      background: var(--color-paper-3);
+      border: 1px solid var(--color-rule);
+      box-shadow: var(--shadow-2);
+      transform: translateX(-50%);
+    }
+    .selection-reply-bar.is-hidden { display: none !important; }
+    .selection-reply-bar button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-ink);
+      font: inherit;
+      font-size: var(--text-sm);
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      line-height: 1;
+    }
+    .selection-reply-bar button:hover {
+      background: var(--accent-wash);
+      color: var(--color-accent);
+    }
+    .msg-reply-quote {
+      margin: 0 0 0.55rem;
+      padding: 0.45rem 0.65rem;
+      border-left: 3px solid color-mix(in oklch, var(--color-accent) 70%, transparent);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: color-mix(in oklch, var(--color-ink) 6%, transparent);
+      color: var(--color-ink-2);
+      font-size: 0.92em;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .msg-reply-quote-label {
+      display: block;
+      margin-bottom: 0.2rem;
+      font-size: var(--text-xs);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+    }
     .composer-attach-chip {
       display: inline-flex;
       align-items: center;
@@ -4631,8 +4787,8 @@
     </button>
     <aside class="chat-sidebar">
       <div class="sidebar-head">
-        <a class="wordmark" href="/" aria-label="tensorUI Chat">
-          <span class="wordmark-brand">tensor<span>UI</span></span>
+        <a class="wordmark" href="/" aria-label="TensorMI Harness Chat">
+          <span class="wordmark-brand">tensor<span>MI</span></span>
           <span class="wordmark-surface">Chat</span>
         </a>
         <div class="sidebar-head-actions">
@@ -4766,7 +4922,7 @@
           <div class="chat-viewport" id="chatViewport" tabindex="0">
             <div class="empty-state" id="emptyState">
               <div class="empty-state-inner" id="emptyStateInner">
-                <canvas class="orb-mark" id="orbMark" role="img" aria-label="tensorUI"></canvas>
+                <canvas class="orb-mark" id="orbMark" role="img" aria-label="TensorMI Harness"></canvas>
                 <p class="empty-eyebrow is-hidden" id="emptyEyebrow">Project</p>
                 <h1 class="empty-greeting" id="greeting">Hello</h1>
                 <p class="empty-sub" id="modelHint">—</p>
@@ -4797,7 +4953,7 @@
   <div id="updateToast" class="update-toast is-hidden" role="status" aria-live="polite" aria-atomic="true" hidden>
     <button type="button" class="btn btn-ghost btn-icon update-toast-close" id="btnUpdateDismiss" aria-label="Dismiss update notice" title="Dismiss">×</button>
     <p class="update-toast-kicker">Update available</p>
-    <p class="update-toast-title" id="updateToastTitle">tensorUI</p>
+    <p class="update-toast-title" id="updateToastTitle">TensorMI Harness</p>
     <p class="update-toast-body" id="updateToastBody">A newer release is on GitHub.</p>
     <div class="update-toast-actions">
       <button type="button" class="btn btn-ghost" id="btnUpdateLater">Later</button>
@@ -4805,11 +4961,16 @@
     </div>
   </div>
 
+  <div id="selectionReplyBar" class="selection-reply-bar is-hidden" role="toolbar" aria-label="Selection actions" hidden>
+    <button type="button" id="btnSelectionReply">Reply</button>
+  </div>
+
   <div class="composer-shell" id="composerShell">
     <div class="composer-card" id="composerCard">
       <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
       <div class="composer-modes" id="composerModes" aria-live="polite"></div>
       <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
+      <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
       <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
       <textarea
         id="composerInput"
@@ -4851,6 +5012,10 @@
           </button>
           <button type="button" class="btn-mic is-hidden" id="btnMic" aria-label="Voice input" aria-pressed="false" title="Voice input" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M8 22h8"/></svg>
+          </button>
+          <button type="button" class="btn btn-outline btn-branch" id="btnBranch" aria-label="Branch into a new chat" title="Send in a new chat that keeps this conversation's context" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.25"/><circle cx="18" cy="5" r="2.25"/><circle cx="6" cy="19" r="2.25"/><path d="M6 7.25v9.5"/><path d="M8.25 5h5.5a4 4 0 0 1 4 4v0"/></svg>
+            <span class="btn-branch-label">Branch</span>
           </button>
           <button type="button" class="btn btn-primary btn-send" id="btnSend" aria-label="Send message" title="Send message" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
@@ -5464,6 +5629,9 @@
     const composerInput = document.getElementById('composerInput');
     const composerHint = document.getElementById('composerHint');
     const composerMentions = document.getElementById('composerMentions');
+    const composerReply = document.getElementById('composerReply');
+    const selectionReplyBar = document.getElementById('selectionReplyBar');
+    const btnSelectionReply = document.getElementById('btnSelectionReply');
     const mentionMenu = document.getElementById('mentionMenu');
     const settingsModal = document.getElementById('settingsModal');
     const projectModal = document.getElementById('projectModal');
@@ -5481,6 +5649,7 @@
     const btnNewIncognitoChat = document.getElementById('btnNewIncognitoChat');
     const topbarIncognito = document.getElementById('topbarIncognito');
     const btnSend = document.getElementById('btnSend');
+    const btnBranch = document.getElementById('btnBranch');
     const btnStop = document.getElementById('btnStop');
     const btnPlus = document.getElementById('btnPlus');
     const plusMenu = document.getElementById('plusMenu');
@@ -6020,6 +6189,26 @@
     function provisionalTitle(text) {
       const src = String(text || '').replace(/\s+/g, ' ').trim() || 'New chat';
       return src.length > 48 ? src.slice(0, 48).trim() + '…' : src;
+    }
+
+    function branchConversationTitle(source) {
+      if (source?.incognito) return 'Ghost Chat';
+      const base = String(source?.title || '').trim() || 'chat';
+      return provisionalTitle('Branch · ' + base);
+    }
+
+    function cloneConversationMessages(messages) {
+      const list = Array.isArray(messages) ? messages : [];
+      try {
+        return structuredClone(list);
+      } catch {
+        return JSON.parse(JSON.stringify(list));
+      }
+    }
+
+    function canBranchFromActiveConversation() {
+      const convo = conversations.find((item) => item.id === activeId);
+      return !!(convo && Array.isArray(convo.messages) && convo.messages.length > 0);
     }
 
     async function requestGeneratedTitle(userText) {
@@ -6949,9 +7138,16 @@
     function formatUserMessageHtml(message) {
       let text = typeof message === 'string' ? message : (message?.content || '');
       const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+      const replyQuote = typeof message === 'object' && message?.replyQuote
+        ? String(message.replyQuote).trim()
+        : '';
       if (attachments.length && text === '(attachment)') text = '';
+      const quoteHtml = replyQuote
+        ? '<div class="msg-reply-quote"><span class="msg-reply-quote-label">Replying to</span>'
+          + escapeHtml(replyQuote) + '</div>'
+        : '';
       const textHtml = formatUserHtml(text);
-      if (!attachments.length) return textHtml;
+      if (!attachments.length) return quoteHtml + textHtml;
       const chips = attachments.map((att) => {
         if (att.kind === 'image' && att.previewUrl) {
           return '<img class="msg-attach-thumb" src="' + escapeHtml(att.previewUrl)
@@ -6960,11 +7156,13 @@
         return '<span class="msg-attach-file">' + escapeHtml(att.name || 'attachment') + '</span>';
       }).join('');
       const media = '<div class="msg-attachments">' + chips + '</div>';
-      return textHtml ? media + textHtml : media;
+      return quoteHtml + (textHtml ? media + textHtml : media);
     }
 
     /** @type {Array<{id:string,name:string,mime:string,kind:'image'|'file',size:number,dataUrl:string,previewUrl:string}>} */
     let pendingAttachments = [];
+    /** Selected assistant snippet the next send will reply to. */
+    let pendingReplyQuote = null;
     let attachmentsSupported = false;
     let modelContextLength = null;
     let tesseractLoading = null;
@@ -7455,9 +7653,11 @@
       }));
     }
 
-    function buildUserApiContent(text, attachments) {
+    function buildUserApiContent(text, attachments, replyQuote) {
       const prepared = Array.isArray(attachments) ? attachments : [];
       const textBits = [];
+      const quote = String(replyQuote || '').trim();
+      if (quote) textBits.push(formatReplyQuoteForApi(quote));
       if (text && String(text).trim()) textBits.push(String(text).trim());
       for (const att of prepared) {
         if (att.sendMode === 'text' && att.apiText) textBits.push(att.apiText);
@@ -7473,10 +7673,19 @@
       return parts;
     }
 
+    function formatReplyQuoteForApi(quote) {
+      const body = String(quote || '').trim().split('\n').map((line) => '> ' + line).join('\n');
+      return 'Replying to this from your previous message:\n\n' + body;
+    }
+
     function userMessageApiContent(message) {
-      const raw = typeof message.content === 'string'
+      let raw = typeof message.content === 'string'
         ? parseCapabilityMentions(message.content).text
         : '';
+      const quote = typeof message.replyQuote === 'string' ? message.replyQuote.trim() : '';
+      if (quote) {
+        raw = formatReplyQuoteForApi(quote) + (raw && raw !== '(attachment)' ? '\n\n' + raw : '');
+      }
       const attachments = Array.isArray(message.attachments) ? message.attachments : [];
       if (!attachments.length) return raw;
       const textBits = [];
@@ -7751,6 +7960,105 @@
       return false;
     }
 
+    function renderComposerReply() {
+      if (!composerReply) return;
+      const quote = typeof pendingReplyQuote === 'string' ? pendingReplyQuote.trim() : '';
+      if (!quote) {
+        composerReply.innerHTML = '';
+        composerReply.classList.add('is-hidden');
+        return;
+      }
+      composerReply.classList.remove('is-hidden');
+      composerReply.innerHTML = '';
+      const chip = document.createElement('div');
+      chip.className = 'composer-reply-chip';
+      const label = document.createElement('span');
+      label.className = 'composer-reply-chip-label';
+      label.textContent = 'Reply';
+      const text = document.createElement('div');
+      text.className = 'composer-reply-chip-text';
+      text.textContent = quote;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', 'Remove reply quote');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        clearPendingReplyQuote();
+        focusComposer();
+      });
+      chip.appendChild(label);
+      chip.appendChild(text);
+      chip.appendChild(remove);
+      composerReply.appendChild(chip);
+    }
+
+    function clearPendingReplyQuote() {
+      pendingReplyQuote = null;
+      renderComposerReply();
+      updateSendEnabled();
+    }
+
+    function setPendingReplyQuote(text) {
+      const quote = String(text || '').replace(/\u00a0/g, ' ').trim().slice(0, 4000);
+      if (!quote) return;
+      pendingReplyQuote = quote;
+      hideSelectionReplyBar();
+      renderComposerReply();
+      updateSendEnabled();
+      focusComposer();
+    }
+
+    function hideSelectionReplyBar() {
+      if (!selectionReplyBar) return;
+      selectionReplyBar.classList.add('is-hidden');
+      selectionReplyBar.hidden = true;
+    }
+
+    function assistantSelectionQuote() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount || !chatThread) return null;
+      const text = String(sel.toString() || '').replace(/\u00a0/g, ' ').trim();
+      if (!text) return null;
+      const range = sel.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const el = node.nodeType === 1 ? node : node.parentElement;
+      if (!el || !chatThread.contains(el)) return null;
+      const row = el.closest('.msg-role-assistant');
+      if (!row || !chatThread.contains(row) || row.classList.contains('msg-queued')) return null;
+      if (el.closest('.thinking, .msg-actions, .clarify-card, .msg-edit, button, textarea, input')) {
+        return null;
+      }
+      const bubble = row.querySelector('.msg-bubble');
+      if (!bubble || !bubble.contains(el)) return null;
+      const rect = range.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+      return {
+        text: text.slice(0, 4000),
+        rect,
+      };
+    }
+
+    function syncSelectionReplyBar() {
+      if (!selectionReplyBar || mainView !== 'chat') {
+        hideSelectionReplyBar();
+        return;
+      }
+      const quote = assistantSelectionQuote();
+      if (!quote) {
+        hideSelectionReplyBar();
+        return;
+      }
+      selectionReplyBar.hidden = false;
+      selectionReplyBar.classList.remove('is-hidden');
+      const top = Math.max(8, quote.rect.top - 44);
+      const left = Math.min(
+        window.innerWidth - 24,
+        Math.max(24, quote.rect.left + quote.rect.width / 2)
+      );
+      selectionReplyBar.style.top = top + 'px';
+      selectionReplyBar.style.left = left + 'px';
+    }
+
     function renderComposerMentions() {
       composerMentions.innerHTML = '';
       const agentOn = !!settings.agentMode;
@@ -7915,6 +8223,7 @@
         bubble.innerHTML = formatUserMessageHtml({
           content: item.displayText,
           attachments: item.attachments,
+          replyQuote: item.replyQuote,
         });
       }
       const label = row.querySelector('.msg-queued-label');
@@ -7955,6 +8264,7 @@
       bubble.innerHTML = formatUserMessageHtml({
         content: item.displayText,
         attachments: item.attachments,
+        replyQuote: item.replyQuote,
       });
       const meta = document.createElement('div');
       meta.className = 'msg-queued-meta';
@@ -8359,6 +8669,7 @@
       nextBubble.innerHTML = formatUserMessageHtml({
         content: item.displayText,
         attachments: item.attachments,
+        replyQuote: item.replyQuote,
       });
       if (editor) editor.replaceWith(nextBubble);
       row.classList.remove('is-editing');
@@ -8379,6 +8690,7 @@
         content: item.displayText || (item.attachments?.length ? '(attachment)' : ''),
       };
       if (item.attachments?.length) userMessage.attachments = item.attachments;
+      if (item.replyQuote) userMessage.replyQuote = item.replyQuote;
       convo.messages.push(userMessage);
       if (convo.messages.length === 1) {
         convo.title = provisionalTitle(
@@ -10324,7 +10636,7 @@
       }
       composerHint.textContent = project
         ? sendHint + ' · chatting in ' + project.name
-        : sendHint + ' · + for tools · @ to mention';
+        : sendHint + ' · + for tools · Branch to fork';
     }
 
     function bySidebarOrder(list = conversations) {
@@ -11598,6 +11910,8 @@
       showThread(convo);
       renderThread(convo);
       if (previousId && previousId !== id) maybeSendNextQueued(previousId);
+      clearPendingReplyQuote();
+      hideSelectionReplyBar();
       syncComposerStreamUi();
       syncUrlFromState();
       closeMobileSidebar();
@@ -11608,6 +11922,8 @@
     function startDraft({ incognito = false } = {}) {
       const previousId = activeId;
       cancelMessageEdit({ resumeQueue: false });
+      clearPendingReplyQuote();
+      hideSelectionReplyBar();
       if (activeId) stickByConvo.set(activeId, stickToBottom);
       activeId = null;
       draftIncognito = !!incognito;
@@ -11772,9 +12088,14 @@
     function updateSendEnabled() {
       const hasText = composerInput.value.trim() !== '';
       const hasFiles = pendingAttachments.length > 0;
-      btnSend.disabled = !serverReady
-        || diskEncryptionLocked()
-        || (!hasText && !hasFiles);
+      const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
+      const canCompose = !diskEncryptionLocked()
+        && serverReady
+        && (hasText || hasFiles || hasQuote);
+      btnSend.disabled = !canCompose;
+      if (btnBranch) {
+        btnBranch.disabled = !canCompose || !canBranchFromActiveConversation();
+      }
     }
 
     function syncModelOriginPill(visible, providerName) {
@@ -12306,11 +12627,18 @@
       }
     }
 
-    async function sendMessage() {
+    async function sendMessage({ branch = false } = {}) {
       const typed = composerInput.value.trim();
       const queuedFiles = pendingAttachments.slice();
-      if ((!typed && !queuedFiles.length) || !serverReady) return;
+      const replyQuote = typeof pendingReplyQuote === 'string' ? pendingReplyQuote.trim() : '';
+      if ((!typed && !queuedFiles.length && !replyQuote) || !serverReady) return;
       if (!requireUnlockedData()) return;
+
+      let source = conversations.find((item) => item.id === activeId);
+      if (branch) {
+        if (!source || !Array.isArray(source.messages) || !source.messages.length) return;
+      }
+
       stopVoiceInput({ silent: true });
       cancelMessageEdit();
       showChatView();
@@ -12331,6 +12659,14 @@
         return;
       }
 
+      if (branch) {
+        source = conversations.find((item) => item.id === source.id) || source;
+        if (!source.messages?.length) {
+          focusComposer();
+          return;
+        }
+      }
+
       const mentioned = parseCapabilityMentions(typed);
       const text = mentioned.text;
       const mentionIds = new Set([
@@ -12342,10 +12678,38 @@
       const turn = resolveTurnSkills(mentionIds);
       const displayText = displayTextWithMentions(text, mentioned.mentions);
       const storedAttachments = storedAttachmentsFromPrepared(prepared);
-      const apiText = buildUserApiContent(text, prepared);
+      const apiText = buildUserApiContent(text, prepared, replyQuote);
 
-      let convo = conversations.find((item) => item.id === activeId);
-      if (!convo) {
+      let convo = branch
+        ? null
+        : conversations.find((item) => item.id === activeId);
+      if (branch) {
+        const projectId = source.projectId || null;
+        convo = {
+          id: newId('c'),
+          title: branchConversationTitle(source),
+          messages: cloneConversationMessages(source.messages),
+          updatedAt: Date.now(),
+          projectId,
+          sortOrder: nextTopSortOrder(projectId),
+          incognito: !!source.incognito,
+        };
+        conversations.push(convo);
+        if (activeId) stickByConvo.set(activeId, stickToBottom);
+        activeId = convo.id;
+        draftIncognito = !!convo.incognito;
+        activeProjectId = projectId;
+        stickToBottom = true;
+        userScrollOverride = false;
+        resumeBottomIntent = false;
+        selectedTraceMsgIndex = null;
+        resetTraceAutoOpenState();
+        syncUrlFromState();
+        showThread(convo);
+        renderThread(convo);
+        renderSidebar();
+        syncComposerStreamUi();
+      } else if (!convo) {
         const id = newId('c');
         convo = {
           id,
@@ -12363,6 +12727,7 @@
 
       composerInput.value = '';
       clearPendingAttachments();
+      clearPendingReplyQuote();
       autoResize(composerInput);
       renderComposerMentions();
       renderComposerModes();
@@ -12374,6 +12739,7 @@
         displayText: displayText || (storedAttachments.length ? '(attachment)' : ''),
         apiText,
         attachments: storedAttachments,
+        replyQuote: replyQuote || '',
         turn: {
           useAgent: turn.useAgent,
           skills: turn.skills,
@@ -12383,7 +12749,8 @@
         },
       };
 
-      if (isConvoBusy(convo.id)) {
+      // Branch always starts a fresh turn on the new chat (never queue on the parent).
+      if (!branch && isConvoBusy(convo.id)) {
         enqueueOutbound(convo, outbound);
         focusComposer();
         return;
@@ -13186,7 +13553,12 @@
         copyCodeBlock(btn);
         return;
       }
-      if (event.target.closest('.msg-action, a, button, summary, details, input, textarea, .clarify-card')) {
+      if (event.target.closest('.msg-action, a, button, summary, details, input, textarea, .clarify-card, #selectionReplyBar')) {
+        return;
+      }
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && String(sel.toString() || '').trim()) {
+        // Don't steal focus from a text selection / Reply affordance.
         return;
       }
       const row = event.target.closest('.msg-role-assistant');
@@ -13259,7 +13631,32 @@
       syncClarifySubmitEnabled(host);
     });
 
-    btnSend.addEventListener('click', sendMessage);
+    btnSend.addEventListener('click', () => { void sendMessage(); });
+    btnBranch?.addEventListener('click', () => { void sendMessage({ branch: true }); });
+    btnSelectionReply?.addEventListener('mousedown', (event) => {
+      // Keep the selection until we capture it in the click handler.
+      event.preventDefault();
+    });
+    btnSelectionReply?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const quote = assistantSelectionQuote();
+      if (quote) setPendingReplyQuote(quote.text);
+      else hideSelectionReplyBar();
+    });
+    document.addEventListener('selectionchange', () => {
+      // Defer so mouseup can finish updating the range first.
+      queueMicrotask(syncSelectionReplyBar);
+    });
+    document.addEventListener('mouseup', () => {
+      queueMicrotask(syncSelectionReplyBar);
+    });
+    chatViewport?.addEventListener('scroll', hideSelectionReplyBar, { passive: true });
+    window.addEventListener('scroll', hideSelectionReplyBar, true);
+    window.addEventListener('resize', hideSelectionReplyBar);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') hideSelectionReplyBar();
+    });
     btnStop.addEventListener('click', () => {
       if (activeId) abortStream(activeId);
     });
@@ -14187,7 +14584,7 @@
       if (updateToastTitle) {
         updateToastTitle.textContent = status.release_name
           ? String(status.release_name)
-          : ('tensorUI ' + latestLabel);
+          : ('TensorMI Harness ' + latestLabel);
       }
       if (updateToastBody) {
         updateToastBody.textContent =

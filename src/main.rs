@@ -14,14 +14,14 @@ use tokio::net::TcpListener;
 #[command(
     name = "tensorui",
     version,
-    about = "tensorUI — a local chat UI for LLM APIs with agent capabilities"
+    about = "TensorMI Harness — a local, lightweight, open source LLM harness for humanity"
 )]
 struct Cli {
     /// Use a specific TOML configuration file
     #[arg(long, value_name = "PATH")]
     config: Option<std::path::PathBuf>,
 
-    /// Loopback address for the tensorUI web server (overrides config/env). Non-loopback addresses are refused.
+    /// Loopback address for the TensorMI Harness web server (overrides config/env). Non-loopback addresses are refused.
     #[arg(long, value_name = "ADDR")]
     bind: Option<SocketAddr>,
 
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
         runtime.spawn(async move { web::serve(shared, listener).await })
     };
 
-    println!("tensorUI listening on {url}");
+    println!("TensorMI Harness listening on {url}");
     println!("  Chat     {url}/");
     println!("  Settings {url}/settings");
     if cli.open {
@@ -77,7 +77,7 @@ const FOCUS_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn greet_running_instance(url: &str, bind: SocketAddr) -> Result<()> {
     match focus_running_instance(url) {
-        Some(_) => println!("tensorUI is already running on {url}"),
+        Some(_) => println!("TensorMI Harness is already running on {url}"),
         None => bail!(
             "{bind} is already in use by another program — pass --bind to choose a different address"
         ),

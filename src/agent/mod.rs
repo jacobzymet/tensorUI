@@ -2297,7 +2297,7 @@ async fn ddgs_search_hits(
         "tensorui-search"
     };
 
-    // Release archives ship a self-contained helper beside tensorUI. The env
+    // Release archives ship a self-contained helper beside TensorMI Harness. The env
     // override and app-data location also leave room for managed/helper updates.
     if let Some(path) = std::env::var_os("TENSORUI_SEARCH_HELPER").filter(|v| !v.is_empty()) {
         candidates.push((path.into(), Vec::new()));

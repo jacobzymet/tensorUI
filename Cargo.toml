@@ -2,7 +2,7 @@
 name = "tensorui"
 version = "0.3.0"
 edition = "2024"
-description = "tensorUI — a local chat UI for LLM APIs with agent capabilities"
+description = "TensorMI Harness — a local, lightweight, open source LLM harness for humanity"
 license = "MIT"
 
 [dependencies]

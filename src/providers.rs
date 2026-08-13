@@ -361,7 +361,7 @@ pub struct RemoteModelOption {
     pub label: String,
     pub thinking_supported: bool,
     /// Advertised request dialect for controllable reasoning. Absent means
-    /// reasoning may exist, but tensorUI cannot safely control its intensity.
+    /// reasoning may exist, but TensorMI Harness cannot safely control its intensity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_control: Option<String>,
     /// Exact effort values accepted by this model, normalized to the UI set.
@@ -381,7 +381,7 @@ pub struct RemoteModelOption {
     pub provider_name: String,
 }
 
-/// Translate tensorUI's canonical effort into the one request dialect this
+/// Translate TensorMI Harness's canonical effort into the one request dialect this
 /// model explicitly advertised. Unsupported values deliberately become Auto
 /// (no field) instead of being guessed or rounded.
 pub fn apply_thinking_control(body: &mut serde_json::Value, model: Option<&RemoteModelOption>) {

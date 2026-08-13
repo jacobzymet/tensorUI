@@ -1,12 +1,14 @@
-# <img src="assets/browser-favicon.png" alt="" width="36" height="36"> tensorUI
+# <img src="assets/browser-favicon.png" alt="" width="36" height="36"> TensorMI Harness
 
-A lightweight, more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui), a local frontend for LLM APIs you connect to, whether they run on your machine (Ollama, llama-server) or in the cloud (OpenAI, Gemini, Anthropic, and other OpenAI-compatible or **Anthropic Messages**–compatible endpoints).
+A local, lightweight, open source LLM harness for humanity.
+
+A more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui): connect to LLM APIs on your machine (Ollama, llama-server) or in the cloud (OpenAI, Gemini, Anthropic, and other OpenAI-compatible or **Anthropic Messages**–compatible endpoints).
 
 **Encryption at rest** is a first-class feature: lock chats and preferences on disk with a passphrase (Argon2id + AES-256-GCM). After each restart you unlock once for the session; **Lock session** clears the key from memory without turning encryption off.
 
 Turn models into agents with **Agent mode**: toggle **Agent** in the composer for every message, or `@web_search` / `@fetch_url` once, and the model can call **Agent Capabilities** — web search, URL fetch, custom skills, and more.
 
-tensorUI does **not** run an inference server. You point it at a base URL such as `http://127.0.0.1:11434/v1`, `https://api.openai.com/v1`, or `https://api.anthropic.com/v1`, and it proxies chat through a loopback-only control plane.
+TensorMI Harness does **not** run an inference server. You point it at a base URL such as `http://127.0.0.1:11434/v1`, `https://api.openai.com/v1`, or `https://api.anthropic.com/v1`, and it proxies chat through a loopback-only control plane.
 
 ## Requirements
 
@@ -46,7 +48,7 @@ Default URL: `http://127.0.0.1:3930`
 
 ## Data & config
 
-By default everything lives in the OS app data folder for **tensorUI**:
+On-disk paths still use the legacy folder name **`tensorUI`** (so renaming the product does not move or orphan chats). UI branding is TensorMI Harness.
 
 | OS | Typical path |
 | --- | --- |
@@ -68,7 +70,7 @@ LLM system/tool prompts are markdown under [`prompts/`](prompts/) in this repo (
 
 ### Encryption at rest
 
-In **Chat → Settings → Local Data**, enable encryption with a passphrase. tensorUI then:
+In **Chat → Settings → Local Data**, enable encryption with a passphrase. TensorMI Harness then:
 
 - Derives a 256-bit key with **Argon2id** (OWASP interactive defaults: 19 MiB memory, 2 iterations)
 - Encrypts `chats.json` and `preferences.json` with **AES-256-GCM** (random 96-bit nonces, purpose-bound AAD so files cannot be swapped)
@@ -122,4 +124,4 @@ That command builds the Rust application only. Web search can use the source che
 .\.venv\Scripts\python -m PyInstaller --noconfirm --clean --onefile --name tensorui-search --collect-all ddgs --distpath target/search-helper --workpath target/search-helper-build --specpath target src/agent/ddgs_search.py
 ```
 
-On macOS/Linux, use `./.venv/bin/python` for those two commands. You can override helper discovery with `TENSORUI_SEARCH_HELPER=/path/to/tensorui-search`; otherwise tensorUI checks beside its executable, the app-data `search-helper` folder, then source-development Python fallbacks.
+On macOS/Linux, use `./.venv/bin/python` for those two commands. You can override helper discovery with `TENSORUI_SEARCH_HELPER=/path/to/tensorui-search`; otherwise TensorMI Harness checks beside its executable, the app-data `search-helper` folder, then source-development Python fallbacks.

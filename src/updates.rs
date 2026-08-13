@@ -1,4 +1,4 @@
-//! Check GitHub Releases for a newer tensorUI version.
+//! Check GitHub Releases for a newer TensorMI Harness version.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};

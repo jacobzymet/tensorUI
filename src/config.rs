@@ -248,7 +248,7 @@ impl Config {
     }
 }
 
-/// Reject non-loopback binds. tensorUI has no auth and must not be LAN/WAN-exposed.
+/// Reject non-loopback binds. TensorMI Harness has no auth and must not be LAN/WAN-exposed.
 pub fn require_loopback_bind(addr: SocketAddr) -> Result<SocketAddr> {
     if addr.ip().is_loopback() {
         return Ok(addr);
@@ -256,7 +256,7 @@ pub fn require_loopback_bind(addr: SocketAddr) -> Result<SocketAddr> {
     eprintln!();
     eprintln!("WARNING: Refusing to start — bind address {addr} is reachable on the network.");
     eprintln!(
-        "WARNING: tensorUI is loopback-only. It has no authentication and can read/write local data."
+        "WARNING: TensorMI Harness is loopback-only. It has no authentication and can read/write local data."
     );
     eprintln!("WARNING: Use 127.0.0.1 or ::1 (config ui.host, --bind, or TENSORUI_BIND).");
     eprintln!();

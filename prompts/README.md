@@ -1,6 +1,6 @@
 # LLM prompts
 
-Markdown sources for every prompt tensorUI sends to a model.
+Markdown sources for every prompt TensorMI Harness sends to a model.
 
 The app loads these at compile time (`include_str!`) via `src/prompts/`. Chat UI templates are also served as `/prompts.js` so `chat.html` can assemble the system prompt without duplicating wording.
 
