@@ -1784,7 +1784,7 @@
     .chat-model-tabs {
       flex: 0 0 auto;
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 0.2rem;
       padding: 0.45rem 0.55rem 0.35rem;
       border-bottom: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
@@ -1849,18 +1849,36 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 0.55rem;
+      gap: 0.45rem;
       text-align: left;
       border: 0;
       background: transparent;
       color: var(--color-ink);
       border-radius: var(--radius-pill);
-      padding: 0.45rem 0.5rem 0.45rem 0.8rem;
+      padding: 0.35rem 0.3rem 0.35rem 0.8rem;
       cursor: pointer;
       font: inherit;
       font-size: var(--text-xs);
       font-weight: 600;
       pointer-events: auto;
+    }
+    .chat-model-option-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.55rem;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: inherit;
+      text-align: left;
+      padding: 0.1rem 0;
+      cursor: pointer;
+      min-height: 1.7rem;
     }
     .chat-model-option-name {
       flex: 1 1 auto;
@@ -1874,6 +1892,45 @@
       max-width: none;
       overflow: visible;
       text-overflow: clip;
+    }
+    .chat-model-pin {
+      flex: 0 0 auto;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: var(--radius-pill);
+      display: inline-grid;
+      place-items: center;
+      cursor: pointer;
+      padding: 0;
+      opacity: 0.55;
+      transition:
+        color var(--dur-short) var(--ease-out),
+        background var(--dur-short) var(--ease-out),
+        opacity var(--dur-short) var(--ease-out);
+    }
+    .chat-model-pin svg {
+      width: 0.92rem;
+      height: 0.92rem;
+    }
+    .chat-model-option:hover .chat-model-pin,
+    .chat-model-option.is-active .chat-model-pin {
+      opacity: 1;
+    }
+    .chat-model-pin:hover {
+      color: var(--color-ink);
+      background: var(--surface-hover);
+    }
+    .chat-model-pin.is-pinned {
+      color: var(--color-accent);
+      opacity: 1;
+    }
+    .chat-model-pin.is-pinned:hover {
+      color: var(--color-accent);
+      background: var(--accent-wash);
     }
     .chat-model-option:hover,
     .chat-model-option.is-active {
@@ -4650,6 +4707,7 @@
                 </div>
                 <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
                   <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
+                  <button type="button" class="chat-model-tab" id="chatModelTabPins" role="tab" aria-selected="false" data-model-tab="pins">Pins</button>
                   <button type="button" class="chat-model-tab" id="chatModelTabAll" role="tab" aria-selected="false" data-model-tab="all">All</button>
                 </div>
                 <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
@@ -5637,18 +5695,22 @@
     const REMOTE_MODEL_KEY = 'tensorui_remote_model_id';
     const CHAT_MODEL_KEY = 'tensorui_chat_model';
     const RECENT_MODELS_KEY = 'tensorui_recent_models';
+    const PINNED_MODELS_KEY = 'tensorui_pinned_models';
     const RECENT_MODELS_MAX = 12;
+    const PINNED_MODELS_MAX = 48;
     /** Below this many models the filter field is more noise than help. */
     const MODEL_SEARCH_MIN_OPTIONS = 6;
+    const MODEL_PIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1z"/></svg>';
     let selectedRemoteModelId = localStorage.getItem(REMOTE_MODEL_KEY) || '';
     let selectedChatModel = localStorage.getItem(CHAT_MODEL_KEY) || '';
     let recentModelIds = loadRecentModelIds();
+    let pinnedModelIds = loadPinnedModelIds();
     let modelMenuOptions = [];
     /** Options passing the current filter — what the arrow keys actually walk. */
     let modelMenuMatches = [];
     let modelMenuFilter = '';
     let modelMenuActiveIndex = -1;
-    let modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+    let modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'all');
     let latestState = null;
 
     function loadRecentModelIds() {
@@ -5684,7 +5746,62 @@
       const allowed = new Set(availableValues || []);
       const next = recentModelIds.filter((id) => allowed.has(id));
       if (next.length !== recentModelIds.length) saveRecentModelIds(next);
-      if (modelMenuTab === 'recents' && !recentModelIds.length) modelMenuTab = 'all';
+      if (modelMenuTab === 'recents' && !recentModelIds.length) {
+        modelMenuTab = pinnedModelIds.length ? 'pins' : 'all';
+      }
+    }
+
+    function loadPinnedModelIds() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(PINNED_MODELS_KEY) || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .filter((id) => typeof id === 'string' && id.trim())
+          .map((id) => id.trim())
+          .slice(0, PINNED_MODELS_MAX);
+      } catch {
+        return [];
+      }
+    }
+
+    function savePinnedModelIds(ids) {
+      pinnedModelIds = (Array.isArray(ids) ? ids : [])
+        .filter((id) => typeof id === 'string' && id)
+        .slice(0, PINNED_MODELS_MAX);
+      try {
+        localStorage.setItem(PINNED_MODELS_KEY, JSON.stringify(pinnedModelIds));
+      } catch {
+        // ignore quota / private-mode failures
+      }
+    }
+
+    function isModelPinned(value) {
+      return !!value && pinnedModelIds.includes(value);
+    }
+
+    function togglePinnedModel(value) {
+      if (!value) return;
+      if (isModelPinned(value)) {
+        savePinnedModelIds(pinnedModelIds.filter((id) => id !== value));
+        if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
+          modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+        }
+      } else {
+        savePinnedModelIds([value, ...pinnedModelIds.filter((id) => id !== value)]);
+      }
+      if (modelMenuIsOpen()) {
+        syncModelMenuTabs();
+        applyModelFilter({ keepActive: true });
+      }
+    }
+
+    function prunePinnedModels(availableValues) {
+      const allowed = new Set(availableValues || []);
+      const next = pinnedModelIds.filter((id) => allowed.has(id));
+      if (next.length !== pinnedModelIds.length) savePinnedModelIds(next);
+      if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
+        modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+      }
     }
 
     function newId(prefix) {
@@ -11361,9 +11478,10 @@
     }
 
     function modelMenuSourceOptions() {
-      if (modelMenuTab !== 'recents') return modelMenuOptions.slice();
+      if (modelMenuTab === 'all') return modelMenuOptions.slice();
       const byValue = new Map(modelMenuOptions.map((option) => [option.value, option]));
-      return recentModelIds
+      const order = modelMenuTab === 'pins' ? pinnedModelIds : recentModelIds;
+      return order
         .map((id) => byValue.get(id))
         .filter(Boolean);
     }
@@ -11377,15 +11495,15 @@
         tab.setAttribute('aria-selected', active ? 'true' : 'false');
       });
       if (chatModelList) {
-        chatModelList.setAttribute(
-          'aria-label',
-          modelMenuTab === 'recents' ? 'Recent models' : 'All models'
-        );
+        const label = modelMenuTab === 'recents'
+          ? 'Recent models'
+          : (modelMenuTab === 'pins' ? 'Pinned models' : 'All models');
+        chatModelList.setAttribute('aria-label', label);
       }
     }
 
     function setModelMenuTab(tab, { keepActive = false } = {}) {
-      const next = tab === 'recents' ? 'recents' : 'all';
+      const next = tab === 'recents' || tab === 'pins' ? tab : 'all';
       if (modelMenuTab === next && modelMenuIsOpen()) {
         applyModelFilter({ keepActive });
         return;
@@ -11454,18 +11572,29 @@
       const sourceCount = modelMenuSourceOptions().length;
       chatModelList.innerHTML = modelMenuMatches.map((option, index) => {
         const isSelected = option.value === selectedChatModel;
+        const pinned = isModelPinned(option.value);
         const badge = option.provider
           ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(option.provider) + '">'
             + highlightModelText(option.provider, terms) + '</span>'
           : '';
-        return '<button type="button" class="chat-model-option' + (isSelected ? ' is-selected' : '')
+        return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
           + '" role="option" id="chat-model-option-' + index + '"'
           + ' data-value="' + escapeModelAttr(option.value) + '"'
           + ' title="' + escapeModelAttr(option.provider ? option.label + ' · ' + option.provider : option.label) + '"'
-          + ' aria-selected="' + (isSelected ? 'true' : 'false') + '">'
+          + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
+          + '<button type="button" class="chat-model-option-main" data-model-pick="'
+          + escapeModelAttr(option.value) + '">'
           + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
           + badge
-          + '</button>';
+          + '</button>'
+          + '<button type="button" class="chat-model-pin' + (pinned ? ' is-pinned' : '') + '"'
+          + ' data-model-pin="' + escapeModelAttr(option.value) + '"'
+          + ' aria-label="' + (pinned ? 'Unpin model' : 'Pin model') + '"'
+          + ' aria-pressed="' + (pinned ? 'true' : 'false') + '"'
+          + ' title="' + (pinned ? 'Unpin' : 'Pin') + '">'
+          + MODEL_PIN_ICON
+          + '</button>'
+          + '</div>';
       }).join('');
 
       const empty = !modelMenuMatches.length;
@@ -11474,6 +11603,8 @@
       if (empty) {
         if (modelMenuTab === 'recents' && !terms.length) {
           chatModelEmpty.textContent = 'Models you pick will show up here.';
+        } else if (modelMenuTab === 'pins' && !terms.length) {
+          chatModelEmpty.textContent = 'Pin models from All or Recents to keep them here.';
         } else if (terms.length) {
           chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
         } else {
@@ -11572,7 +11703,11 @@
       chatModelSearchWrap.classList.toggle('is-hidden', !searchable);
       modelMenuFilter = '';
       if (chatModelSearch) chatModelSearch.value = '';
-      if (modelMenuTab === 'recents' && !recentModelIds.length) modelMenuTab = 'all';
+      if (modelMenuTab === 'recents' && !recentModelIds.length) {
+        modelMenuTab = pinnedModelIds.length ? 'pins' : 'all';
+      } else if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
+        modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+      }
       syncModelMenuTabs();
       chatModelMenu.classList.remove('is-hidden');
       syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
@@ -11729,6 +11864,7 @@
       }));
       modelMenuOptions = remoteOptions;
       pruneRecentModels(remoteOptions.map((o) => o.value));
+      prunePinnedModels(remoteOptions.map((o) => o.value));
       if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
         rememberRecentModel(selectedChatModel);
       }
@@ -13479,7 +13615,7 @@
         setModelMenuTab(tab.getAttribute('data-model-tab'));
         return;
       }
-      if (event.target.closest('.chat-model-option')) {
+      if (event.target.closest('[data-model-pin], [data-model-pick], .chat-model-option')) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -13489,11 +13625,22 @@
       // Let the filter field take the caret normally.
       if (event.target.closest('.chat-model-search')) return;
       if (event.target.closest('[data-model-tab]')) return;
-      const btn = event.target.closest('.chat-model-option');
-      if (!btn) return;
+      const pin = event.target.closest('[data-model-pin]');
+      if (pin) {
+        event.preventDefault();
+        event.stopPropagation();
+        togglePinnedModel(pin.getAttribute('data-model-pin') || '');
+        return;
+      }
+      const pick = event.target.closest('[data-model-pick]');
+      const row = event.target.closest('.chat-model-option');
+      const value = pick?.getAttribute('data-model-pick')
+        || row?.getAttribute('data-value')
+        || '';
+      if (!value) return;
       event.preventDefault();
       event.stopPropagation();
-      chooseModelOption(btn.getAttribute('data-value') || '');
+      chooseModelOption(value);
     });
     document.addEventListener('click', (event) => {
       if (!modelMenuIsOpen()) return;
