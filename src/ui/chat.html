@@ -12278,7 +12278,10 @@
       const toolLive = stream.timeline.some((part) => part.type === 'tool' && part.live);
       const clarifyLive = stream.timeline.some((part) => part.type === 'clarify' && part.live);
       restoreClarifyHost(answerEl, savedClarifyHost || stream.dom?.clarifyHost);
-      if (toolLive || clarifyLive || thinkingOpen || (streaming && stream.useAgent && !hasVisibleAnswer)) {
+      // Agent turns keep the status chip for the whole stream — including the quiet
+      // gap after a tool finishes and before the next think/answer tokens arrive.
+      const agentStreaming = streaming && !!stream.useAgent;
+      if (toolLive || clarifyLive || thinkingOpen || agentStreaming || (streaming && !cleaned && !hasTimeline)) {
         statusEl.classList.remove('is-hidden');
         thinkingOrb.play();
         if (toolLive) {
@@ -12287,12 +12290,13 @@
           thinkingLabel.textContent = 'Waiting for your answers…';
         } else if (thinkingOpen) {
           thinkingLabel.textContent = 'Reasoning…';
-        } else if (stream.useAgent) {
-          thinkingLabel.textContent = thinkingLabel.textContent || 'Processing…';
+        } else if (agentStreaming) {
+          const label = String(thinkingLabel.textContent || '').trim();
+          // After tools, never leave a blank/stale chip — fall back to Processing.
+          if (!label || label === 'Reading results') {
+            thinkingLabel.textContent = 'Processing…';
+          }
         }
-      } else if (streaming && !cleaned && !hasTimeline) {
-        statusEl.classList.remove('is-hidden');
-        thinkingOrb.play();
       } else if (hasVisibleAnswer || (!streaming && (cleaned || hasTimeline))) {
         statusEl.classList.add('is-hidden');
         // Pause only — stop() is irreversible and a brief think/answer flicker
@@ -12464,7 +12468,7 @@
           if (stream.dom) {
             stream.dom.thinkingLabel.textContent = note
               ? skillLabel(payload.name, last) + ' · ' + note
-              : 'Reading results';
+              : 'Processing…';
           }
         } else if (payload.phase === 'clarify') {
           commitStreamBuffer(stream, typer);
