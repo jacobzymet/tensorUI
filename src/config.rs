@@ -14,6 +14,13 @@ use crate::{providers::ProvidersConfig, store::StorageMode};
 
 pub const DEFAULT_UI_HOST: &str = "127.0.0.1";
 pub const DEFAULT_UI_PORT: u16 = 3930;
+/// Friendly loopback hostname for printed / opened URLs (`*.localhost` → 127.0.0.1 in browsers).
+pub const PUBLIC_UI_HOST: &str = "tensormi.localhost";
+
+/// Browser-facing URL for a bound loopback listener (hostname only; bind IP stays 127.0.0.1/::1).
+pub fn public_ui_url(bind: SocketAddr) -> String {
+    format!("http://{PUBLIC_UI_HOST}:{}", bind.port())
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -331,5 +338,13 @@ mod tests {
         let err = Config::resolve_ui_bind_with_env(None, Some("0.0.0.0:3930".into()), &config)
             .unwrap_err();
         assert!(err.to_string().contains("loopback"));
+    }
+
+    #[test]
+    fn public_ui_url_uses_friendly_localhost_host() {
+        let bind: SocketAddr = "127.0.0.1:3930".parse().unwrap();
+        assert_eq!(public_ui_url(bind), "http://tensormi.localhost:3930");
+        let custom: SocketAddr = "127.0.0.1:4000".parse().unwrap();
+        assert_eq!(public_ui_url(custom), "http://tensormi.localhost:4000");
     }
 }

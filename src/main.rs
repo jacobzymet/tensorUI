@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use tensorui::{app::App, config::Config, system::open_in_browser, web};
+use tensorui::{app::App, config::{self, Config}, system::open_in_browser, web};
 use tokio::net::TcpListener;
 
 #[derive(Debug, Parser)]
@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     let config = Config::load(&config_path)?;
 
     let bind = Config::resolve_ui_bind(cli.bind, &config)?;
-    let url = format!("http://{bind}");
+    let url = config::public_ui_url(bind);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

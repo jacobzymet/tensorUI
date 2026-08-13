@@ -39,7 +39,7 @@ python3 -m venv .venv
 cargo run -- --open
 ```
 
-Default URL: `http://127.0.0.1:3930`
+Default URL: `http://tensormi.localhost:3930`
 
 | Path | Surface |
 | --- | --- |
