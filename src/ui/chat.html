@@ -2122,6 +2122,19 @@
     .msg-queued-label.is-paused {
       color: var(--color-warn);
     }
+    .msg-queued-label.is-steering {
+      color: var(--color-accent, var(--color-warn));
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .msg-queued-label.is-steered {
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .msg-steering .msg-bubble {
+      border-style: dashed;
+      opacity: 0.92;
+    }
     .msg-queued-action {
       border: 0;
       background: transparent;
@@ -7812,6 +7825,11 @@
       btnSend.setAttribute('aria-label', busy ? 'Queue message' : 'Send message');
       updateSendEnabled();
       updateComposerHint();
+      // Steer appears only while an agent reply can accept mid-turn guidance.
+      if (activeId) {
+        const convo = conversations.find((c) => c.id === activeId);
+        if (convo && getOutboundQueue(activeId).length) renderOutboundQueue(convo);
+      }
     }
 
     function getOutboundQueue(convoId) {
@@ -7833,6 +7851,25 @@
       if (activeId === convoId) renderOutboundQueue(conversations.find((c) => c.id === convoId));
     }
 
+    function canSteerLiveStream(stream = activeStream()) {
+      return !!(stream && stream.useAgent);
+    }
+
+    function steerTextFromItem(item) {
+      if (!item) return '';
+      const text = String(item.editText || item.displayText || '').trim();
+      if (text && text !== '(attachment)') return text;
+      if (item.attachments?.length) {
+        const names = item.attachments
+          .map((file) => file.name || 'attachment')
+          .filter(Boolean);
+        return names.length
+          ? 'Please account for the attached file(s): ' + names.join(', ')
+          : '';
+      }
+      return '';
+    }
+
     function findQueuedItem(convoId, queueId) {
       return getOutboundQueue(convoId).find((item) => item.id === queueId) || null;
     }
@@ -7843,7 +7880,7 @@
       return !!(head && head.id === editingQueueId);
     }
 
-    function refreshQueuedBubble(row, item, { paused = false } = {}) {
+    function refreshQueuedBubble(row, item, { paused = false, canSteer = false } = {}) {
       if (!row || !item) return;
       row.dataset.raw = item.editText || item.displayText || '';
       const bubble = row.querySelector('.msg-bubble');
@@ -7858,9 +7895,30 @@
         label.textContent = paused ? 'Paused · editing' : 'Queued';
         label.classList.toggle('is-paused', !!paused);
       }
+      const meta = row.querySelector('.msg-queued-meta');
+      if (meta) {
+        meta.innerHTML = queuedMetaActionsHtml(item.id, { paused, canSteer });
+      }
     }
 
-    function buildQueuedBubble(item, { paused = false } = {}) {
+    function queuedMetaActionsHtml(queueId, { paused = false, canSteer = false } = {}) {
+      const id = escapeHtml(queueId);
+      return (
+        '<span class="msg-queued-label' + (paused ? ' is-paused' : '') + '">' +
+          (paused ? 'Paused · editing' : 'Queued') +
+        '</span>' +
+        (canSteer
+          ? '<button type="button" class="msg-queued-action" data-queue-steer="' + id +
+            '" title="Guide the current reply without stopping it" aria-label="Steer current activity">Steer</button>'
+          : '') +
+        '<button type="button" class="msg-queued-action" data-queue-edit="' + id +
+          '" aria-label="Edit queued message">Edit</button>' +
+        '<button type="button" class="msg-queued-action" data-queue-remove="' + id +
+          '" aria-label="Remove queued message">Remove</button>'
+      );
+    }
+
+    function buildQueuedBubble(item, { paused = false, canSteer = false } = {}) {
       const row = document.createElement('div');
       row.className = 'msg msg-role-user msg-queued';
       row.dataset.queueId = item.id;
@@ -7873,16 +7931,7 @@
       });
       const meta = document.createElement('div');
       meta.className = 'msg-queued-meta';
-      meta.innerHTML =
-        '<span class="msg-queued-label' + (paused ? ' is-paused' : '') + '">' +
-          (paused ? 'Paused · editing' : 'Queued') +
-        '</span>' +
-        '<button type="button" class="msg-queued-action" data-queue-edit="' +
-          escapeHtml(item.id) +
-          '" aria-label="Edit queued message">Edit</button>' +
-        '<button type="button" class="msg-queued-action" data-queue-remove="' +
-          escapeHtml(item.id) +
-          '" aria-label="Remove queued message">Remove</button>';
+      meta.innerHTML = queuedMetaActionsHtml(item.id, { paused, canSteer });
       row.appendChild(bubble);
       row.appendChild(meta);
       return row;
@@ -7897,23 +7946,26 @@
         ? editingRow
         : null;
       const keepId = keepEditing?.dataset.queueId || null;
-      chatThread.querySelectorAll('.msg-queued').forEach((el) => {
+      chatThread.querySelectorAll('.msg-queued:not(.msg-steering)').forEach((el) => {
         if (keepId && el.dataset.queueId === keepId) return;
         el.remove();
       });
       if (!convo || activeId !== convo.id) return;
       const queue = getOutboundQueue(convo.id);
       const pausedHead = isQueuePausedForEdit(convo.id);
+      const canSteer = canSteerLiveStream() && !pausedHead;
       for (const item of queue) {
         if (keepId && item.id === keepId) {
           refreshQueuedBubble(keepEditing, item, {
             paused: pausedHead && item.id === editingQueueId,
+            canSteer: canSteer && item.id !== editingQueueId,
           });
           chatThread.appendChild(keepEditing);
           continue;
         }
         chatThread.appendChild(buildQueuedBubble(item, {
           paused: pausedHead && item.id === editingQueueId,
+          canSteer,
         }));
       }
     }
@@ -7922,7 +7974,8 @@
       getOutboundQueue(convo.id).push(item);
       if (activeId === convo.id) {
         showThread(convo);
-        const row = buildQueuedBubble(item);
+        const canSteer = canSteerLiveStream() && !isQueuePausedForEdit(convo.id);
+        const row = buildQueuedBubble(item, { canSteer });
         chatThread.appendChild(row);
         queueMicrotask(() => motionEnter(row, { y: 10 }));
         scrollToBottom({ force: true });
@@ -7950,6 +8003,209 @@
       }
       updateComposerHint();
       maybeSendNextQueued(convoId);
+    }
+
+    /**
+     * Mid-turn steer (Copilot/Claude pattern): keep the live agent turn running and
+     * inject this message before the next LLM call (usually after the current tool
+     * round). Does not abort. If the turn ends first, the message is re-queued.
+     */
+    function steerQueuedOutbound(convoId, queueId) {
+      if (!convoId || !queueId) return;
+      const stream = activeStreams.get(convoId);
+      if (!canSteerLiveStream(stream)) {
+        showAttachHint('Steer is available while an agent reply is in progress.');
+        return;
+      }
+      const queue = getOutboundQueue(convoId);
+      const idx = queue.findIndex((item) => item.id === queueId);
+      if (idx < 0) return;
+      const [item] = queue.splice(idx, 1);
+      outboundQueues.set(convoId, queue);
+      if (editingQueueId === queueId) {
+        if (editingRow?.dataset.queueId === queueId) {
+          cancelMessageEdit({ resumeQueue: false });
+        } else {
+          editingQueueId = null;
+        }
+      }
+      if (activeId === convoId) {
+        const row = [...chatThread.querySelectorAll('.msg-queued')]
+          .find((el) => el.dataset.queueId === queueId);
+        if (row) row.remove();
+        const convo = conversations.find((c) => c.id === convoId);
+        if (convo) renderOutboundQueue(convo);
+      }
+      updateComposerHint();
+      const text = steerTextFromItem(item);
+      if (!text) {
+        queue.unshift(item);
+        outboundQueues.set(convoId, queue);
+        if (activeId === convoId) {
+          const convo = conversations.find((c) => c.id === convoId);
+          if (convo) renderOutboundQueue(convo);
+        }
+        showAttachHint('Nothing to steer with — add text first.');
+        updateComposerHint();
+        return;
+      }
+      if (!stream.pendingSteers) stream.pendingSteers = [];
+      const entry = { item, text, posted: false, applied: false };
+      stream.pendingSteers.push(entry);
+      renderPendingSteerBubble(convoId, entry);
+      void flushPendingSteers(stream);
+    }
+
+    function renderPendingSteerBubble(convoId, entry) {
+      if (activeId !== convoId || !chatThread || !entry?.item) return;
+      const existing = chatThread.querySelector(
+        '.msg-steering[data-steer-queue-id="' + CSS.escape(entry.item.id) + '"]'
+      );
+      if (existing) return;
+      const row = document.createElement('div');
+      row.className = 'msg msg-role-user msg-queued msg-steering';
+      row.dataset.steerQueueId = entry.item.id;
+      row.dataset.raw = entry.text;
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+      bubble.innerHTML = formatUserMessageHtml({
+        content: entry.item.displayText || entry.text,
+        attachments: entry.item.attachments,
+      });
+      const meta = document.createElement('div');
+      meta.className = 'msg-queued-meta';
+      meta.innerHTML =
+        '<span class="msg-queued-label is-steering">Steering…</span>' +
+        '<button type="button" class="msg-queued-action" data-steer-cancel="' +
+          escapeHtml(entry.item.id) +
+          '" aria-label="Cancel steer">Cancel</button>';
+      row.appendChild(bubble);
+      row.appendChild(meta);
+      const stream = activeStreams.get(convoId);
+      const streamRow = stream?.dom?.row;
+      if (streamRow && streamRow.parentNode === chatThread) {
+        chatThread.insertBefore(row, streamRow);
+      } else {
+        chatThread.appendChild(row);
+      }
+      queueMicrotask(() => motionEnter(row, { y: 8 }));
+      scrollToBottom({ force: true });
+    }
+
+    async function postSteerToAgent(stream, entry) {
+      const response = await fetch('/api/chat/steer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: stream.steerId,
+          text: entry.text,
+          client_id: entry.item?.id || undefined,
+        }),
+      });
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null);
+        throw new Error((problem && problem.error) || 'Could not steer this turn');
+      }
+    }
+
+    async function flushPendingSteers(stream) {
+      if (!stream?.steerId || !Array.isArray(stream.pendingSteers)) return;
+      for (const entry of stream.pendingSteers) {
+        if (entry.posted || entry.applied) continue;
+        try {
+          await postSteerToAgent(stream, entry);
+          entry.posted = true;
+        } catch (error) {
+          entry.posted = false;
+          showAttachHint(error?.message || 'Could not steer this turn');
+        }
+      }
+    }
+
+    function cancelPendingSteer(convoId, queueId) {
+      const stream = activeStreams.get(convoId);
+      if (!stream?.pendingSteers) return;
+      const idx = stream.pendingSteers.findIndex((entry) => entry.item?.id === queueId);
+      if (idx < 0) return;
+      const [entry] = stream.pendingSteers.splice(idx, 1);
+      if (activeId === convoId) {
+        const row = chatThread.querySelector(
+          '.msg-steering[data-steer-queue-id="' + CSS.escape(queueId) + '"]'
+        );
+        if (row) row.remove();
+      }
+      if (entry?.item && !entry.applied) {
+        getOutboundQueue(convoId).unshift(entry.item);
+        const convo = conversations.find((c) => c.id === convoId);
+        if (convo && activeId === convoId) renderOutboundQueue(convo);
+      }
+      updateComposerHint();
+    }
+
+    function applySteeredEntry(convo, stream, text, entry) {
+      const content = String(text || entry?.text || '').trim();
+      if (!content) return;
+      if (entry) entry.applied = true;
+      const userMessage = {
+        role: 'user',
+        content: entry?.item?.displayText || content,
+        steered: true,
+      };
+      if (entry?.item?.attachments?.length) {
+        userMessage.attachments = entry.item.attachments;
+      }
+      convo.messages.push(userMessage);
+      convo.updatedAt = Date.now();
+      saveConversations();
+      if (stream.dom?.row) {
+        // Placeholder index for the in-flight assistant after mid-turn inserts.
+        stream.dom.row.dataset.msgIndex = String(convo.messages.length);
+        if (activeId === convo.id) {
+          selectTraceMessage(convo.messages.length, { animate: false, ensureOpen: false });
+        }
+      }
+      if (stream.timeline) {
+        stream.timeline.push({
+          type: 'notice',
+          content: 'Steered: ' + content,
+          tone: 'ok',
+          kind: 'steer',
+        });
+      }
+      if (activeId === convo.id) {
+        const pendingRow = entry?.item?.id
+          ? chatThread.querySelector(
+            '.msg-steering[data-steer-queue-id="' + CSS.escape(entry.item.id) + '"]'
+          )
+          : null;
+        const idx = convo.messages.length - 1;
+        const row = buildBubble('user', userMessage.content, idx, userMessage, { animate: true });
+        const streamRow = stream.dom?.row;
+        if (pendingRow) {
+          pendingRow.replaceWith(row);
+        } else if (streamRow && streamRow.parentNode === chatThread) {
+          chatThread.insertBefore(row, streamRow);
+        } else {
+          chatThread.appendChild(row);
+        }
+      }
+    }
+
+    function reclaimUnappliedSteers(convoId, stream) {
+      const pending = stream?.pendingSteers;
+      if (!pending?.length) return;
+      const queue = getOutboundQueue(convoId);
+      for (let i = pending.length - 1; i >= 0; i -= 1) {
+        const entry = pending[i];
+        if (entry.applied || !entry.item) continue;
+        queue.unshift(entry.item);
+      }
+      stream.pendingSteers = [];
+      if (activeId === convoId) {
+        chatThread.querySelectorAll('.msg-steering').forEach((el) => el.remove());
+        const convo = conversations.find((c) => c.id === convoId);
+        if (convo) renderOutboundQueue(convo);
+      }
     }
 
     function beginQueuedMessageEdit(row) {
@@ -9170,6 +9426,16 @@
       }, 0);
     }
 
+    function isDeferredMemoryNotice(part) {
+      // Memory notices are stamped at turn end; steer notices must stay in-sequence.
+      if (!part || part.type !== 'notice') return false;
+      if (part.kind === 'steer') return false;
+      if (part.kind === 'memory') return true;
+      // Legacy saves: tone:ok without kind, excluding old "Steered:" rows.
+      if (part.tone === 'ok' && !/^steered:/i.test(String(part.content || '').trim())) return true;
+      return false;
+    }
+
     function collectTimelineAndAnswer(message) {
       const timelineParts = [];
       const deferredNotices = [];
@@ -9183,8 +9449,7 @@
       const { processNotes, answerChunks } = splitSealedTextParts(message?.parts);
       for (const part of message?.parts || []) {
         if (!part) continue;
-        // Memory notices are recorded at turn end — keep them after reasoning/tools.
-        if (part.type === 'notice' && part.tone === 'ok') {
+        if (isDeferredMemoryNotice(part)) {
           deferredNotices.push(part);
           continue;
         }
@@ -9359,11 +9624,12 @@
       let stepCount = 0;
       if (live && Array.isArray(message.parts)) {
         // Memory notices land on the timeline at turn end; keep them after live reasoning.
+        // Steer notices stay in chronological order.
         const earlyParts = [];
         const deferredNotices = [];
         for (const part of message.parts) {
           if (!part) continue;
-          if (part.type === 'notice' && part.tone === 'ok') deferredNotices.push(part);
+          if (isDeferredMemoryNotice(part)) deferredNotices.push(part);
           else earlyParts.push(part);
         }
         timelineHtml = renderCommittedParts(earlyParts, { forceOpenThinking: true });
@@ -9390,7 +9656,7 @@
       }
       if (title) {
         title.textContent = live
-          ? 'Activity · live'
+          ? 'Live Activity'
           : (stepCount ? ('Activity · ' + stepCount) : 'Activity');
       }
       if (!timelineHtml.trim()) {
@@ -10005,9 +10271,15 @@
         }
         const busy = isConvoBusy(activeId);
         composerHint.textContent = queueLen === 1
-          ? (busy ? '1 message queued · sends when this reply finishes' : '1 message queued')
+          ? (busy
+            ? (canSteerLiveStream()
+              ? '1 message queued · Steer to guide live activity, or waits until this reply finishes'
+              : '1 message queued · sends when this reply finishes')
+            : '1 message queued')
           : (busy
-            ? queueLen + ' messages queued · sending in order'
+            ? (canSteerLiveStream()
+              ? queueLen + ' messages queued · Steer one to guide live activity, or they send in order'
+              : queueLen + ' messages queued · sending in order')
             : queueLen + ' messages queued');
         return;
       }
@@ -11148,6 +11420,12 @@
         bubble.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
       } else {
         bubble.innerHTML = formatUserMessageHtml(message || { content });
+        if (message?.steered) {
+          const meta = document.createElement('div');
+          meta.className = 'msg-queued-meta';
+          meta.innerHTML = '<span class="msg-queued-label is-steered">Steered</span>';
+          row.appendChild(meta);
+        }
       }
       attachMessageActions(row);
       if (role === 'assistant') {
@@ -11155,6 +11433,26 @@
       }
       if (animate) queueMicrotask(() => motionEnter(row, { y: role === 'user' ? 10 : 14 }));
       return row;
+    }
+
+    function reattachLiveStream(convo) {
+      if (!convo || activeId !== convo.id) return null;
+      const stream = activeStreams.get(convo.id);
+      if (!stream) return null;
+      stream.dom = null;
+      paintStreamIntoView(convo, stream, stream.partial || '', true);
+      for (const entry of stream.pendingSteers || []) {
+        if (entry?.applied) continue;
+        renderPendingSteerBubble(convo.id, entry);
+      }
+      if (stream.dom?.row) {
+        stream.dom.row.dataset.msgIndex = String(convo.messages.length);
+        selectTraceMessage(Number(stream.dom.row.dataset.msgIndex), {
+          animate: false,
+          ensureOpen: false,
+        });
+      }
+      return stream;
     }
 
     function renderThread(convo) {
@@ -11168,6 +11466,11 @@
         chatThread.appendChild(buildBubble(message.role, message.content, index, message));
       });
       renderOutboundQueue(convo);
+      if (reattachLiveStream(convo)) {
+        scrollToBottom({ force: stickToBottom });
+        maybeSendNextQueued(convo.id);
+        return;
+      }
       let pick = null;
       for (let i = convo.messages.length - 1; i >= 0; i -= 1) {
         if (convo.messages[i]?.role === 'assistant') {
@@ -11268,16 +11571,6 @@
       showThread(convo);
       renderThread(convo);
       if (previousId && previousId !== id) maybeSendNextQueued(previousId);
-      const stream = activeStreams.get(id);
-      if (stream) {
-        // Reattach live streaming UI for this conversation.
-        stream.dom = null;
-        paintStreamIntoView(convo, stream, stream.partial || '', true);
-        selectTraceMessage(Number(stream.dom?.row?.dataset?.msgIndex), {
-          animate: false,
-          ensureOpen: false,
-        });
-      }
       syncComposerStreamUi();
       syncUrlFromState();
       closeMobileSidebar();
@@ -12367,6 +12660,8 @@
         timeline: [],
         errorMessage: null,
         dom: null,
+        steerId: null,
+        pendingSteers: [],
       };
       activeStreams.set(convo.id, stream);
       renderSidebar();
@@ -12498,6 +12793,30 @@
             mountClarifyForm(stream, part);
           }
           if (stream.dom) stream.dom.thinkingLabel.textContent = 'Researching…';
+        } else if (payload.phase === 'steer_ready' && payload.id) {
+          stream.steerId = String(payload.id);
+          void flushPendingSteers(stream);
+          if (activeId === convo.id) renderOutboundQueue(convo);
+        } else if (payload.phase === 'steer' && payload.content != null) {
+          const text = String(payload.content).trim();
+          const clientId = payload.client_id != null ? String(payload.client_id) : '';
+          const pending = stream.pendingSteers || [];
+          let entryIdx = -1;
+          if (clientId) {
+            entryIdx = pending.findIndex(
+              (entry) => !entry.applied && entry.item?.id === clientId
+            );
+          }
+          if (entryIdx < 0) {
+            entryIdx = pending.findIndex((entry) => entry.text === text && !entry.applied);
+          }
+          if (entryIdx < 0) {
+            entryIdx = pending.findIndex((entry) => !entry.applied);
+          }
+          const entry = entryIdx >= 0 ? pending.splice(entryIdx, 1)[0] : null;
+          if (entry) entry.applied = true;
+          applySteeredEntry(convo, stream, text, entry);
+          if (stream.dom) stream.dom.thinkingLabel.textContent = 'Steering…';
         } else if (payload.phase === 'status' && payload.message) {
           if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
         } else if (payload.phase === 'notice' && payload.message) {
@@ -12624,6 +12943,7 @@
       if (!conversations.some((item) => item.id === convo.id)) {
         if (stream.dom?.thinkingOrb) stream.dom.thinkingOrb.stop();
         activeStreams.delete(convo.id);
+        reclaimUnappliedSteers(convo.id, stream);
         renderSidebar();
         syncComposerStreamUi();
         return;
@@ -12631,11 +12951,8 @@
       const extracted = collectTurnMemoryExtraction(stream, typer.target);
       const memoryChanges = applyExtractedMemories(convo, extracted);
       const memoryNotices = memoryNoticeLabels(memoryChanges);
-      for (const label of memoryNotices) {
-        if (!stream.timeline.some((part) => part.type === 'notice' && part.content === label)) {
-          stream.timeline.push({ type: 'notice', content: label, tone: 'ok' });
-        }
-      }
+      // Memory chips live on the message; do not also push tone:ok notices into the
+      // timeline (those were deferred to the bottom and duplicated the chips).
       let assistantText = extracted.cleaned;
       if (!assistantText && !stream.errorMessage) {
         assistantText = memoryOnlyAssistantFallback(extracted);
@@ -12678,6 +12995,7 @@
                 type: 'notice',
                 content: part.content,
                 ...(part.tone ? { tone: part.tone } : {}),
+                ...(part.kind ? { kind: part.kind } : {}),
               }
               : { type: part.type, content: part.content }
         ))
@@ -12768,6 +13086,7 @@
       }
 
       activeStreams.delete(convo.id);
+      reclaimUnappliedSteers(convo.id, stream);
       renderSidebar();
       syncComposerStreamUi();
       // After the first reply finishes — local servers often reject concurrent
@@ -12786,6 +13105,20 @@
     }
 
     chatThread.addEventListener('click', (event) => {
+      const queueSteer = event.target.closest('[data-queue-steer]');
+      if (queueSteer && chatThread.contains(queueSteer)) {
+        event.preventDefault();
+        const queueId = queueSteer.getAttribute('data-queue-steer');
+        if (activeId && queueId) steerQueuedOutbound(activeId, queueId);
+        return;
+      }
+      const steerCancel = event.target.closest('[data-steer-cancel]');
+      if (steerCancel && chatThread.contains(steerCancel)) {
+        event.preventDefault();
+        const queueId = steerCancel.getAttribute('data-steer-cancel');
+        if (activeId && queueId) cancelPendingSteer(activeId, queueId);
+        return;
+      }
       const queueRemove = event.target.closest('[data-queue-remove]');
       if (queueRemove && chatThread.contains(queueRemove)) {
         event.preventDefault();
@@ -13040,8 +13373,10 @@
       if (convo && !threadWrap.classList.contains('is-hidden')) {
         // Re-render so bubbles pick the desktop/mobile activity layout.
         const keep = selectedTraceMsgIndex;
+        const wasLive = activeStreams.has(convo.id);
         renderThread(convo);
-        if (keep != null) selectTraceMessage(keep, { animate: false });
+        // Live reattach already reselects the in-flight row.
+        if (!wasLive && keep != null) selectTraceMessage(keep, { animate: false });
       } else {
         refreshTraceSidebar({ animate: false });
       }

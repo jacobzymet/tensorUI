@@ -42,10 +42,24 @@ const MAX_EMPTY_RETRIES: usize = 2;
 /// Extra nudges once research already has sources and only the write-up is missing.
 const MAX_ANSWER_RETRIES: usize = 4;
 const CLARIFY_WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// Prefix for mid-turn user guidance injected between tool rounds.
+const STEER_MARKER: &str = "[USER STEER]";
 
 fn clarify_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<Value>>> {
     static WAITERS: OnceLock<Mutex<HashMap<String, oneshot::Sender<Value>>>> = OnceLock::new();
     WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn steer_sessions() -> &'static Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>> {
+    static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>>> =
+        OnceLock::new();
+    SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Debug, Clone)]
+struct SteerPayload {
+    text: String,
+    client_id: Option<String>,
 }
 
 pub fn submit_clarify_answers(id: &str, answers: Value) -> Result<(), String> {
@@ -63,6 +77,37 @@ pub fn submit_clarify_answers(id: &str, answers: Value) -> Result<(), String> {
         .map_err(|_| "Research turn is no longer waiting for answers.".to_string())
 }
 
+/// Queue mid-turn guidance for an active agent run. Injected before the next
+/// LLM call (typically after the current tool round finishes)—does not abort.
+pub fn submit_steer(id: &str, text: &str, client_id: Option<&str>) -> Result<(), String> {
+    let id = id.trim();
+    let text = text.trim();
+    if id.is_empty() {
+        return Err("steer id is required".into());
+    }
+    if text.is_empty() {
+        return Err("steer text is required".into());
+    }
+    let sender = steer_sessions()
+        .lock()
+        .map_err(|_| "steer sessions lock poisoned".to_string())?
+        .get(id)
+        .cloned()
+        .ok_or_else(|| {
+            "No active agent turn for that id (it may have finished).".to_string()
+        })?;
+    let client_id = client_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    sender
+        .send(SteerPayload {
+            text: text.to_string(),
+            client_id,
+        })
+        .map_err(|_| "Agent turn is no longer accepting steering.".to_string())
+}
+
 struct ClarifyWaitGuard {
     id: String,
 }
@@ -72,6 +117,54 @@ impl Drop for ClarifyWaitGuard {
         if let Ok(mut map) = clarify_waiters().lock() {
             map.remove(&self.id);
         }
+    }
+}
+
+struct SteerSessionGuard {
+    id: String,
+}
+
+impl Drop for SteerSessionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = steer_sessions().lock() {
+            map.remove(&self.id);
+        }
+    }
+}
+
+fn new_steer_id() -> String {
+    let mut bytes = [0u8; 6];
+    let _ = getrandom::fill(&mut bytes);
+    format!(
+        "steer_{}",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
+}
+
+fn drain_steers(rx: &mut mpsc::UnboundedReceiver<SteerPayload>) -> Vec<SteerPayload> {
+    let mut out = Vec::new();
+    while let Ok(payload) = rx.try_recv() {
+        let trimmed = payload.text.trim().to_string();
+        if !trimmed.is_empty() {
+            out.push(SteerPayload {
+                text: trimmed,
+                client_id: payload.client_id,
+            });
+        }
+    }
+    out
+}
+
+fn format_steer_content(text: &str) -> String {
+    format!("{STEER_MARKER}\n{}", text.trim())
+}
+
+fn append_steer_messages(messages: &mut Vec<Value>, steers: &[SteerPayload]) {
+    for payload in steers {
+        messages.push(json!({
+            "role": "user",
+            "content": format_steer_content(&payload.text),
+        }));
     }
 }
 const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
@@ -467,6 +560,26 @@ async fn run_agent_loop(
     )
     .await?;
 
+    let steer_id = new_steer_id();
+    let (steer_tx, mut steer_rx) = mpsc::unbounded_channel();
+    {
+        let mut map = steer_sessions()
+            .lock()
+            .map_err(|_| StreamFail::Other("steer sessions lock poisoned".into()))?;
+        map.insert(steer_id.clone(), steer_tx);
+    }
+    let _steer_guard = SteerSessionGuard {
+        id: steer_id.clone(),
+    };
+    send_sse(
+        tx,
+        sse_agent(json!({
+            "phase": "steer_ready",
+            "id": steer_id,
+        })),
+    )
+    .await?;
+
     let mut tool_rounds = 0usize;
     let mut empty_retries = 0usize;
     let mut force_retries = 0usize;
@@ -477,6 +590,32 @@ async fn run_agent_loop(
     let search_cap = deep_research_search_cap(request.deep_research_output);
 
     loop {
+        let steers = drain_steers(&mut steer_rx);
+        if !steers.is_empty() {
+            append_steer_messages(&mut request.messages, &steers);
+            for payload in &steers {
+                let mut event = json!({
+                    "phase": "steer",
+                    "content": payload.text,
+                });
+                if let Some(client_id) = &payload.client_id {
+                    event["client_id"] = json!(client_id);
+                }
+                send_sse(tx, sse_agent(event)).await?;
+            }
+            send_sse(
+                tx,
+                sse_agent(json!({
+                    "phase": "status",
+                    "message": if steers.len() == 1 {
+                        "Steering…".to_string()
+                    } else {
+                        format!("Steering ({} notes)…", steers.len())
+                    },
+                })),
+            )
+            .await?;
+        }
         let force_final = request.deep_research
             && deep_searches > 0
             && (deep_searches >= search_cap || empty_retries > 0);
@@ -974,6 +1113,7 @@ fn agent_system_block(
         })
         .to_string(),
         trim_prompt(agent::CORE).to_string(),
+        trim_prompt(agent::STEER).to_string(),
     ];
     if !force_tools.is_empty() {
         lines.push(fill(

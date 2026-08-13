@@ -46,6 +46,7 @@ pub mod agent {
     pub const INTRO_DEEP_RESEARCH: &str =
         include_str!("../../prompts/agent/intro-deep-research.md");
     pub const CORE: &str = include_str!("../../prompts/agent/core.md");
+    pub const STEER: &str = include_str!("../../prompts/agent/steer.md");
     pub const REQUIRED_TOOLS: &str = include_str!("../../prompts/agent/required-tools.md");
     pub const POLICY_DEEP_RESEARCH: &str =
         include_str!("../../prompts/agent/policy-deep-research.md");

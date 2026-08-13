@@ -112,6 +112,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
     let api = Router::new()
         .route("/api/chat/completions", post(chat_completions))
         .route("/api/chat/clarify", post(chat_clarify))
+        .route("/api/chat/steer", post(chat_steer))
         .route("/api/chat/title", post(chat_title))
         .route("/api/state", get(state))
         .route("/api/ui/theme", post(set_ui_theme))
@@ -490,6 +491,20 @@ async fn chat_clarify(
     Json(body): Json<ClarifyAnswersBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent::submit_clarify_answers(&body.id, body.answers).map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SteerBody {
+    id: String,
+    text: String,
+    #[serde(default)]
+    client_id: Option<String>,
+}
+
+async fn chat_steer(Json(body): Json<SteerBody>) -> Result<Json<serde_json::Value>, ApiError> {
+    agent::submit_steer(&body.id, &body.text, body.client_id.as_deref())
+        .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
