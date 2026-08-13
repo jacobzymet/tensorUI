@@ -640,6 +640,25 @@
       height: 0.85rem;
     }
     .topbar-incognito-pill.is-hidden { display: none; }
+    .chat-shell.is-incognito .msg-role-user .msg-bubble,
+    .chat-shell.is-incognito .msg-edit,
+    .chat-shell.is-incognito .composer-card {
+      background: transparent !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      border: 3px dashed color-mix(in oklch, var(--accent-edge) 82%, transparent);
+    }
+    .chat-shell.is-incognito .composer-card {
+      border-color: color-mix(in oklch, var(--color-rule-2) 88%, transparent);
+    }
+    .chat-shell.is-incognito .composer-card:focus-within,
+    .chat-shell.is-incognito .composer-card.is-dragover {
+      background: transparent !important;
+      box-shadow: none !important;
+      border-style: dashed;
+      border-width: 3px;
+      border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-rule-2));
+    }
     .sidebar-nav {
       flex: 1 1 auto;
       min-height: 0;

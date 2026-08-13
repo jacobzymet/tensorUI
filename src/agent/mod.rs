@@ -93,9 +93,7 @@ pub fn submit_steer(id: &str, text: &str, client_id: Option<&str>) -> Result<(),
         .map_err(|_| "steer sessions lock poisoned".to_string())?
         .get(id)
         .cloned()
-        .ok_or_else(|| {
-            "No active agent turn for that id (it may have finished).".to_string()
-        })?;
+        .ok_or_else(|| "No active agent turn for that id (it may have finished).".to_string())?;
     let client_id = client_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
