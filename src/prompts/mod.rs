@@ -150,10 +150,7 @@ mod tests {
 
     #[test]
     fn fill_replaces_placeholders() {
-        assert_eq!(
-            fill("Hello {{name}}!", &[("name", "Ada")]),
-            "Hello Ada!"
-        );
+        assert_eq!(fill("Hello {{name}}!", &[("name", "Ada")]), "Hello Ada!");
     }
 
     #[test]

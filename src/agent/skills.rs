@@ -377,10 +377,8 @@ pub fn user_skills_catalog_block(skills: &[UserSkill]) -> String {
     if skills.is_empty() {
         return String::new();
     }
-    let mut lines = vec![crate::prompts::trim_prompt(
-        crate::prompts::agent::SKILLS_CATALOG_INTRO,
-    )
-    .to_string()];
+    let mut lines =
+        vec![crate::prompts::trim_prompt(crate::prompts::agent::SKILLS_CATALOG_INTRO).to_string()];
     for skill in skills {
         lines.push(skill.catalog_line());
     }

@@ -755,7 +755,9 @@ struct StartLocalLlmBody {
     threads: Option<u32>,
 }
 
-async fn local_llms_status(State(app): State<SharedApp>) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
+async fn local_llms_status(
+    State(app): State<SharedApp>,
+) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
     let mut app = app.lock().map_err(|_| ApiError::lock())?;
     let install = crate::local_llm::detect_llama_server();
     let running = app.local_llm.status();

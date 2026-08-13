@@ -119,7 +119,11 @@ pub fn list_cached_models() -> Result<Vec<CachedModel>, String> {
         b.modified_at
             .unwrap_or(0)
             .cmp(&a.modified_at.unwrap_or(0))
-            .then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
+            .then_with(|| {
+                a.name
+                    .to_ascii_lowercase()
+                    .cmp(&b.name.to_ascii_lowercase())
+            })
     });
     Ok(out)
 }
@@ -156,14 +160,9 @@ pub fn start_local_llm(
         .filter(|n| *n > 0)
         .unwrap_or_else(default_threads);
 
-    let (model_label, model_args) = resolve_model_args(req.hf.as_deref(), req.model_path.as_deref())?;
-    let args = build_args(
-        &model_args,
-        &host,
-        port,
-        threads,
-        req.mmap,
-    );
+    let (model_label, model_args) =
+        resolve_model_args(req.hf.as_deref(), req.model_path.as_deref())?;
+    let args = build_args(&model_args, &host, port, threads, req.mmap);
     let command = format_command(&bin, &args);
 
     let mut child = Command::new(&bin)
@@ -231,9 +230,9 @@ fn resolve_model_args(
                 .to_string();
             Ok((label, vec!["-m".into(), p.display().to_string()]))
         }
-        (None, None) => Err(
-            "Provide a Hugging Face model (org/repo:quant) or choose a cached GGUF.".into(),
-        ),
+        (None, None) => {
+            Err("Provide a Hugging Face model (org/repo:quant) or choose a cached GGUF.".into())
+        }
     }
 }
 
@@ -264,9 +263,9 @@ pub fn normalize_hf_id(raw: &str) -> Result<String, String> {
     };
     let parts: Vec<_> = repo.split('/').filter(|p| !p.is_empty()).collect();
     if parts.len() != 2
-        || parts.iter().any(|p| {
-            p.contains([' ', '\\', '\t', '\n']) || *p == "." || *p == ".."
-        })
+        || parts
+            .iter()
+            .any(|p| p.contains([' ', '\\', '\t', '\n']) || *p == "." || *p == "..")
     {
         return Err(
             "Use Hugging Face form org/repo or org/repo:QUANT (example: ggml-org/gpt-oss-120b-GGUF:Q4_K_M)."
@@ -331,15 +330,9 @@ fn build_args(
         );
     } else {
         args.extend(
-            [
-                "--ctx-size",
-                "8192",
-                "--jinja",
-                "--flash-attn",
-                "on",
-            ]
-            .into_iter()
-            .map(str::to_string),
+            ["--ctx-size", "8192", "--jinja", "--flash-attn", "on"]
+                .into_iter()
+                .map(str::to_string),
         );
     }
     args.extend([
@@ -522,12 +515,12 @@ pub fn llama_cache_dir() -> Result<PathBuf, String> {
     {
         let local = env::var("LOCALAPPDATA")
             .map_err(|_| "LOCALAPPDATA is not set; cannot locate llama.cpp cache.".to_string())?;
-        return Ok(PathBuf::from(local).join("llama.cpp"));
+        Ok(PathBuf::from(local).join("llama.cpp"))
     }
     #[cfg(target_os = "macos")]
     {
         let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-        return Ok(PathBuf::from(home).join("Library/Caches/llama.cpp"));
+        Ok(PathBuf::from(home).join("Library/Caches/llama.cpp"))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -535,7 +528,7 @@ pub fn llama_cache_dir() -> Result<PathBuf, String> {
             return Ok(PathBuf::from(xdg).join("llama.cpp"));
         }
         let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-        return Ok(PathBuf::from(home).join(".cache/llama.cpp"));
+        Ok(PathBuf::from(home).join(".cache/llama.cpp"))
     }
     #[cfg(not(any(windows, unix)))]
     {
@@ -552,7 +545,8 @@ fn collect_gguf(
     if depth > 6 || out.len() >= 200 {
         return Ok(());
     }
-    let entries = fs::read_dir(dir).map_err(|error| format!("Could not read {}: {error}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|error| format!("Could not read {}: {error}", dir.display()))?;
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(file_type) = entry.file_type() else {
@@ -662,8 +656,14 @@ mod tests {
         );
         assert!(args.iter().any(|a| a == "--mmap"));
         assert!(args.iter().any(|a| a == "--no-repack"));
-        assert!(args.windows(2).any(|w| w[0] == "--device" && w[1] == "none"));
-        assert!(args.windows(2).any(|w| w[0] == "--n-gpu-layers" && w[1] == "0"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--device" && w[1] == "none")
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--n-gpu-layers" && w[1] == "0")
+        );
         assert!(args.windows(2).any(|w| w[0] == "--threads" && w[1] == "14"));
     }
 
