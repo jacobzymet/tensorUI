@@ -169,7 +169,9 @@ const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const DEFAULT_SEARCH_RESULTS: usize = 6;
 const MAX_SEARCH_RESULTS: usize = 20;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
-const FETCH_URL_MAX_CHARS: usize = 8_000;
+const DEFAULT_FETCH_URL_MAX_CHARS: usize = 8_000;
+const MIN_PAGE_FETCH_CHARS: usize = 1_000;
+const MAX_PAGE_FETCH_CHARS: usize = 200_000;
 const DDGS_TIMEOUT: Duration = Duration::from_secs(45);
 /// Retry flaky DDGS calls before handing a soft failure back to the model.
 const DDGS_ATTEMPTS: usize = 3;
@@ -341,6 +343,14 @@ fn default_web_search_region() -> String {
     "us-en".to_string()
 }
 
+fn default_fetch_url_max_chars() -> usize {
+    DEFAULT_FETCH_URL_MAX_CHARS
+}
+
+fn clamp_page_fetch_chars(value: usize) -> usize {
+    value.clamp(MIN_PAGE_FETCH_CHARS, MAX_PAGE_FETCH_CHARS)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentSkills {
     #[serde(default)]
@@ -357,8 +367,13 @@ pub struct AgentSkills {
     pub web_search_safesearch: WebSearchSafeSearch,
     #[serde(default)]
     pub web_search_recency: WebSearchRecency,
+    /// When non-zero, overrides per-depth search page scrape character caps.
+    #[serde(default)]
+    pub web_search_page_max_chars: usize,
     #[serde(default)]
     pub fetch_url: bool,
+    #[serde(default = "default_fetch_url_max_chars")]
+    pub fetch_url_max_chars: usize,
 }
 
 impl Default for AgentSkills {
@@ -371,7 +386,9 @@ impl Default for AgentSkills {
             web_search_region: default_web_search_region(),
             web_search_safesearch: WebSearchSafeSearch::default(),
             web_search_recency: WebSearchRecency::default(),
+            web_search_page_max_chars: 0,
             fetch_url: false,
+            fetch_url_max_chars: default_fetch_url_max_chars(),
         }
     }
 }
@@ -379,6 +396,25 @@ impl Default for AgentSkills {
 impl AgentSkills {
     pub fn any_enabled(&self) -> bool {
         self.web_search || self.fetch_url
+    }
+
+    fn fetch_url_char_limit(&self) -> usize {
+        clamp_page_fetch_chars(if self.fetch_url_max_chars == 0 {
+            DEFAULT_FETCH_URL_MAX_CHARS
+        } else {
+            self.fetch_url_max_chars
+        })
+    }
+
+    fn search_scrape_plan(&self) -> Option<(usize, usize)> {
+        self.web_search_depth.scrape_plan().map(|(pages, preset)| {
+            let chars = if self.web_search_page_max_chars == 0 {
+                preset
+            } else {
+                clamp_page_fetch_chars(self.web_search_page_max_chars)
+            };
+            (pages, chars)
+        })
     }
 
     fn search_result_count(&self) -> usize {
@@ -1125,7 +1161,7 @@ fn agent_system_block(
     }
     if skills.web_search {
         let depth = skills.web_search_depth;
-        let depth_note = match depth.scrape_plan() {
+        let depth_note = match skills.search_scrape_plan() {
             None => trim_prompt(agent::WEB_SEARCH_DEPTH_OFF).to_string(),
             Some((pages, chars)) => {
                 let pages = pages.to_string();
@@ -1164,7 +1200,7 @@ fn agent_system_block(
         lines.push(web_line);
     }
     if skills.fetch_url {
-        let max_chars = FETCH_URL_MAX_CHARS.to_string();
+        let max_chars = skills.fetch_url_char_limit().to_string();
         let mut fetch_line = fill(agent::FETCH_URL, &[("max_chars", &max_chars)]);
         fetch_line.push(' ');
         if skills.web_search {
@@ -2135,7 +2171,7 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "fetch_url requires a non-empty \"url\" string.".to_string())?;
-            Ok(ToolOutcome::text(fetch_single_url(url).await?))
+            Ok(ToolOutcome::text(fetch_single_url(url, skills).await?))
         }
         "activate_skill" | "read_skill" => {
             let key = call
@@ -2157,19 +2193,20 @@ async fn execute_tool(
     }
 }
 
-async fn fetch_single_url(url: &str) -> Result<String, String> {
+async fn fetch_single_url(url: &str, skills: &AgentSkills) -> Result<String, String> {
     if !scrapeable_url(url) {
         return Err(
             "fetch_url only supports http(s) pages (not files like PDF, images, or archives)."
                 .into(),
         );
     }
-    let text = fetch_page_text(url, FETCH_URL_MAX_CHARS).await?;
+    let max_chars = skills.fetch_url_char_limit();
+    let text = fetch_page_text(url, max_chars).await?;
     if text.trim().is_empty() {
         return Err(format!("Fetched {url} but extracted no readable text."));
     }
     Ok(format!(
-        "Fetched page text from {url} (up to {FETCH_URL_MAX_CHARS} characters):\n{text}"
+        "Fetched page text from {url} (up to {max_chars} characters):\n{text}"
     ))
 }
 
@@ -2244,7 +2281,7 @@ async fn ddgs_web_search(
                         hit.snippet
                     ));
                 }
-                append_scraped_pages(&mut out, &hits, skills.web_search_depth).await;
+                append_scraped_pages(&mut out, &hits, skills).await;
                 return Ok((
                     out,
                     format!(
@@ -2720,10 +2757,11 @@ async fn duckduckgo_instant_answer(
 }
 
 */
-async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], depth: WebSearchDepth) {
-    let Some((page_count, max_chars)) = depth.scrape_plan() else {
+async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &AgentSkills) {
+    let Some((page_count, max_chars)) = skills.search_scrape_plan() else {
         return;
     };
+    let depth = skills.web_search_depth;
     let targets: Vec<&SearchHit> = hits
         .iter()
         .filter(|hit| scrapeable_url(&hit.url))

@@ -5301,6 +5301,16 @@
                   </span>
                 </span>
               </label>
+              <div class="settings-row" style="margin-top:0.75rem">
+                <label class="field-label" for="settingFetchUrlMaxChars">Max characters</label>
+                <input class="field-input" id="settingFetchUrlMaxChars" type="number" min="1000" max="200000" step="500" value="8000">
+              </div>
+              <p class="field-hint">Caps readable text returned by <code>fetch_url</code>.</p>
+              <div class="settings-row" style="margin-top:0.75rem">
+                <label class="field-label" for="settingWebSearchPageMaxChars">Search page max characters</label>
+                <input class="field-input" id="settingWebSearchPageMaxChars" type="number" min="0" max="200000" step="500" value="0">
+              </div>
+              <p class="field-hint">Caps text from each page opened by web search page depth. Use <code>0</code> for each depth’s default (auto 2800, light 1600, standard 3200, deep 4800).</p>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Deep research</h3>
@@ -5607,6 +5617,8 @@
       webSearchSafeSearch: 'moderate',
       webSearchRecency: 'any',
       skillFetchUrl: true,
+      fetchUrlMaxChars: 8000,
+      webSearchPageMaxChars: 0,
       skillDeepResearch: true,
       agentMode: false,
       deepResearch: 'off', // off | long | brief — composer Research mode
@@ -6391,6 +6403,8 @@
     function normalizeSettings(parsed) {
       if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
       const maxChars = Number(parsed.attachmentMaxChars);
+      const fetchUrlMaxChars = Number(parsed.fetchUrlMaxChars);
+      const webSearchPageMaxChars = Number(parsed.webSearchPageMaxChars);
       const searchResults = Number(parsed.webSearchResults);
       const searchRegion = String(parsed.webSearchRegion || '').trim().toLowerCase();
       return {
@@ -6425,6 +6439,14 @@
           ? parsed.webSearchRecency
           : DEFAULT_SETTINGS.webSearchRecency,
         skillFetchUrl: parsed.skillFetchUrl !== false,
+        fetchUrlMaxChars: Number.isFinite(fetchUrlMaxChars)
+          ? Math.min(200000, Math.max(1000, Math.round(fetchUrlMaxChars)))
+          : DEFAULT_SETTINGS.fetchUrlMaxChars,
+        webSearchPageMaxChars: Number.isFinite(webSearchPageMaxChars)
+          ? (Math.round(webSearchPageMaxChars) <= 0
+            ? 0
+            : Math.min(200000, Math.max(1000, Math.round(webSearchPageMaxChars))))
+          : DEFAULT_SETTINGS.webSearchPageMaxChars,
         skillDeepResearch: parsed.skillDeepResearch !== false,
         agentMode: parsed.agentMode === true,
         deepResearch: DEEP_RESEARCH_MODES.includes(parsed.deepResearch)
@@ -6505,6 +6527,8 @@
         && value.webSearchSafeSearch === DEFAULT_SETTINGS.webSearchSafeSearch
         && value.webSearchRecency === DEFAULT_SETTINGS.webSearchRecency
         && value.skillFetchUrl === DEFAULT_SETTINGS.skillFetchUrl
+        && value.fetchUrlMaxChars === DEFAULT_SETTINGS.fetchUrlMaxChars
+        && value.webSearchPageMaxChars === DEFAULT_SETTINGS.webSearchPageMaxChars
         && value.skillDeepResearch === DEFAULT_SETTINGS.skillDeepResearch
         && value.agentMode === DEFAULT_SETTINGS.agentMode
         && value.deepResearch === DEFAULT_SETTINGS.deepResearch
@@ -7761,6 +7785,15 @@
             ? settings.webSearchRecency
             : 'any',
           fetch_url: fetchUrl,
+          fetch_url_max_chars: Math.min(
+            200000,
+            Math.max(1000, Number(settings.fetchUrlMaxChars) || 8000)
+          ),
+          web_search_page_max_chars: (() => {
+            const raw = Number(settings.webSearchPageMaxChars);
+            if (!Number.isFinite(raw) || raw <= 0) return 0;
+            return Math.min(200000, Math.max(1000, Math.round(raw)));
+          })(),
       };
       if (deep) {
         skills.web_search_depth = 'deep';
@@ -8817,6 +8850,10 @@
       document.getElementById('settingWebSearchSafeSearch').value = settings.webSearchSafeSearch || 'moderate';
       document.getElementById('settingWebSearchRecency').value = settings.webSearchRecency || 'any';
       document.getElementById('settingSkillFetchUrl').checked = settings.skillFetchUrl;
+      document.getElementById('settingFetchUrlMaxChars').value = String(settings.fetchUrlMaxChars || 8000);
+      document.getElementById('settingWebSearchPageMaxChars').value = String(
+        Number.isFinite(settings.webSearchPageMaxChars) ? settings.webSearchPageMaxChars : 0
+      );
       document.getElementById('settingSkillDeepResearch').checked = settings.skillDeepResearch !== false;
       document.getElementById('settingAttachmentsMode').value = settings.attachmentsMode || 'auto';
       document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
@@ -8828,6 +8865,8 @@
 
     function readSettingsForm() {
       const maxCharsRaw = Number(document.getElementById('settingAttachmentMaxChars').value);
+      const fetchUrlMaxCharsRaw = Number(document.getElementById('settingFetchUrlMaxChars').value);
+      const webSearchPageMaxCharsRaw = Number(document.getElementById('settingWebSearchPageMaxChars').value);
       const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
       const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
       return normalizeSettings({
@@ -8846,6 +8885,8 @@
         webSearchSafeSearch: document.getElementById('settingWebSearchSafeSearch').value,
         webSearchRecency: document.getElementById('settingWebSearchRecency').value,
         skillFetchUrl: document.getElementById('settingSkillFetchUrl').checked,
+        fetchUrlMaxChars: fetchUrlMaxCharsRaw,
+        webSearchPageMaxChars: webSearchPageMaxCharsRaw,
         skillDeepResearch: document.getElementById('settingSkillDeepResearch').checked,
         agentMode: settings.agentMode,
         deepResearch: settings.deepResearch,
@@ -13029,6 +13070,15 @@
           ? settings.webSearchRecency
           : 'any',
         fetch_url: !!settings.skillFetchUrl,
+        fetch_url_max_chars: Math.min(
+          200000,
+          Math.max(1000, Number(settings.fetchUrlMaxChars) || 8000)
+        ),
+        web_search_page_max_chars: (() => {
+          const raw = Number(settings.webSearchPageMaxChars);
+          if (!Number.isFinite(raw) || raw <= 0) return 0;
+          return Math.min(200000, Math.max(1000, Math.round(raw)));
+        })(),
       };
       if (deepResearch) {
         useAgent = true;
