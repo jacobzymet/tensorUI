@@ -4086,11 +4086,18 @@
       font-size: var(--text-sm);
       color: var(--color-ink-2);
       line-height: 1.4;
-      overflow-wrap: anywhere;
+      display: grid;
+      gap: 0.12rem;
     }
     .agent-step-detail em {
       font-style: normal;
       color: var(--color-muted);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .agent-step-detail-value {
+      overflow-wrap: anywhere;
     }
     .agent-step-result {
       margin-top: 0.4rem;
@@ -9731,7 +9738,8 @@
             ? '<div class="agent-step-note">' + escapeHtml(note) + '</div>'
             : '') +
           (detail
-            ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em> · ' + escapeHtml(detail) + '</div>'
+            ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em>'
+              + '<span class="agent-step-detail-value">' + escapeHtml(detail) + '</span></div>'
             : '') +
           agentStepResultHtml(result) +
         '</div>',
