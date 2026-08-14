@@ -2564,6 +2564,7 @@
       color: transparent;
       -webkit-text-fill-color: transparent;
       animation: thinking-shimmer 1.5s linear infinite;
+      will-change: background-position;
     }
     @keyframes thinking-shimmer {
       to { background-position: -3.5em 0; }
@@ -10073,10 +10074,13 @@
       const wasNearBottom = isTraceSidebarNearBottom();
       const title = traceSidebarTitle;
       if (!message) {
-        if (title) title.textContent = 'Activity';
-        traceSidebarBody.innerHTML =
-          '<p class="trace-sidebar-empty">Select an assistant reply to inspect reasoning and tool steps.</p>';
+        if (title && title.textContent !== 'Activity') title.textContent = 'Activity';
+        if (!traceSidebarBody.querySelector('.trace-sidebar-empty')) {
+          traceSidebarBody.innerHTML =
+            '<p class="trace-sidebar-empty">Select an assistant reply to inspect reasoning and tool steps.</p>';
+        }
         traceSidebar?.classList.add('is-empty');
+        delete traceSidebarBody.dataset.sidebarSig;
         return;
       }
       let timelineHtml = '';
@@ -10093,45 +10097,124 @@
         }
         timelineHtml = renderCommittedParts(earlyParts, { forceOpenThinking: true });
         stepCount = timelinePartCount(earlyParts);
-        if (message.content) {
-          for (const segment of parseThinkSegments(message.content)) {
-            if (segment.type !== 'think' || !String(segment.content || '').trim()) continue;
-            timelineHtml += renderThinkBlock(segment.content, {
-              open: !!segment.open,
-              streaming: true,
-              forceOpen: true,
-            });
-            stepCount += 1;
-          }
+        const liveSegments = message.content ? parseThinkSegments(message.content) : [];
+        const openThink = liveSegments.find((seg) => seg.type === 'think' && seg.open);
+        const closedThinks = liveSegments.filter(
+          (seg) => seg.type === 'think' && !seg.open && String(seg.content || '').trim()
+        );
+        for (const segment of closedThinks) {
+          timelineHtml += renderThinkBlock(segment.content, {
+            open: false,
+            streaming: false,
+            forceOpen: true,
+          });
+          stepCount += 1;
         }
         if (deferredNotices.length) {
           timelineHtml += renderCommittedParts(deferredNotices, { forceOpenThinking: true });
           stepCount += timelinePartCount(deferredNotices);
         }
+        if (title) {
+          const totalSteps = stepCount + (openThink ? 1 : 0);
+          const nextTitle = live
+            ? (totalSteps ? ('Live Activity · ' + totalSteps) : 'Live Activity')
+            : (totalSteps ? ('Activity · ' + totalSteps) : 'Activity');
+          if (title.textContent !== nextTitle) title.textContent = nextTitle;
+        }
+        if (!timelineHtml.trim() && !openThink) {
+          if (!traceSidebarBody.querySelector('.trace-sidebar-empty')) {
+            traceSidebarBody.innerHTML =
+              '<p class="trace-sidebar-empty">This reply has no reasoning or tool activity.</p>';
+          }
+          traceSidebar?.classList.add('is-empty');
+          delete traceSidebarBody.dataset.sidebarSig;
+          return;
+        }
+        traceSidebar?.classList.remove('is-empty');
+
+        const committedSig =
+          'live\0' +
+          timelineSignature(earlyParts) +
+          '\0' +
+          closedThinks.map((s) => s.content).join('\0') +
+          '\0' +
+          timelineSignature(deferredNotices);
+
+        if (openThink) {
+          if (
+            traceSidebarBody.dataset.sidebarSig !== committedSig ||
+            !traceSidebarBody.querySelector(':scope > .agent-step.is-live-think')
+          ) {
+            traceSidebarBody.innerHTML =
+              timelineHtml +
+              wrapTimelineStep(
+                '<details class="think-block is-streaming" open>' +
+                  '<summary>' +
+                    '<span class="think-summary-label thinking-label">Reasoning</span>' +
+                    THINK_CHEVRON +
+                  '</summary>' +
+                  '<div class="think-stream"></div>' +
+                '</details>',
+                { think: true, live: true }
+              );
+            const liveStep = traceSidebarBody.querySelector(':scope > .agent-step:last-child');
+            if (liveStep) liveStep.classList.add('is-live-think');
+            traceSidebarBody.dataset.sidebarSig = committedSig;
+            enhanceCodeBlocks(traceSidebarBody);
+            traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
+          }
+          const streamEl = traceSidebarBody.querySelector(
+            ':scope > .agent-step.is-live-think .think-stream, :scope > .agent-step.is-think.is-live .think-stream'
+          );
+          if (streamEl) {
+            if (streamEl.dataset.thinkRaw !== openThink.content) {
+              streamEl.dataset.thinkRaw = openThink.content;
+              streamEl.innerHTML = renderThinkMarkdown(openThink.content);
+            }
+            streamEl.scrollTop = streamEl.scrollHeight;
+          }
+        } else {
+          if (traceSidebarBody.dataset.sidebarSig !== committedSig) {
+            traceSidebarBody.innerHTML = timelineHtml;
+            traceSidebarBody.dataset.sidebarSig = committedSig;
+            enhanceCodeBlocks(traceSidebarBody);
+            traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
+          }
+        }
+        if (stickTraceSidebar || wasNearBottom) {
+          stickTraceSidebar = true;
+          scrollTraceSidebarToBottom({ force: true });
+        }
+        return;
       } else {
         const collected = collectTimelineAndAnswer(message);
         timelineHtml = renderCommittedParts(collected.timelineParts, { forceOpenThinking: true });
         stepCount = collected.stepCount;
-      }
-      if (title) {
-        title.textContent = live
-          ? 'Live Activity'
-          : (stepCount ? ('Activity · ' + stepCount) : 'Activity');
-      }
-      if (!timelineHtml.trim()) {
-        traceSidebarBody.innerHTML =
-          '<p class="trace-sidebar-empty">This reply has no reasoning or tool activity.</p>';
-        traceSidebar?.classList.add('is-empty');
-        return;
-      }
-      traceSidebar?.classList.remove('is-empty');
-      traceSidebarBody.innerHTML = timelineHtml;
-      enhanceCodeBlocks(traceSidebarBody);
-      traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
-      // Replacing innerHTML resets scrollTop — only re-pin if we were following.
-      if (stickTraceSidebar || wasNearBottom) {
-        stickTraceSidebar = true;
-        scrollTraceSidebarToBottom({ force: true });
+        if (title) {
+          const nextTitle = stepCount ? ('Activity · ' + stepCount) : 'Activity';
+          if (title.textContent !== nextTitle) title.textContent = nextTitle;
+        }
+        if (!timelineHtml.trim()) {
+          if (!traceSidebarBody.querySelector('.trace-sidebar-empty')) {
+            traceSidebarBody.innerHTML =
+              '<p class="trace-sidebar-empty">This reply has no reasoning or tool activity.</p>';
+          }
+          traceSidebar?.classList.add('is-empty');
+          delete traceSidebarBody.dataset.sidebarSig;
+          return;
+        }
+        traceSidebar?.classList.remove('is-empty');
+        const staticSig = 'static\0' + timelineSignature(collected.timelineParts);
+        if (traceSidebarBody.dataset.sidebarSig !== staticSig) {
+          traceSidebarBody.innerHTML = timelineHtml;
+          traceSidebarBody.dataset.sidebarSig = staticSig;
+          enhanceCodeBlocks(traceSidebarBody);
+          traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
+        }
+        if (stickTraceSidebar || wasNearBottom) {
+          stickTraceSidebar = true;
+          scrollTraceSidebarToBottom({ force: true });
+        }
       }
     }
 
@@ -12940,7 +13023,7 @@
     /**
      * While an open <think> block is streaming alone, patch the existing
      * .think-stream markdown instead of rebuilding the whole answer tree every
-     * typer frame (full rebuilds starve the canvas orb's rAF).
+     * typer frame (full rebuilds starve the canvas orb's rAF and reset CSS animations).
      */
     function paintLiveThinkOnly(rootEl, cleaned) {
       if (settings.thinking === 'hidden') {
@@ -12950,17 +13033,28 @@
       const segments = parseThinkSegments(cleaned);
       const openThink = segments.find((segment) => segment.type === 'think' && segment.open);
       if (!openThink) return false;
-      const hasOther = segments.some((segment) => {
-        if (segment.type === 'think') return !segment.open && !!segment.content.trim();
-        return !!segment.content.trim();
+      const otherSegments = segments.filter((segment) => {
+        if (segment === openThink) return false;
+        return segment.type !== 'think' ? !!segment.content.trim() : (!segment.open && !!segment.content.trim());
       });
-      if (hasOther) return false;
+      const closedSig = otherSegments.map((s) => s.type + ':' + s.content).join('\0');
       let streamEl = rootEl.querySelector(
-        ':scope > .agent-step.is-think .think-stream, :scope > .think-live > .think-stream, :scope > .think-block.is-streaming > .think-stream'
+        ':scope > .agent-step.is-live-think .think-stream, :scope > .agent-step.is-think .think-stream, :scope > .think-live > .think-stream, :scope > .think-block.is-streaming > .think-stream'
       );
-      if (!streamEl) {
-        rootEl.innerHTML = renderThinkBlock(openThink.content, { open: true, streaming: true });
-        streamEl = rootEl.querySelector('.think-stream');
+      if (!streamEl || rootEl.dataset.closedSig !== closedSig) {
+        let prefixHtml = '';
+        for (const seg of otherSegments) {
+          if (seg.type === 'think') {
+            prefixHtml += renderThinkBlock(seg.content, { open: false, streaming: false });
+          } else {
+            prefixHtml += renderMarkdown(seg.content);
+          }
+        }
+        rootEl.innerHTML = prefixHtml + renderThinkBlock(openThink.content, { open: true, streaming: true });
+        rootEl.dataset.closedSig = closedSig;
+        const liveStep = rootEl.querySelector(':scope > .agent-step:last-child');
+        if (liveStep) liveStep.classList.add('is-live-think');
+        streamEl = rootEl.querySelector('.is-live-think .think-stream, .think-stream');
       }
       if (!streamEl) return false;
       if (streamEl.dataset.thinkRaw !== openThink.content) {
@@ -13030,14 +13124,26 @@
 
       if (desktop) {
         if (answerHtml) {
-          answerEl.innerHTML = answerHtml;
-          if (!streaming) enhanceCodeBlocks(answerEl);
+          if (answerEl.dataset.renderedHtml !== answerHtml) {
+            answerEl.innerHTML = answerHtml;
+            answerEl.dataset.renderedHtml = answerHtml;
+            if (!streaming) enhanceCodeBlocks(answerEl);
+          }
         } else if (!streaming) {
-          answerEl.innerHTML = '';
+          if (answerEl.innerHTML) answerEl.innerHTML = '';
+          delete answerEl.dataset.renderedHtml;
         } else if (!hasTimeline && !thinkingOpen) {
-          answerEl.innerHTML = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
+          const nextHtml = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
+          if (answerEl.dataset.renderedHtml !== nextHtml) {
+            answerEl.innerHTML = nextHtml;
+            answerEl.dataset.renderedHtml = nextHtml;
+          }
         } else {
-          answerEl.innerHTML = sealedAnswerHtml || '';
+          const nextHtml = sealedAnswerHtml || '';
+          if (answerEl.dataset.renderedHtml !== nextHtml) {
+            answerEl.innerHTML = nextHtml;
+            answerEl.dataset.renderedHtml = nextHtml;
+          }
         }
         delete answerEl.dataset.committedSig;
         stream.enteredSteps = 0;
@@ -13077,8 +13183,9 @@
           stream.enteredSteps = steps.length;
         }
       } else if (!streaming) {
-        answerEl.innerHTML = '';
+        if (answerEl.innerHTML) answerEl.innerHTML = '';
         delete answerEl.dataset.committedSig;
+        delete answerEl.dataset.renderedHtml;
         stream.enteredSteps = 0;
       }
 
@@ -13094,14 +13201,20 @@
         if (toolLive) {
           // Label is set by the tool_call agent event.
         } else if (clarifyLive) {
-          thinkingLabel.textContent = 'Waiting for your answers…';
+          if (thinkingLabel.textContent !== 'Waiting for your answers…') {
+            thinkingLabel.textContent = 'Waiting for your answers…';
+          }
         } else if (thinkingOpen) {
-          thinkingLabel.textContent = 'Reasoning…';
+          if (thinkingLabel.textContent !== 'Reasoning…') {
+            thinkingLabel.textContent = 'Reasoning…';
+          }
         } else if (agentStreaming) {
           const label = String(thinkingLabel.textContent || '').trim();
           // After tools, never leave a blank/stale chip — fall back to Processing.
           if (!label || label === 'Reading results') {
-            thinkingLabel.textContent = 'Processing…';
+            if (thinkingLabel.textContent !== 'Processing…') {
+              thinkingLabel.textContent = 'Processing…';
+            }
           }
         }
       } else if (hasVisibleAnswer || (!streaming && (cleaned || hasTimeline))) {
@@ -13175,10 +13288,22 @@
         if (turnForceTools.includes('web_search')) turnSkills.web_search = true;
         if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
       }
-      const controller = new AbortController();
+
+      const activeModelRef = selectedRemoteModel(latestState);
+      const activeModelKey = activeModelRef?.id || latestState?.network?.remote_model;
+      const modelDetail = (availableModels || []).find((m) => m.id === activeModelKey);
+      const supportsReasoning = !!(modelDetail?.supports_reasoning || modelDetail?.thinking);
+      const effort = settings.thinkingEffort;
+      const effectiveEffort = (supportsReasoning && effort !== 'off') ? effort : null;
+
       const stream = {
-        controller,
+        controller: new AbortController(),
         useAgent,
+        deepResearch,
+        deepResearchOutput,
+        turnSkills,
+        turnForceTools,
+        thinkingEffort: effectiveEffort,
         partial: '',
         timeline: [],
         errorMessage: null,
@@ -13206,16 +13331,17 @@
 
       const typer = createStreamTyper((replyText, streaming) => {
         if (activeId === convo.id && stream.dom) {
-          if (isThinkingOpen(replyText)) {
-            stream.dom.thinkingLabel.textContent = 'Reasoning…';
-          } else if (useAgent) {
-            stream.dom.thinkingLabel.textContent = deepResearch
-              ? (deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
-              : 'Writing answer';
-          } else if (replyText && replyText.trim()) {
-            stream.dom.thinkingLabel.textContent = 'Writing…';
-          } else {
-            stream.dom.thinkingLabel.textContent = 'Processing…';
+          const nextLabel = isThinkingOpen(replyText)
+            ? 'Reasoning…'
+            : useAgent
+              ? (deepResearch
+                ? (deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
+                : 'Writing answer')
+              : (replyText && replyText.trim())
+                ? 'Writing…'
+                : 'Processing…';
+          if (stream.dom.thinkingLabel.textContent !== nextLabel) {
+            stream.dom.thinkingLabel.textContent = nextLabel;
           }
         }
         paintStreamIntoView(convo, stream, replyText, streaming);
