@@ -13521,7 +13521,7 @@
             'content-type': 'application/json',
           },
           body: JSON.stringify(requestBody),
-          signal: controller.signal,
+          signal: stream.controller.signal,
         });
         if (!response.ok) {
           const problem = await response.json().catch(() => null);
