@@ -2676,6 +2676,9 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.45; }
     }
+    @keyframes agent-step-spin {
+      to { transform: rotate(360deg); }
+    }
 
     .dialog-backdrop {
       position: fixed; inset: 0;
@@ -4193,7 +4196,7 @@
       display: flex;
       justify-content: center;
       /* Shared for think + tool so the left rail stays on one vertical axis. */
-      padding-top: 0.4rem;
+      padding-top: 0.32rem;
       width: 1.1rem;
     }
     /* Connect consecutive timeline steps (think ↔ tool) on one shared rail. */
@@ -4201,41 +4204,78 @@
     .agent-step:has(+ .agent-live) .agent-step-rail::after {
       content: "";
       position: absolute;
-      top: 1rem;
+      top: 0.85rem;
       bottom: calc(-0.15rem - 0.85rem);
       left: 50%;
       width: 1px;
       transform: translateX(-50%);
       background: color-mix(in oklch, var(--color-rule) 80%, transparent);
+      z-index: 0;
     }
     .agent-live:empty { display: none; }
     .agent-step-dot {
-      width: 0.45rem;
-      height: 0.45rem;
+      width: 0.85rem;
+      height: 0.85rem;
       border-radius: var(--radius-pill);
-      background: var(--color-rule-2);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-paper) 80%, var(--color-rule));
+      background: var(--color-paper-2);
+      border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+      display: grid;
+      place-items: center;
+      position: relative;
       z-index: 1;
       flex: 0 0 auto;
+      box-sizing: border-box;
+      transition:
+        background-color var(--dur-short) var(--ease-settle),
+        border-color var(--dur-short) var(--ease-settle),
+        box-shadow var(--dur-short) var(--ease-settle);
+    }
+    .agent-step-check {
+      display: none;
+      width: 0.55rem;
+      height: 0.55rem;
+      color: var(--color-ok);
+      flex: 0 0 auto;
+    }
+    .agent-step-spinner {
+      display: none;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 1.5px solid color-mix(in oklch, var(--color-accent) 22%, transparent);
+      border-top-color: var(--color-accent);
+      animation: agent-step-spin 0.75s linear infinite;
+      box-sizing: border-box;
     }
     .agent-step.is-live .agent-step-dot {
-      background: var(--color-accent);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 20%, transparent);
-      animation: think-pulse 1.4s var(--ease-in-out) infinite;
+      background: var(--color-paper-2);
+      border-color: transparent;
+      box-shadow: none;
     }
-    .agent-step.is-done .agent-step-dot {
-      background: color-mix(in oklch, var(--color-ok) 75%, var(--color-rule));
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-ok) 14%, transparent);
-      animation: none;
+    .agent-step.is-live .agent-step-spinner {
+      display: block;
     }
+    .agent-step.is-live .agent-step-check {
+      display: none;
+    }
+    .agent-step.is-done .agent-step-dot,
     .agent-step.is-think:not(.is-live) .agent-step-dot {
-      background: var(--color-rule-2);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-rule) 35%, transparent);
-      animation: none;
+      background: color-mix(in oklch, var(--color-ok) 12%, var(--color-paper-2));
+      border-color: color-mix(in oklch, var(--color-ok) 34%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-ok) 8%, transparent);
+      color: var(--color-ok);
+    }
+    .agent-step.is-done .agent-step-check,
+    .agent-step.is-think:not(.is-live) .agent-step-check {
+      display: block;
+    }
+    .agent-step.is-done .agent-step-spinner,
+    .agent-step.is-think:not(.is-live) .agent-step-spinner {
+      display: none;
     }
     /* Tool cards have extra top padding; nudge the rail to the title row. */
     .agent-step:not(.is-think) .agent-step-rail {
-      padding-top: 0.72rem;
+      padding-top: 0.65rem;
     }
     .agent-step-card {
       min-width: 0;
@@ -9625,7 +9665,16 @@
       '<svg class="think-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 
     function agentStepRailHtml() {
-      return '<div class="agent-step-rail"><span class="agent-step-dot" aria-hidden="true"></span></div>';
+      return (
+        '<div class="agent-step-rail">' +
+          '<span class="agent-step-dot" aria-hidden="true">' +
+            '<svg class="agent-step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">' +
+              '<path d="M20 6 9 17l-5-5"/>' +
+            '</svg>' +
+            '<span class="agent-step-spinner"></span>' +
+          '</span>' +
+        '</div>'
+      );
     }
 
     function wrapTimelineStep(innerHtml, { think = false, live = false, done = false } = {}) {
@@ -9669,7 +9718,7 @@
         '<summary>' + summary + '</summary>' +
         body +
         '</details>';
-      return wrapTimelineStep(details, { think: true, live });
+      return wrapTimelineStep(details, { think: true, live, done: !live });
     }
 
     function renderCommittedParts(parts, { forceOpenThinking = false } = {}) {
