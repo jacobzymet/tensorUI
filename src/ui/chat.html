@@ -13289,13 +13289,6 @@
         if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
       }
 
-      const activeModelRef = selectedRemoteModel(latestState);
-      const activeModelKey = activeModelRef?.id || latestState?.network?.remote_model;
-      const modelDetail = (availableModels || []).find((m) => m.id === activeModelKey);
-      const supportsReasoning = !!(modelDetail?.supports_reasoning || modelDetail?.thinking);
-      const effort = settings.thinkingEffort;
-      const effectiveEffort = (supportsReasoning && effort !== 'off') ? effort : null;
-
       const stream = {
         controller: new AbortController(),
         useAgent,
@@ -13303,7 +13296,6 @@
         deepResearchOutput,
         turnSkills,
         turnForceTools,
-        thinkingEffort: effectiveEffort,
         partial: '',
         timeline: [],
         errorMessage: null,
