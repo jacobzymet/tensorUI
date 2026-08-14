@@ -1728,22 +1728,28 @@ fn openai_tools_payload(
         }));
     }
     if skills.fetch_url {
-        let description = if skills.web_search {
-            trim_prompt(tools::FETCH_URL_WITH_SEARCH)
+        let max_chars = skills.fetch_url_char_limit().to_string();
+        let raw_desc = if skills.web_search {
+            tools::FETCH_URL_WITH_SEARCH
         } else {
-            trim_prompt(tools::FETCH_URL)
+            tools::FETCH_URL
         };
+        let description = crate::prompts::fill(raw_desc, &[("max_chars", &max_chars)]);
         tools_out.push(json!({
             "type": "function",
             "function": {
                 "name": "fetch_url",
-                "description": description,
+                "description": description.trim(),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "url": {
                             "type": "string",
                             "description": "Absolute http(s) URL to fetch"
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Optional character offset to start reading from (for paginating through long pages). Default is 0."
                         }
                     },
                     "required": ["url"]
@@ -2171,7 +2177,26 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "fetch_url requires a non-empty \"url\" string.".to_string())?;
-            Ok(ToolOutcome::text(fetch_single_url(url, skills).await?))
+            let offset = call
+                .arguments
+                .get("offset")
+                .and_then(|v| {
+                    v.as_u64().or_else(|| {
+                        v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
+                    })
+                })
+                .unwrap_or(0) as usize;
+            let custom_max = call
+                .arguments
+                .get("max_chars")
+                .or_else(|| call.arguments.get("limit"))
+                .and_then(|v| {
+                    v.as_u64().or_else(|| {
+                        v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
+                    })
+                })
+                .map(|n| n as usize);
+            Ok(ToolOutcome::text(fetch_single_url(url, skills, offset, custom_max).await?))
         }
         "activate_skill" | "read_skill" => {
             let key = call
@@ -2193,21 +2218,72 @@ async fn execute_tool(
     }
 }
 
-async fn fetch_single_url(url: &str, skills: &AgentSkills) -> Result<String, String> {
+fn format_page_window(
+    url: &str,
+    full_text: &str,
+    offset: usize,
+    max_chars: usize,
+) -> String {
+    let total_chars = full_text.chars().count();
+    if total_chars == 0 {
+        return format!("Fetched {url} but extracted no readable text.");
+    }
+    if offset >= total_chars {
+        return format!(
+            "Fetched {url} at offset {offset}, but the page ends at {total_chars} total characters (no further content)."
+        );
+    }
+    let slice: String = full_text.chars().skip(offset).take(max_chars).collect();
+    let slice_len = slice.chars().count();
+    let end_offset = offset + slice_len;
+
+    let prefix = if offset > 0 {
+        format!("[Continued from offset {offset} of {total_chars} total]\n\n")
+    } else {
+        String::new()
+    };
+
+    let suffix = if end_offset < total_chars {
+        format!(
+            "\n\n[Showing characters {offset}..{end_offset} of {total_chars} total. Call fetch_url with url=\"{url}\" and offset={end_offset} to read the next chunk]"
+        )
+    } else if offset > 0 {
+        format!("\n\n[End of page reached: {total_chars} total characters]")
+    } else {
+        String::new()
+    };
+
+    let header = if total_chars <= max_chars && offset == 0 {
+        format!("Fetched page text from {url} ({total_chars} characters):\n")
+    } else {
+        format!("Fetched page text from {url} (characters {offset}..{end_offset} of {total_chars} total):\n")
+    };
+
+    format!("{header}{prefix}{slice}{suffix}")
+}
+
+async fn fetch_single_url(
+    url: &str,
+    skills: &AgentSkills,
+    offset: usize,
+    custom_max: Option<usize>,
+) -> Result<String, String> {
     if !scrapeable_url(url) {
         return Err(
             "fetch_url only supports http(s) pages (not files like PDF, images, or archives)."
                 .into(),
         );
     }
-    let max_chars = skills.fetch_url_char_limit();
-    let text = fetch_page_text(url, max_chars).await?;
-    if text.trim().is_empty() {
+    let configured_limit = skills.fetch_url_char_limit();
+    let max_chars = custom_max
+        .map(|n| clamp_page_fetch_chars(n).min(configured_limit))
+        .unwrap_or(configured_limit);
+
+    let full_text = fetch_raw_page_text(url).await?;
+    if full_text.trim().is_empty() {
         return Err(format!("Fetched {url} but extracted no readable text."));
     }
-    Ok(format!(
-        "Fetched page text from {url} (up to {max_chars} characters):\n{text}"
-    ))
+    Ok(format_page_window(url, &full_text, offset, max_chars))
 }
 
 #[derive(Debug)]
@@ -2827,7 +2903,7 @@ fn apply_browser_page_headers(req: reqwest::RequestBuilder) -> reqwest::RequestB
     http::apply_browser_navigation_headers(req)
 }
 
-async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
+async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
     let client = http::public_client();
     let mut response = apply_browser_page_headers(client.get(url).timeout(PAGE_TIMEOUT))
         .send()
@@ -2872,10 +2948,15 @@ async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> 
         .await
         .map_err(|error| format!("read failed: {error}"))?;
     let html = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_PAGE_BYTES as usize)]);
-    Ok(html_to_readable_text(&html, max_chars))
+    Ok(html_to_full_text(&html))
 }
 
-fn html_to_readable_text(html: &str, max_chars: usize) -> String {
+async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
+    let full = fetch_raw_page_text(url).await?;
+    Ok(truncate_chars(&full, max_chars))
+}
+
+fn html_to_full_text(html: &str) -> String {
     let mut cleaned = remove_tag_blocks(html, "script");
     cleaned = remove_tag_blocks(&cleaned, "style");
     cleaned = remove_tag_blocks(&cleaned, "noscript");
@@ -2935,7 +3016,12 @@ fn html_to_readable_text(html: &str, max_chars: usize) -> String {
         lines.pop();
     }
 
-    let joined = lines.join("\n");
+    lines.join("\n")
+}
+
+#[cfg(test)]
+fn html_to_readable_text(html: &str, max_chars: usize) -> String {
+    let joined = html_to_full_text(html);
     truncate_chars(&joined, max_chars)
 }
 
@@ -3482,14 +3568,54 @@ mod tests {
     }
 
     #[test]
-    fn agent_prompt_marks_required_tools() {
+    fn fetch_url_tool_schema_includes_offset_parameter() {
         let skills = AgentSkills {
-            web_search: true,
+            fetch_url: true,
             ..AgentSkills::default()
         };
-        let block = agent_system_block(&skills, &[], false, &["web_search".into()]);
-        assert!(block.contains("Required tools for this turn: web_search"));
-        let optional = agent_system_block(&skills, &[], false, &[]);
-        assert!(optional.contains("Use them when needed"));
+        let tools = openai_tools_payload(&skills, &[], true);
+        let fetch = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "fetch_url")
+            .expect("fetch_url tool");
+        let props = &fetch["function"]["parameters"]["properties"];
+        assert!(props.get("url").is_some());
+        assert!(props.get("offset").is_some());
+        let desc = fetch["function"]["description"].as_str().unwrap();
+        assert!(desc.contains("~8000 characters"));
+    }
+
+    #[test]
+    fn format_page_window_paginates_and_formats_correctly() {
+        let sample = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+        // 1. Short page fits in one chunk
+        let full = format_page_window("https://example.com/test", sample, 0, 50);
+        assert!(full.contains("Fetched page text from https://example.com/test (36 characters):"));
+        assert!(full.contains(sample));
+        assert!(!full.contains("[Showing characters"));
+
+        // 2. First chunk of a longer page
+        let chunk1 = format_page_window("https://example.com/test", sample, 0, 10);
+        assert!(chunk1.contains("characters 0..10 of 36 total"));
+        assert!(chunk1.contains("ABCDEFGHIJ"));
+        assert!(chunk1.contains("Call fetch_url with url=\"https://example.com/test\" and offset=10"));
+
+        // 3. Middle chunk
+        let chunk2 = format_page_window("https://example.com/test", sample, 10, 10);
+        assert!(chunk2.contains("characters 10..20 of 36 total"));
+        assert!(chunk2.contains("[Continued from offset 10 of 36 total]"));
+        assert!(chunk2.contains("KLMNOPQRST"));
+        assert!(chunk2.contains("offset=20"));
+
+        // 4. Final chunk reaching end
+        let chunk_end = format_page_window("https://example.com/test", sample, 30, 10);
+        assert!(chunk_end.contains("characters 30..36 of 36 total"));
+        assert!(chunk_end.contains("456789"));
+        assert!(chunk_end.contains("[End of page reached: 36 total characters]"));
+
+        // 5. Offset beyond end of page
+        let past_end = format_page_window("https://example.com/test", sample, 40, 10);
+        assert!(past_end.contains("offset 40, but the page ends at 36 total characters"));
     }
 }

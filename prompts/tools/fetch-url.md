@@ -1,1 +1,1 @@
-Open one specific http(s) URL and extract readable page text. Prefer when the user already gave a concrete URL.
+Open one specific http(s) URL and extract readable page text in chunks (~{{max_chars}} characters). For long pages, pass "offset" to continue reading subsequent chunks. Prefer when the user already gave a concrete URL.

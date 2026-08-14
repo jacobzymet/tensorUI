@@ -1,1 +1,1 @@
-Prefer when the user already gave a concrete URL.
+Prefer when the user already gave a concrete URL. Use "offset" to paginate if needed.

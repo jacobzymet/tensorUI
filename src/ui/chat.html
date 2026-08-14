@@ -5287,6 +5287,13 @@
                       <p class="field-hint">How many result pages to open and how much text to extract after the search listing.</p>
                     </div>
                   </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingWebSearchPageMaxChars">Search page max characters</label>
+                    <div>
+                      <input class="field-input" id="settingWebSearchPageMaxChars" type="number" min="0" max="200000" step="500" value="0">
+                      <p class="field-hint">Caps text from each page opened by web search page depth. Use <code>0</code> for each depth’s default (auto 2800, light 1600, standard 3200, deep 4800).</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -5297,20 +5304,25 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable fetch URL</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Open one specific page the user (or a prior result) names and extract readable text — not a web search.
+                    Open one specific page the user (or a prior result) names and extract readable text with offset pagination.
                   </span>
                 </span>
               </label>
-              <div class="settings-row" style="margin-top:0.75rem">
-                <label class="field-label" for="settingFetchUrlMaxChars">Max characters</label>
-                <input class="field-input" id="settingFetchUrlMaxChars" type="number" min="1000" max="200000" step="500" value="8000">
+              <div class="capability-advanced" data-capability-advanced="fetch-url">
+                <button type="button" class="capability-advanced-toggle" id="btnFetchUrlAdvanced" aria-expanded="false" aria-controls="fetchUrlOptions">
+                  Advanced
+                  <span class="capability-advanced-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="fetchUrlOptions" class="capability-advanced-panel is-collapsed" hidden>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingFetchUrlMaxChars">Chunk size (max chars)</label>
+                    <div>
+                      <input class="field-input" id="settingFetchUrlMaxChars" type="number" min="1000" max="200000" step="500" value="8000">
+                      <p class="field-hint">Max characters returned per chunk (~8,000 recommended). The model uses pagination offsets to read longer pages.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p class="field-hint">Caps readable text returned by <code>fetch_url</code>.</p>
-              <div class="settings-row" style="margin-top:0.75rem">
-                <label class="field-label" for="settingWebSearchPageMaxChars">Search page max characters</label>
-                <input class="field-input" id="settingWebSearchPageMaxChars" type="number" min="0" max="200000" step="500" value="0">
-              </div>
-              <p class="field-hint">Caps text from each page opened by web search page depth. Use <code>0</code> for each depth’s default (auto 2800, light 1600, standard 3200, deep 4800).</p>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Deep research</h3>
@@ -8860,6 +8872,7 @@
       document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
       document.getElementById('settingAttachmentMaxChars').value = String(settings.attachmentMaxChars || 48000);
       syncWebSearchControls();
+      syncFetchUrlControls();
       syncAttachmentFallbackControls();
     }
 
@@ -8928,6 +8941,11 @@
         document.getElementById('webSearchOptions'),
         false
       );
+      setCapabilityAdvancedOpen(
+        document.getElementById('btnFetchUrlAdvanced'),
+        document.getElementById('fetchUrlOptions'),
+        false
+      );
       refreshLocalDataPane();
       showSettingsPane('personalization');
       openBackdrop(settingsModal);
@@ -8947,6 +8965,18 @@
       const enabled = document.getElementById('settingSkillWebSearch').checked;
       const options = document.getElementById('webSearchOptions');
       const toggle = document.getElementById('btnWebSearchAdvanced');
+      if (toggle) toggle.disabled = !enabled;
+      if (!options) return;
+      options.querySelectorAll('input, select').forEach((control) => {
+        control.disabled = !enabled;
+      });
+      options.style.opacity = enabled ? '' : '0.55';
+    }
+
+    function syncFetchUrlControls() {
+      const enabled = document.getElementById('settingSkillFetchUrl').checked;
+      const options = document.getElementById('fetchUrlOptions');
+      const toggle = document.getElementById('btnFetchUrlAdvanced');
       if (toggle) toggle.disabled = !enabled;
       if (!options) return;
       options.querySelectorAll('input, select').forEach((control) => {
@@ -14079,12 +14109,14 @@
     settingsModal.querySelector('.settings-dialog')?.addEventListener('input', (event) => {
       if (!event.target.closest('input, textarea, select')) return;
       syncWebSearchControls();
+      syncFetchUrlControls();
       syncAttachmentFallbackControls();
       syncSettingsSaveButton();
     });
     settingsModal.querySelector('.settings-dialog')?.addEventListener('change', (event) => {
       if (!event.target.closest('input, textarea, select')) return;
       syncWebSearchControls();
+      syncFetchUrlControls();
       syncAttachmentFallbackControls();
       syncSettingsSaveButton();
     });
@@ -14092,6 +14124,13 @@
     document.getElementById('btnWebSearchAdvanced')?.addEventListener('click', () => {
       const toggle = document.getElementById('btnWebSearchAdvanced');
       const panel = document.getElementById('webSearchOptions');
+      if (!toggle || toggle.disabled) return;
+      setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+    });
+    document.getElementById('settingSkillFetchUrl').addEventListener('change', syncFetchUrlControls);
+    document.getElementById('btnFetchUrlAdvanced')?.addEventListener('click', () => {
+      const toggle = document.getElementById('btnFetchUrlAdvanced');
+      const panel = document.getElementById('fetchUrlOptions');
       if (!toggle || toggle.disabled) return;
       setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
     });
