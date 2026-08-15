@@ -5,14 +5,14 @@ use crate::{
     crypto,
     local_llm::LocalLlmManager,
     providers::{
-        ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, RemoteModelOption,
-        mask_token, normalize_provider_base, probe_provider_catalog, probe_provider_health,
-        split_openai_base,
+        ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, ProviderUpsertOptions,
+        RemoteModelOption, mask_token, normalize_provider_base, probe_provider_catalog,
+        probe_provider_health, split_openai_base,
     },
     store::{self, StorageMode, StoreError},
 };
 
-type WarmTarget = (ApiStyle, String, String);
+type WarmTarget = (ApiStyle, String, String, bool);
 
 #[derive(Debug)]
 pub struct App {
@@ -32,10 +32,8 @@ impl App {
         config.providers.migrate();
         config.ui.normalize_fonts();
         config.keep_ui_private();
-        if config != before {
-            let _ = config.save(&config_path);
-        }
-        Self {
+        let changed = config != before;
+        let mut app = Self {
             config,
             config_path,
             listen_addr: None,
@@ -43,7 +41,12 @@ impl App {
             remote_catalog: CatalogCache::default(),
             disk_key: None,
             local_llm: LocalLlmManager::default(),
+        };
+        // Also sanitizes plaintext credentials left by older provider save paths.
+        if changed || app.encryption_enabled() {
+            app.persist_config();
         }
+        app
     }
 
     pub fn set_listen_addr(&mut self, addr: SocketAddr) {
@@ -56,19 +59,31 @@ impl App {
     }
 
     pub fn persist_config(&mut self) {
+        let _ = self.try_persist_config();
+    }
+
+    fn try_persist_config(&mut self) -> Result<(), String> {
+        self.config.providers.migrate();
+        self.config.keep_ui_private();
         if self.encryption_enabled() {
             if let Some(key) = self.disk_key.as_ref() {
                 let tokens = self.provider_tokens_value();
-                let _ = store::save_provider_tokens(&self.data_dir(), &tokens, key);
+                store::save_provider_tokens(&self.data_dir(), &tokens, key)
+                    .map_err(Self::map_store_err)?;
             }
             let mut public_config = self.config.clone();
             for provider in &mut public_config.providers.items {
                 provider.token.clear();
             }
-            let _ = public_config.save(&self.config_path);
+            public_config
+                .save(&self.config_path)
+                .map_err(|error| format!("could not save config: {error:#}"))?;
         } else {
-            let _ = self.config.save(&self.config_path);
+            self.config
+                .save(&self.config_path)
+                .map_err(|error| format!("could not save config: {error:#}"))?;
         }
+        Ok(())
     }
 
     pub fn skill_store(&self) -> crate::skills::SkillStore {
@@ -100,7 +115,12 @@ impl App {
             return;
         };
         for provider in &mut self.config.providers.items {
-            if let Some(token) = tokens.get(&provider.id).and_then(|value| value.as_str()) {
+            // A non-empty in-memory value may be a credential recovered from a
+            // plaintext config written by the old provider persistence bug.
+            // Prefer it to an older encrypted copy; the next persist migrates it.
+            if provider.token.is_empty()
+                && let Some(token) = tokens.get(&provider.id).and_then(|value| value.as_str())
+            {
                 provider.token = token.to_string();
             }
         }
@@ -236,6 +256,7 @@ impl App {
                     remote.api_style,
                     remote.base.trim().to_string(),
                     remote.token.trim().to_string(),
+                    remote.allow_insecure_tls,
                 )
             })
             .collect();
@@ -256,6 +277,7 @@ impl App {
                     remote.api_style,
                     remote.base.trim().to_string(),
                     remote.token.trim().to_string(),
+                    remote.allow_insecure_tls,
                 )
             })
             .collect();
@@ -319,6 +341,7 @@ impl App {
                 name: remote.name.clone(),
                 base: remote.base.clone(),
                 api_style: remote.api_style.as_str(),
+                allow_insecure_tls: remote.allow_insecure_tls,
                 token_set: !remote.token.trim().is_empty(),
                 token_masked: mask_token(&remote.token),
                 active: remote.id == active_id,
@@ -337,11 +360,21 @@ impl App {
         base: &str,
         token: &str,
         api_style: ApiStyle,
+        allow_insecure_tls: bool,
         activate: bool,
     ) -> Result<(), String> {
-        self.config
-            .providers
-            .upsert(None, name, base, Some(token), api_style, activate)?;
+        self.require_provider_persistence_unlocked()?;
+        self.config.providers.upsert(
+            None,
+            name,
+            base,
+            Some(token),
+            api_style,
+            ProviderUpsertOptions {
+                allow_insecure_tls: Some(allow_insecure_tls),
+                activate,
+            },
+        )?;
         self.persist_providers("provider added")
     }
 
@@ -352,7 +385,9 @@ impl App {
         base: Option<&str>,
         token: Option<&str>,
         api_style: Option<ApiStyle>,
+        allow_insecure_tls: Option<bool>,
     ) -> Result<(), String> {
+        self.require_provider_persistence_unlocked()?;
         self.config.providers.migrate();
         let current = self
             .config
@@ -368,23 +403,29 @@ impl App {
             base.unwrap_or(&current.base),
             token,
             api_style.unwrap_or(current.api_style),
-            false,
+            ProviderUpsertOptions {
+                allow_insecure_tls,
+                activate: false,
+            },
         )?;
         self.persist_providers("provider updated")
     }
 
     pub fn delete_provider(&mut self, id: &str) -> Result<(), String> {
+        self.require_provider_persistence_unlocked()?;
         self.config.providers.delete(id)?;
         self.persist_providers("provider removed")
     }
 
     pub fn activate_provider(&mut self, id: &str) -> Result<(), String> {
+        self.require_provider_persistence_unlocked()?;
         self.config.providers.set_active(id)?;
         self.persist_providers("provider activated")
     }
 
     /// Register or refresh the managed llama-server provider and make it default.
     pub fn ensure_local_llama_provider(&mut self, base_url: &str) -> Result<(), String> {
+        self.require_provider_persistence_unlocked()?;
         let id = crate::local_llm::provider_id();
         let name = crate::local_llm::provider_name();
         let Some(normalized) = normalize_provider_base(base_url, ApiStyle::Openai) else {
@@ -394,6 +435,7 @@ impl App {
             provider.name = name.to_string();
             provider.base = normalized;
             provider.api_style = ApiStyle::Openai;
+            provider.allow_insecure_tls = false;
             provider.token.clear();
             self.config.providers.active_provider_id = id.to_string();
         } else {
@@ -410,12 +452,15 @@ impl App {
     }
 
     fn persist_providers(&mut self, _action: &str) -> Result<(), String> {
-        self.config.providers.migrate();
-        self.config.keep_ui_private();
-        self.config
-            .save(&self.config_path)
-            .map_err(|error| format!("could not save config: {error:#}"))?;
-        Ok(())
+        self.try_persist_config()
+    }
+
+    fn require_provider_persistence_unlocked(&self) -> Result<(), String> {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            Err("Local data is encrypted. Unlock it before changing providers.".into())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn set_ui_theme(&mut self, theme: crate::config::UiTheme) {
@@ -719,7 +764,7 @@ impl App {
         store::clear_provider_tokens(&root).map_err(|error| format!("{error:#}"))?;
         crypto::clear_meta(&root).map_err(|error| format!("{error:#}"))?;
         self.disk_key = None;
-        let _ = self.config.save(&self.config_path);
+        self.try_persist_config()?;
         Ok(())
     }
 
@@ -748,14 +793,54 @@ impl App {
 
     pub fn warm_provider_caches(&self) {
         let (health_targets, catalog_targets) = self.provider_warm_targets();
-        for (style, base, token) in health_targets {
-            let health = probe_provider_health(&base, &token, style);
+        for (style, base, token, insecure) in health_targets {
+            let health = crate::http::with_insecure_provider_tls(insecure, || {
+                probe_provider_health(&base, &token, style)
+            });
             self.store_remote_health(style, &base, &token, health);
         }
-        for (style, base, token) in catalog_targets {
+        for (style, base, token, insecure) in catalog_targets {
             let others = self.other_provider_ports(&base);
-            let catalog = probe_provider_catalog(&base, &token, style, &[], &others);
+            let catalog = crate::http::with_insecure_provider_tls(insecure, || {
+                probe_provider_catalog(&base, &token, style, &[], &others)
+            });
             self.store_remote_catalog(style, &base, &token, catalog);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_mutations_never_restore_plaintext_tokens_when_encrypted() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut app = App::new(Config::default(), config_path.clone());
+        app.create_provider(
+            "Test",
+            "https://example.com/v1",
+            "secret-provider-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        app.enable_disk_encryption(
+            "correct horse battery staple",
+            "correct horse battery staple",
+        )
+        .unwrap();
+
+        let provider_id = app.config.providers.items[0].id.clone();
+        app.update_provider(&provider_id, Some("Renamed"), None, None, None, None)
+            .unwrap();
+
+        let plaintext = std::fs::read_to_string(config_path).unwrap();
+        assert!(!plaintext.contains("secret-provider-token"));
+        let tokens =
+            store::load_provider_tokens(temp.path(), app.disk_key().expect("unlocked")).unwrap();
+        assert_eq!(tokens[&provider_id], "secret-provider-token");
     }
 }

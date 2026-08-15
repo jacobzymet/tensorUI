@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Path, State},
-    http::{StatusCode, header},
+    http::{HeaderValue, Request, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -37,6 +38,111 @@ use embed::{
 pub type SharedApp = Arc<Mutex<App>>;
 
 pub const INSTANCE_MARKER: &str = "tensorui";
+
+const SESSION_COOKIE: &str = "tensorui_session";
+
+#[derive(Clone)]
+struct ApiSecurity {
+    authorities: Vec<String>,
+    origins: Vec<String>,
+    token: String,
+}
+
+impl ApiSecurity {
+    fn new(addr: std::net::SocketAddr) -> anyhow::Result<Self> {
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).map_err(|error| anyhow::anyhow!("session token: {error}"))?;
+        use base64::Engine as _;
+        let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let authorities = vec![
+            addr.to_string(),
+            format!("{}:{}", crate::config::PUBLIC_UI_HOST, addr.port()),
+        ];
+        Ok(Self {
+            origins: authorities
+                .iter()
+                .map(|authority| format!("http://{authority}"))
+                .collect(),
+            authorities,
+            token,
+        })
+    }
+}
+
+fn secret_eq(left: &str, right: &str) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.as_bytes()
+        .iter()
+        .zip(right.as_bytes())
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
+fn request_token<B>(request: &Request<B>) -> Option<&str> {
+    if let Some(value) = request
+        .headers()
+        .get("x-tensorui-token")
+        .and_then(|value| value.to_str().ok())
+    {
+        return Some(value);
+    }
+    request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())?
+        .split(';')
+        .map(str::trim)
+        .find_map(|cookie| cookie.strip_prefix(&format!("{SESSION_COOKIE}=")))
+}
+
+async fn secure_local_request(
+    State(security): State<ApiSecurity>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let host_ok = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| {
+            security
+                .authorities
+                .iter()
+                .any(|allowed| host.eq_ignore_ascii_case(allowed))
+        });
+    if !host_ok {
+        return (StatusCode::MISDIRECTED_REQUEST, "invalid Host header").into_response();
+    }
+
+    let is_api = request.uri().path().starts_with("/api/");
+    if is_api {
+        let origin_ok = request
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+            .is_none_or(|origin| security.origins.iter().any(|allowed| origin == allowed));
+        let token_ok =
+            request_token(&request).is_some_and(|token| secret_eq(token, &security.token));
+        if !origin_ok || !token_ok {
+            return (StatusCode::UNAUTHORIZED, "unauthorized local API request").into_response();
+        }
+    }
+
+    let issue_cookie = !is_api && request.method() == axum::http::Method::GET;
+    let mut response = next.run(request).await;
+    if issue_cookie {
+        let value = format!(
+            "{SESSION_COOKIE}={}; HttpOnly; SameSite=Strict; Path=/",
+            security.token
+        );
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
+    }
+    response
+}
 
 static PROVIDER_CACHE_WARM_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
@@ -73,23 +179,27 @@ fn schedule_provider_cache_warm(app: SharedApp) {
         let catalog_others: Vec<Vec<u16>> = match app.lock() {
             Ok(guard) => catalog_targets
                 .iter()
-                .map(|(_, base, _)| guard.other_provider_ports(base))
+                .map(|(_, base, _, _)| guard.other_provider_ports(base))
                 .collect(),
             Err(_) => return,
         };
 
         let health_results: Vec<_> = health_targets
             .into_iter()
-            .map(|(style, base, token)| {
-                let health = probe_provider_health(&base, &token, style);
+            .map(|(style, base, token, insecure)| {
+                let health = crate::http::with_insecure_provider_tls(insecure, || {
+                    probe_provider_health(&base, &token, style)
+                });
                 (style, base, token, health)
             })
             .collect();
         let catalog_results: Vec<_> = catalog_targets
             .into_iter()
             .zip(catalog_others)
-            .map(|((style, base, token), others)| {
-                let catalog = probe_provider_catalog(&base, &token, style, &[], &others);
+            .map(|((style, base, token, insecure), others)| {
+                let catalog = crate::http::with_insecure_provider_tls(insecure, || {
+                    probe_provider_catalog(&base, &token, style, &[], &others)
+                });
                 (style, base, token, catalog)
             })
             .collect();
@@ -109,6 +219,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
     // Probe providers before the first browser poll so Chat doesn't flash unreachable.
     schedule_provider_cache_warm(Arc::clone(&app));
 
+    let security = ApiSecurity::new(listener.local_addr()?)?;
     let api = Router::new()
         .route("/api/chat/completions", post(chat_completions))
         .route("/api/chat/clarify", post(chat_clarify))
@@ -174,6 +285,10 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/ti-transparent-bg-white.png", get(ui_mark_dark))
         .route("/ti-transparent-bg-black.png", get(ui_mark_light))
         .merge(api)
+        .layer(middleware::from_fn_with_state(
+            security,
+            secure_local_request,
+        ))
         .with_state(app);
 
     axum::serve(listener, router.into_make_service())
@@ -349,7 +464,7 @@ async fn chat_title(
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .map(str::to_string);
-    let (api_base, token, api_style) = {
+    let (api_base, token, api_style, allow_insecure_tls) = {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         let providers = &app.config.providers;
         if let Some(requested) = body.remote_base.as_deref() {
@@ -360,7 +475,12 @@ async fn chat_title(
             };
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
-            (api_base, linked.token.clone(), linked.api_style)
+            (
+                api_base,
+                linked.token.clone(),
+                linked.api_style,
+                linked.allow_insecure_tls,
+            )
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
@@ -369,13 +489,25 @@ async fn chat_title(
             };
             let api_base = normalize_openai_base(&active.base)
                 .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
-            (api_base, active.token.clone(), active.api_style)
+            (
+                api_base,
+                active.token.clone(),
+                active.api_style,
+                active.allow_insecure_tls,
+            )
         }
     };
 
-    let title = chat::generate_chat_title(&api_base, &token, api_style, model.as_deref(), message)
-        .await
-        .map_err(ApiError::bad_request)?;
+    let title = chat::generate_chat_title(
+        &api_base,
+        &token,
+        api_style,
+        model.as_deref(),
+        message,
+        allow_insecure_tls,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(Json(ChatTitleResponse { title }))
 }
 
@@ -404,7 +536,12 @@ async fn chat_completions(
             };
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
-            Some((api_base, linked.token.clone(), linked.api_style))
+            Some((
+                api_base,
+                linked.token.clone(),
+                linked.api_style,
+                linked.allow_insecure_tls,
+            ))
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
@@ -413,9 +550,14 @@ async fn chat_completions(
             };
             let api_base = normalize_openai_base(&active.base)
                 .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
-            Some((api_base, active.token.clone(), active.api_style))
+            Some((
+                api_base,
+                active.token.clone(),
+                active.api_style,
+                active.allow_insecure_tls,
+            ))
         };
-        let thinking_model = remote.as_ref().and_then(|(base, _, _)| {
+        let thinking_model = remote.as_ref().and_then(|(base, _, _, _)| {
             remote_model.as_deref().and_then(|model| {
                 app.remote_model_catalog_cached()
                     .into_iter()
@@ -428,7 +570,7 @@ async fn chat_completions(
         (remote, user_skills, thinking_model)
     };
 
-    let Some((api_base, token, api_style)) = remote else {
+    let Some((api_base, token, api_style, allow_insecure_tls)) = remote else {
         return Err(ApiError::bad_request(
             "No provider configured. Add one in Server.",
         ));
@@ -451,13 +593,20 @@ async fn chat_completions(
             if request.messages.is_empty() {
                 return Err(ApiError::bad_request("messages must not be empty"));
             }
-            agent::stream_agent(&api_base, key, api_style, request, user_skills)
+            agent::stream_agent(
+                &api_base,
+                key,
+                api_style,
+                allow_insecure_tls,
+                request,
+                user_skills,
+            )
         }
         Ok(_) => {
             if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
                 agent::inject_skill_catalog_into_messages(messages, &user_skills);
             }
-            chat::stream_remote_completion(&api_base, &token, api_style, body)
+            chat::stream_remote_completion(&api_base, &token, api_style, allow_insecure_tls, body)
         }
         Err(error) if wants_agent => {
             return Err(ApiError::bad_request(format!(
@@ -468,7 +617,7 @@ async fn chat_completions(
             if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
                 agent::inject_skill_catalog_into_messages(messages, &user_skills);
             }
-            chat::stream_remote_completion(&api_base, &token, api_style, body)
+            chat::stream_remote_completion(&api_base, &token, api_style, allow_insecure_tls, body)
         }
     };
 
@@ -517,6 +666,8 @@ struct CreateProviderBody {
     token: String,
     #[serde(default)]
     api_style: Option<ApiStyle>,
+    #[serde(default)]
+    allow_insecure_tls: bool,
     #[serde(default = "default_true")]
     activate: bool,
 }
@@ -531,6 +682,7 @@ struct UpdateProviderBody {
     base: Option<String>,
     token: Option<String>,
     api_style: Option<ApiStyle>,
+    allow_insecure_tls: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -542,6 +694,8 @@ struct TestProviderBody {
     api_style: Option<ApiStyle>,
     #[serde(default)]
     id: Option<String>,
+    #[serde(default)]
+    allow_insecure_tls: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -604,6 +758,7 @@ async fn test_provider(
         }
     };
     let forced_style = body.api_style;
+    let allow_insecure_tls = body.allow_insecure_tls;
 
     let probe_base = base.clone();
     let probe_token = token.clone();
@@ -614,19 +769,22 @@ async fn test_provider(
         app.other_provider_ports(&base)
     };
     let (probe, catalog) = tokio::task::spawn_blocking(move || {
-        let probe = probe_provider_style(&probe_base, &probe_token, forced_style);
-        let catalog = if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty) {
-            Some(probe_provider_catalog(
-                &probe_base,
-                &probe_token,
-                probe.api_style,
-                &[],
-                &probe_others,
-            ))
-        } else {
-            None
-        };
-        (probe, catalog)
+        crate::http::with_insecure_provider_tls(allow_insecure_tls, || {
+            let probe = probe_provider_style(&probe_base, &probe_token, forced_style);
+            let catalog =
+                if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty) {
+                    Some(probe_provider_catalog(
+                        &probe_base,
+                        &probe_token,
+                        probe.api_style,
+                        &[],
+                        &probe_others,
+                    ))
+                } else {
+                    None
+                };
+            (probe, catalog)
+        })
     })
     .await
     .map_err(|error| ApiError::bad_request(format!("connection test failed: {error}")))?;
@@ -664,8 +822,11 @@ async fn create_provider(
     } else {
         let probe_base = base.clone();
         let probe_token = token.clone();
+        let insecure = body.allow_insecure_tls;
         tokio::task::spawn_blocking(move || {
-            probe_provider_style(&probe_base, &probe_token, None).api_style
+            crate::http::with_insecure_provider_tls(insecure, || {
+                probe_provider_style(&probe_base, &probe_token, None).api_style
+            })
         })
         .await
         .map_err(|error| ApiError::bad_request(format!("style detection failed: {error}")))?
@@ -673,8 +834,15 @@ async fn create_provider(
 
     let response = {
         let mut app = app.lock().map_err(|_| ApiError::lock())?;
-        app.create_provider(&body.name, &base, &token, api_style, body.activate)
-            .map_err(ApiError::bad_request)?;
+        app.create_provider(
+            &body.name,
+            &base,
+            &token,
+            api_style,
+            body.allow_insecure_tls,
+            body.activate,
+        )
+        .map_err(ApiError::bad_request)?;
         ProvidersResponse {
             providers: app.public_providers(),
             state: AppState::from_app(&app),
@@ -697,6 +865,7 @@ async fn update_provider(
             body.base.as_deref(),
             body.token.as_deref(),
             body.api_style,
+            body.allow_insecure_tls,
         )
         .map_err(ApiError::bad_request)?;
         ProvidersResponse {

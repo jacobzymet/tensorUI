@@ -92,6 +92,9 @@ fn greet_running_instance(url: &str, bind: SocketAddr) -> Result<()> {
 
 fn focus_running_instance(url: &str) -> Option<()> {
     let client = tensorui::http::app_blocking_client(FOCUS_TIMEOUT);
+    // Bootstrap the per-process HttpOnly session cookie exactly as a browser
+    // navigation does before calling the authenticated local API.
+    client.get(format!("{url}/")).send().ok()?;
     let response = client.post(format!("{url}/api/focus")).send().ok()?;
     if response.status().as_u16() != 200 {
         return None;

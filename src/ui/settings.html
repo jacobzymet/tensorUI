@@ -1299,6 +1299,10 @@
                     <label class="field-label" for="providerToken">API token <span style="color:var(--color-muted);font-weight:400">(optional)</span></label>
                     <input class="field-input" id="providerToken" type="password" placeholder="sk-… or leave blank" autocomplete="off" spellcheck="false">
                   </div>
+                  <label style="display:flex;align-items:center;gap:.6rem">
+                    <input id="providerAllowInsecureTls" type="checkbox">
+                    <span>Allow invalid HTTPS certificates <span style="color:var(--color-muted)">(unsafe)</span></span>
+                  </label>
                   <div class="form-actions">
                     <button type="button" class="btn btn-primary" id="btnSaveProvider">Add</button>
                     <button type="button" class="btn btn-ghost is-hidden" id="btnCancelProviderEdit">Cancel</button>
@@ -1682,7 +1686,7 @@
         }
       }
 
-      async function testProviderConnection({ base, token, id, api_style }) {
+      async function testProviderConnection({ base, token, id, api_style, allow_insecure_tls }) {
         const style = api_style || selectedApiStyle();
         const detecting = !style || style === 'auto';
         showConnectionTest(
@@ -1690,7 +1694,7 @@
           detecting ? 'Detecting API style…' : 'Testing connection…',
           'Calling ' + base + '/models'
         );
-        const body = { base, token: token || undefined };
+        const body = { base, token: token || undefined, allow_insecure_tls: !!allow_insecure_tls };
         if (!detecting) body.api_style = style;
         if (id) body.id = id;
         const result = await api('/api/providers/test', {
@@ -1851,6 +1855,7 @@
         document.getElementById('providerBase').value = '';
         document.getElementById('providerToken').value = '';
         document.getElementById('providerToken').placeholder = 'sk-… / sk-ant-… or leave blank';
+        document.getElementById('providerAllowInsecureTls').checked = false;
         delete btnSaveProvider.dataset.editingId;
         btnSaveProvider.textContent = 'Add';
         btnCancelProviderEdit.classList.add('is-hidden');
@@ -1869,6 +1874,7 @@
         document.getElementById('providerToken').placeholder = provider.token_set || provider.token_masked
           ? ('saved · ' + (provider.token_masked || '••••'))
           : 'sk-… / sk-ant-… or leave blank';
+        document.getElementById('providerAllowInsecureTls').checked = !!provider.allow_insecure_tls;
         btnSaveProvider.dataset.editingId = provider.id;
         btnSaveProvider.textContent = 'Save';
         btnCancelProviderEdit.classList.remove('is-hidden');
@@ -2283,6 +2289,7 @@
         const styleChoice = selectedApiStyle();
         const baseRaw = document.getElementById('providerBase').value.trim();
         const token = document.getElementById('providerToken').value.trim();
+        const allow_insecure_tls = document.getElementById('providerAllowInsecureTls').checked;
         const editingId = btnSaveProvider.dataset.editingId || '';
         if (!baseRaw) {
           hideConnectionTest();
@@ -2300,6 +2307,7 @@
               token,
               api_style: styleChoice,
               id: editingId || undefined,
+              allow_insecure_tls,
             });
             if (summary.state !== 'ok') {
               showError(summary.detail || summary.title);
@@ -2316,6 +2324,7 @@
                   base,
                   token: token || undefined,
                   api_style,
+                  allow_insecure_tls,
                 }),
               });
               clearProviderForm();
@@ -2329,6 +2338,7 @@
                   base,
                   token: token || undefined,
                   api_style,
+                  allow_insecure_tls,
                   activate: true,
                 }),
               });

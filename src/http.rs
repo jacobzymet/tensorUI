@@ -1,7 +1,11 @@
-//! Shared reqwest clients. LLM traffic may skip TLS verify for private/lab hosts;
-//! public HTTPS (search, page fetch) always verifies.
+//! Shared reqwest clients. TLS verification is the default for every connection.
 
-use std::{net::IpAddr, sync::OnceLock, time::Duration};
+use std::{
+    cell::Cell,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::OnceLock,
+    time::Duration,
+};
 
 use reqwest::{Client, Url};
 
@@ -19,6 +23,10 @@ const BROWSER_ACCEPT_LANG: &str = "en-US,en;q=0.9";
 
 static PUBLIC_CLIENT: OnceLock<Client> = OnceLock::new();
 
+thread_local! {
+    static INSECURE_PROVIDER_TLS: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Attach Chrome-like navigation headers so page fetches look like a normal document load.
 pub fn apply_browser_navigation_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     req.header("Accept", BROWSER_ACCEPT)
@@ -34,28 +42,36 @@ pub fn apply_browser_navigation_headers(req: reqwest::RequestBuilder) -> reqwest
         .header("Cache-Control", "max-age=0")
 }
 
-/// True when the URL targets a loopback / private / lab host where self-signed
-/// certs are common. Public internet hosts keep certificate verification on.
-pub fn url_allows_insecure_tls(url: &str) -> bool {
+/// Apply a saved provider's explicit insecure-certificate choice to synchronous
+/// probes performed inside `work`.
+pub fn with_insecure_provider_tls<T>(allow: bool, work: impl FnOnce() -> T) -> T {
+    INSECURE_PROVIDER_TLS.with(|flag| {
+        let previous = flag.replace(allow);
+        struct Restore<'a>(&'a Cell<bool>, bool);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
+            }
+        }
+        let _restore = Restore(flag, previous);
+        work()
+    })
+}
+
+/// Classify private/lab URLs for provider capability probing only. This does
+/// not affect certificate verification.
+pub fn url_is_private_or_local(url: &str) -> bool {
     let Ok(parsed) = Url::parse(url) else {
         return false;
     };
     let Some(host) = parsed.host_str() else {
         return false;
     };
-    let host = host.trim().to_ascii_lowercase();
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
-        return true;
-    }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-            }
-            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unspecified(),
-        };
-    }
-    false
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.parse::<IpAddr>().is_ok_and(ip_is_non_public)
 }
 
 fn build_client(timeout: Duration, insecure: bool, user_agent: &str) -> Client {
@@ -80,14 +96,16 @@ fn build_blocking_client(
     builder.build().expect("reqwest blocking client")
 }
 
-/// Async client for LLM APIs. Insecure TLS only when `api_base` is private/lab.
-pub fn llm_client(api_base: &str, timeout: Duration) -> Client {
-    build_client(timeout, url_allows_insecure_tls(api_base), APP_UA)
+/// Async client for LLM APIs. Invalid certificates require explicit opt-in.
+pub fn llm_client(timeout: Duration, allow_insecure_tls: bool) -> Client {
+    build_client(timeout, allow_insecure_tls, APP_UA)
 }
 
-/// Blocking client for provider probes (run on `spawn_blocking`).
-pub fn llm_blocking_client(api_base: &str, timeout: Duration) -> reqwest::blocking::Client {
-    build_blocking_client(timeout, url_allows_insecure_tls(api_base), APP_UA)
+/// Blocking client for provider probes. The opt-in is scoped by
+/// `with_insecure_provider_tls` at the provider boundary.
+pub fn llm_blocking_client(_api_base: &str, timeout: Duration) -> reqwest::blocking::Client {
+    let insecure = INSECURE_PROVIDER_TLS.with(Cell::get);
+    build_blocking_client(timeout, insecure, APP_UA)
 }
 
 /// Async client for public HTTPS (search / page fetch). Always verifies TLS.
@@ -109,7 +127,111 @@ pub fn public_client() -> Client {
 
 /// Blocking client for one-off local focus pings.
 pub fn app_blocking_client(timeout: Duration) -> reqwest::blocking::Client {
-    build_blocking_client(timeout, true, APP_UA)
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .user_agent(APP_UA)
+        .cookie_store(true)
+        .build()
+        .expect("reqwest blocking client")
+}
+
+fn ipv4_is_non_public(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || a == 0
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 198 && (b == 18 || b == 19))
+        || a >= 240
+}
+
+pub fn ip_is_non_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ipv4_is_non_public(ip),
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return ipv4_is_non_public(v4);
+            }
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_multicast()
+        }
+    }
+}
+
+const MAX_SAFE_REDIRECTS: usize = 10;
+
+/// GET a public HTTP(S) page while preventing SSRF and DNS rebinding. Each
+/// redirect is resolved and validated independently, and the connection is
+/// pinned to the addresses that passed validation.
+pub async fn safe_public_get(url: &str, loose_accept: bool) -> Result<reqwest::Response, String> {
+    let mut current = Url::parse(url).map_err(|_| "invalid URL".to_string())?;
+    for redirect_count in 0..=MAX_SAFE_REDIRECTS {
+        if !matches!(current.scheme(), "http" | "https")
+            || !current.username().is_empty()
+            || current.password().is_some()
+        {
+            return Err("URL must be HTTP(S) and must not contain credentials".into());
+        }
+        let host = current
+            .host_str()
+            .ok_or_else(|| "URL has no host".to_string())?
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+            return Err("fetch_url blocked a local or private destination".into());
+        }
+        let port = current
+            .port_or_known_default()
+            .ok_or_else(|| "URL has no valid port".to_string())?;
+        let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map_err(|error| format!("DNS resolution failed: {error}"))?
+            .collect();
+        if addresses.is_empty() || addresses.iter().any(|addr| ip_is_non_public(addr.ip())) {
+            return Err(
+                "fetch_url blocked a local, private, link-local, or reserved destination".into(),
+            );
+        }
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(60))
+            .user_agent(BROWSER_UA)
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(&host, &addresses)
+            .http1_only()
+            .build()
+            .map_err(|error| format!("could not build guarded HTTP client: {error}"))?;
+        let mut request = apply_browser_navigation_headers(client.get(current.clone()));
+        if loose_accept {
+            request = request.header("Accept", "*/*");
+        }
+        let response = request.send().await.map_err(|error| error.to_string())?;
+        if response.status().is_redirection() {
+            if redirect_count == MAX_SAFE_REDIRECTS {
+                return Err("too many redirects".into());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "redirect response has no valid Location".to_string())?;
+            current = current
+                .join(location)
+                .map_err(|_| "redirect has an invalid destination".to_string())?;
+            continue;
+        }
+        return Ok(response);
+    }
+    Err("too many redirects".into())
 }
 
 #[cfg(test)]
@@ -117,12 +239,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn insecure_tls_for_private_hosts_only() {
-        assert!(url_allows_insecure_tls("https://127.0.0.1:1234/v1"));
-        assert!(url_allows_insecure_tls("http://localhost:8080"));
-        assert!(url_allows_insecure_tls("https://192.168.1.10:1234/v1"));
-        assert!(url_allows_insecure_tls("https://10.0.0.5/v1"));
-        assert!(!url_allows_insecure_tls("https://api.openai.com/v1"));
-        assert!(!url_allows_insecure_tls("https://api.anthropic.com"));
+    fn rejects_non_public_addresses() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "169.254.169.254",
+            "192.168.1.2",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(ip_is_non_public(ip.parse().unwrap()), "{ip}");
+        }
+        assert!(!ip_is_non_public("93.184.216.34".parse().unwrap()));
     }
 }

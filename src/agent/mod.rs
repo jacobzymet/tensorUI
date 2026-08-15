@@ -165,7 +165,6 @@ fn append_steer_messages(messages: &mut Vec<Value>, steers: &[SteerPayload]) {
         }));
     }
 }
-const PAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const DEFAULT_SEARCH_RESULTS: usize = 6;
 const MAX_SEARCH_RESULTS: usize = 20;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
@@ -540,6 +539,7 @@ pub fn stream_agent(
     api_base: &str,
     api_key: Option<&str>,
     style: ApiStyle,
+    allow_insecure_tls: bool,
     mut request: AgentRequest,
     user_skills: Vec<UserSkill>,
 ) -> ChatStream {
@@ -553,6 +553,7 @@ pub fn stream_agent(
             &api_base,
             api_key.as_deref(),
             style,
+            allow_insecure_tls,
             &mut request,
             &user_skills,
             &tx,
@@ -565,6 +566,7 @@ async fn run_agent_loop(
     api_base: &str,
     api_key: Option<&str>,
     style: ApiStyle,
+    allow_insecure_tls: bool,
     request: &mut AgentRequest,
     user_skills: &[UserSkill],
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
@@ -701,6 +703,7 @@ async fn run_agent_loop(
             StreamOnceTools {
                 pending_force: &pending_list,
                 allow_tools,
+                allow_insecure_tls,
             },
             tx,
         )
@@ -1292,6 +1295,7 @@ struct AccumToolCall {
 struct StreamOnceTools<'a> {
     pending_force: &'a [String],
     allow_tools: bool,
+    allow_insecure_tls: bool,
 }
 
 async fn stream_once(
@@ -1355,7 +1359,15 @@ async fn stream_once(
     };
 
     let token = api_key.map(str::trim).unwrap_or("");
-    let response = open_llm_sse(api_base, &url, style, token, &body).await?;
+    let response = open_llm_sse(
+        api_base,
+        &url,
+        style,
+        token,
+        &body,
+        tools.allow_insecure_tls,
+    )
+    .await?;
     let mut byte_stream = response.bytes_stream();
     let mut content = String::new();
     let mut reasoning = String::new();
@@ -2895,26 +2907,13 @@ fn scrapeable_url(url: &str) -> bool {
     !SKIP_EXT.iter().any(|ext| path.ends_with(ext))
 }
 
-/// Chrome-like Accept / navigation headers. Sparse Accept values get 406 from some CDNs.
-fn apply_browser_page_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    http::apply_browser_navigation_headers(req)
-}
-
 async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
-    let client = http::public_client();
-    let mut response = apply_browser_page_headers(client.get(url).timeout(PAGE_TIMEOUT))
-        .send()
-        .await
-        .map_err(|error| format!("{error}"))?;
+    let mut response = http::safe_public_get(url, false).await?;
 
     let mut status = response.status().as_u16();
     // Negotiate again with a looser Accept — Akamai/news stacks sometimes 406 the first try.
     if matches!(status, 406 | 403) {
-        response = apply_browser_page_headers(client.get(url).timeout(PAGE_TIMEOUT))
-            .header("Accept", "*/*")
-            .send()
-            .await
-            .map_err(|error| format!("{error}"))?;
+        response = http::safe_public_get(url, true).await?;
         status = response.status().as_u16();
     }
 

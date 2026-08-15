@@ -88,7 +88,16 @@ pub fn stream_completion(
                 .entry("model")
                 .or_insert_with(|| serde_json::json!("local"));
         }
-        proxy_openai_sse(&api_base, &url, &token, &payload, &tx, "llama-server").await
+        proxy_openai_sse(
+            &api_base,
+            &url,
+            &token,
+            &payload,
+            &tx,
+            "llama-server",
+            false,
+        )
+        .await
     })
 }
 
@@ -96,6 +105,7 @@ pub fn stream_remote_completion(
     api_base: &str,
     token: &str,
     style: ApiStyle,
+    allow_insecure_tls: bool,
     mut payload: serde_json::Value,
 ) -> ChatStream {
     let api_base = api_base.trim_end_matches('/').to_string();
@@ -118,26 +128,36 @@ pub fn stream_remote_completion(
                     );
                 }
                 let url = format!("{api_base}/chat/completions");
-                proxy_openai_sse(&api_base, &url, &token, &payload, &tx, "remote LLM").await
+                proxy_openai_sse(
+                    &api_base,
+                    &url,
+                    &token,
+                    &payload,
+                    &tx,
+                    "remote LLM",
+                    allow_insecure_tls,
+                )
+                .await
             }
             ApiStyle::Anthropic => {
                 let url = format!("{api_base}/messages");
                 let anth =
                     anthropic::openai_to_anthropic_messages(&payload).map_err(StreamFail::Other)?;
-                proxy_anthropic_sse(&api_base, &url, &token, &anth, &tx).await
+                proxy_anthropic_sse(&api_base, &url, &token, &anth, &tx, allow_insecure_tls).await
             }
         }
     })
 }
 
 pub(crate) async fn open_llm_sse(
-    api_base: &str,
+    _api_base: &str,
     url: &str,
     style: ApiStyle,
     token: &str,
     payload: &serde_json::Value,
+    allow_insecure_tls: bool,
 ) -> Result<reqwest::Response, StreamFail> {
-    let client = http::llm_client(api_base, REQUEST_TIMEOUT);
+    let client = http::llm_client(REQUEST_TIMEOUT, allow_insecure_tls);
     let mut request = client.post(url).json(payload);
     for (name, value) in providers::provider_auth_headers(style, token) {
         request = request.header(name, value);
@@ -165,8 +185,18 @@ async fn proxy_openai_sse(
     payload: &serde_json::Value,
     tx: &mpsc::Sender<Result<Vec<u8>, io::Error>>,
     upstream_label: &str,
+    allow_insecure_tls: bool,
 ) -> Result<(), StreamFail> {
-    let response = match open_llm_sse(api_base, url, ApiStyle::Openai, token, payload).await {
+    let response = match open_llm_sse(
+        api_base,
+        url,
+        ApiStyle::Openai,
+        token,
+        payload,
+        allow_insecure_tls,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(StreamFail::Other(message)) => {
             return Err(StreamFail::Other(message.replacen(
@@ -186,8 +216,17 @@ async fn proxy_anthropic_sse(
     token: &str,
     payload: &serde_json::Value,
     tx: &mpsc::Sender<Result<Vec<u8>, io::Error>>,
+    allow_insecure_tls: bool,
 ) -> Result<(), StreamFail> {
-    let response = open_llm_sse(api_base, url, ApiStyle::Anthropic, token, payload).await?;
+    let response = open_llm_sse(
+        api_base,
+        url,
+        ApiStyle::Anthropic,
+        token,
+        payload,
+        allow_insecure_tls,
+    )
+    .await?;
     let mut byte_stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut translator = AnthropicSseTranslator::default();
@@ -253,6 +292,7 @@ pub async fn generate_chat_title(
     style: ApiStyle,
     model: Option<&str>,
     user_message: &str,
+    allow_insecure_tls: bool,
 ) -> Result<String, String> {
     let api_base = api_base.trim_end_matches('/');
     let snippet: String = user_message.chars().take(240).collect();
@@ -294,7 +334,7 @@ pub async fn generate_chat_title(
         );
     }
 
-    let value = post_title_completion(api_base, token, style, &payload).await?;
+    let value = post_title_completion(api_base, token, style, &payload, allow_insecure_tls).await?;
     let raw = match style {
         ApiStyle::Openai => extract_openai_title_text(&value),
         ApiStyle::Anthropic => extract_anthropic_text(&value),
@@ -312,8 +352,9 @@ async fn post_title_completion(
     token: &str,
     style: ApiStyle,
     payload: &serde_json::Value,
+    allow_insecure_tls: bool,
 ) -> Result<serde_json::Value, String> {
-    let client = http::llm_client(api_base, TITLE_TIMEOUT);
+    let client = http::llm_client(TITLE_TIMEOUT, allow_insecure_tls);
     let (url, body) = match style {
         ApiStyle::Openai => (format!("{api_base}/chat/completions"), payload.clone()),
         ApiStyle::Anthropic => (

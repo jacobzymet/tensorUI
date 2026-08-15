@@ -54,6 +54,9 @@ pub struct Provider {
     pub token: String,
     #[serde(default)]
     pub api_style: ApiStyle,
+    /// Explicit opt-in for self-signed or otherwise invalid HTTPS certificates.
+    #[serde(default)]
+    pub allow_insecure_tls: bool,
 }
 
 impl Provider {
@@ -69,6 +72,7 @@ impl Provider {
             base: base.into(),
             token: token.into(),
             api_style,
+            allow_insecure_tls: false,
         }
     }
 
@@ -87,6 +91,7 @@ pub struct ProviderPublic {
     pub name: String,
     pub base: String,
     pub api_style: &'static str,
+    pub allow_insecure_tls: bool,
     pub token_set: bool,
     pub token_masked: String,
     pub active: bool,
@@ -100,6 +105,12 @@ pub struct ProvidersConfig {
     pub items: Vec<Provider>,
     #[serde(default, alias = "active_remote_id")]
     pub active_provider_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProviderUpsertOptions {
+    pub allow_insecure_tls: Option<bool>,
+    pub activate: bool,
 }
 
 impl ProvidersConfig {
@@ -151,7 +162,7 @@ impl ProvidersConfig {
         base: &str,
         token: Option<&str>,
         api_style: ApiStyle,
-        activate: bool,
+        options: ProviderUpsertOptions,
     ) -> Result<Provider, String> {
         self.migrate();
         let Some(normalized) = normalize_provider_base(base, api_style) else {
@@ -186,11 +197,14 @@ impl ProvidersConfig {
             provider.name = cleaned_name;
             provider.base = normalized;
             provider.api_style = api_style;
+            if let Some(allow) = options.allow_insecure_tls {
+                provider.allow_insecure_tls = allow;
+            }
             if let Some(token) = token {
                 provider.token = token.to_string();
             }
             let updated = provider.clone();
-            if activate {
+            if options.activate {
                 self.active_provider_id = updated.id.clone();
             }
             return Ok(updated);
@@ -202,7 +216,7 @@ impl ProvidersConfig {
         let provider = Provider::new(cleaned_name, normalized, token.unwrap_or(""), api_style);
         let created = provider.clone();
         self.items.push(provider);
-        if activate || self.items.len() == 1 {
+        if options.activate || self.items.len() == 1 {
             self.active_provider_id = created.id.clone();
         }
         Ok(created)
@@ -314,10 +328,15 @@ pub fn mask_token(token: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    if trimmed.len() <= 8 {
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= 8 {
         return "••••••••".into();
     }
-    format!("{}…{}", &trimmed[..4], &trimmed[trimmed.len() - 4..])
+    format!(
+        "{}…{}",
+        chars[..4].iter().collect::<String>(),
+        chars[chars.len() - 4..].iter().collect::<String>()
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1434,7 +1453,7 @@ fn base_is_local(api_base: &str) -> bool {
     // Reuse the app's private/lab-host classification so inference servers on
     // a LAN keep their Ollama/LM Studio capability detection too. The explicit
     // host check also covers bracketed IPv6 loopback URLs.
-    http::url_allows_insecure_tls(api_base)
+    http::url_is_private_or_local(api_base)
         || split_openai_base(api_base).is_some_and(|(_, host, _)| host_is_local(&host))
 }
 
@@ -1842,6 +1861,12 @@ fn jinja_mentions_ident(template: &str, ident: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn masks_unicode_tokens_without_byte_slicing() {
+        assert_eq!(mask_token("🔑🔑🔑🔑abcdef🔒🔒🔒🔒"), "🔑🔑🔑🔑…🔒🔒🔒🔒");
+        assert_eq!(mask_token("éééé"), "••••••••");
+    }
 
     fn reasoning_model(
         control: Option<&str>,
