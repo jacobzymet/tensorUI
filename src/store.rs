@@ -14,6 +14,7 @@ use crate::crypto;
 
 pub const CHATS_FILE: &str = "chats.json";
 pub const PREFERENCES_FILE: &str = "preferences.json";
+pub const PROVIDER_TOKENS_FILE: &str = "provider-tokens.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -80,6 +81,37 @@ pub fn chats_path(root: &Path) -> PathBuf {
 
 pub fn preferences_path(root: &Path) -> PathBuf {
     root.join(PREFERENCES_FILE)
+}
+
+pub fn provider_tokens_path(root: &Path) -> PathBuf {
+    root.join(PROVIDER_TOKENS_FILE)
+}
+
+pub fn load_provider_tokens(root: &Path, key: &crypto::DiskKey) -> Result<Value, StoreError> {
+    match read_json_file(&provider_tokens_path(root))? {
+        Some(value) => crypto::decrypt_value(key, &value, crypto::AAD_PROVIDER_TOKENS)
+            .map_err(StoreError::from),
+        None => Ok(serde_json::json!({})),
+    }
+}
+
+pub fn save_provider_tokens(
+    root: &Path,
+    value: &Value,
+    key: &crypto::DiskKey,
+) -> Result<(), StoreError> {
+    ensure_data_dir(root)?;
+    let encrypted = crypto::encrypt_value(key, value, crypto::AAD_PROVIDER_TOKENS)?;
+    atomic_write_json(&provider_tokens_path(root), &encrypted)?;
+    Ok(())
+}
+
+pub fn clear_provider_tokens(root: &Path) -> Result<()> {
+    let path = provider_tokens_path(root);
+    if path.exists() {
+        fs::remove_file(&path).with_context(|| format!("could not remove {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub fn ensure_data_dir(root: &Path) -> Result<()> {
@@ -403,5 +435,26 @@ mod tests {
         )
         .unwrap();
         assert!(load_chats(root, Some(&key)).is_err());
+    }
+
+    #[test]
+    fn provider_tokens_are_authenticated_and_encrypted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("a sufficiently long passphrase", &salt).unwrap();
+        let tokens = serde_json::json!({ "provider-1": "secret-token" });
+        save_provider_tokens(root, &tokens, &key).unwrap();
+
+        let raw = read_json_file(&provider_tokens_path(root))
+            .unwrap()
+            .unwrap();
+        assert!(crypto::is_envelope(&raw));
+        assert!(
+            !serde_json::to_string(&raw)
+                .unwrap()
+                .contains("secret-token")
+        );
+        assert_eq!(load_provider_tokens(root, &key).unwrap(), tokens);
     }
 }

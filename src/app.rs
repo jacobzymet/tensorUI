@@ -56,11 +56,54 @@ impl App {
     }
 
     pub fn persist_config(&mut self) {
-        let _ = self.config.save(&self.config_path);
+        if self.encryption_enabled() {
+            if let Some(key) = self.disk_key.as_ref() {
+                let tokens = self.provider_tokens_value();
+                let _ = store::save_provider_tokens(&self.data_dir(), &tokens, key);
+            }
+            let mut public_config = self.config.clone();
+            for provider in &mut public_config.providers.items {
+                provider.token.clear();
+            }
+            let _ = public_config.save(&self.config_path);
+        } else {
+            let _ = self.config.save(&self.config_path);
+        }
     }
 
     pub fn skill_store(&self) -> crate::skills::SkillStore {
-        crate::skills::SkillStore::new(&self.config_path)
+        crate::skills::SkillStore::new(
+            &self.config_path,
+            self.disk_key(),
+            self.encryption_enabled(),
+        )
+    }
+
+    fn provider_tokens_value(&self) -> serde_json::Value {
+        serde_json::Value::Object(
+            self.config
+                .providers
+                .items
+                .iter()
+                .map(|provider| {
+                    (
+                        provider.id.clone(),
+                        serde_json::Value::String(provider.token.clone()),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn restore_provider_tokens(&mut self, value: &serde_json::Value) {
+        let Some(tokens) = value.as_object() else {
+            return;
+        };
+        for provider in &mut self.config.providers.items {
+            if let Some(token) = tokens.get(&provider.id).and_then(|value| value.as_str()) {
+                provider.token = token.to_string();
+            }
+        }
     }
 
     pub fn list_user_skills(&self) -> Result<Vec<crate::skills::UserSkill>, String> {
@@ -577,7 +620,29 @@ impl App {
             let _ = crypto::save_meta(&root, &meta);
         }
 
+        let tokens = if store::provider_tokens_path(&root).is_file() {
+            store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?
+        } else {
+            // Upgrade installs that enabled chat encryption before credentials
+            // were included: capture the still-plaintext tokens before scrubbing.
+            let tokens = self.provider_tokens_value();
+            store::save_provider_tokens(&root, &tokens, &key).map_err(Self::map_store_err)?;
+            tokens
+        };
+        self.restore_provider_tokens(&tokens);
+
+        // Upgrade installs whose encryption predates encrypted skill storage.
+        let encrypted_skills = crate::skills::SkillStore::new(&self.config_path, Some(&key), true);
+        if encrypted_skills.list().is_err() {
+            let plaintext_skills = crate::skills::SkillStore::new(&self.config_path, None, false)
+                .list()
+                .map_err(|error| error.to_string())?;
+            encrypted_skills
+                .rewrite(&plaintext_skills)
+                .map_err(|error| error.to_string())?;
+        }
         self.disk_key = Some(key);
+        self.persist_config();
         Ok(())
     }
 
@@ -608,6 +673,7 @@ impl App {
         // Read current plaintext while encryption is still off.
         let chats = store::load_chats(&root, None).map_err(Self::map_store_err)?;
         let prefs = store::load_preferences(&root, None).map_err(Self::map_store_err)?;
+        let skills = self.list_user_skills()?;
 
         let salt = crypto::random_salt().map_err(|error| format!("{error:#}"))?;
         let key = crypto::derive_key(passphrase, &salt).map_err(|error| format!("{error:#}"))?;
@@ -617,8 +683,14 @@ impl App {
         // leave encryption.json claiming "on" while files are still plaintext.
         store::save_chats(&root, chats, Some(&key)).map_err(Self::map_store_err)?;
         store::save_preferences(&root, prefs, Some(&key)).map_err(Self::map_store_err)?;
+        store::save_provider_tokens(&root, &self.provider_tokens_value(), &key)
+            .map_err(Self::map_store_err)?;
+        crate::skills::SkillStore::new(&self.config_path, Some(&key), true)
+            .rewrite(&skills)
+            .map_err(|error| error.to_string())?;
         crypto::save_meta(&root, &meta).map_err(|error| format!("{error:#}"))?;
         self.disk_key = Some(key);
+        self.persist_config();
         Ok(())
     }
 
@@ -631,13 +703,23 @@ impl App {
 
         let chats = store::load_chats(&root, Some(&key)).map_err(Self::map_store_err)?;
         let prefs = store::load_preferences(&root, Some(&key)).map_err(Self::map_store_err)?;
+        let tokens = store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?;
+        self.restore_provider_tokens(&tokens);
+        let skills = crate::skills::SkillStore::new(&self.config_path, Some(&key), true)
+            .list()
+            .map_err(|error| error.to_string())?;
 
         // Write plaintext first while meta still exists (dedicated helpers), then
         // remove meta. Avoids a window of encrypted files with no meta.
         store::save_chats_plaintext_for_disable(&root, chats).map_err(Self::map_store_err)?;
         store::save_preferences_plaintext_for_disable(&root, prefs).map_err(Self::map_store_err)?;
+        crate::skills::SkillStore::new(&self.config_path, None, false)
+            .rewrite(&skills)
+            .map_err(|error| error.to_string())?;
+        store::clear_provider_tokens(&root).map_err(|error| format!("{error:#}"))?;
         crypto::clear_meta(&root).map_err(|error| format!("{error:#}"))?;
         self.disk_key = None;
+        let _ = self.config.save(&self.config_path);
         Ok(())
     }
 

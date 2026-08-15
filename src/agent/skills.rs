@@ -7,6 +7,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::crypto;
+
 const MAX_SKILLS: usize = 32;
 const MAX_NAME_LEN: usize = 64;
 const MAX_DESCRIPTION_LEN: usize = 280;
@@ -66,15 +68,21 @@ struct SkillMeta {
 
 pub struct SkillStore {
     root: PathBuf,
+    key: Option<crypto::DiskKey>,
+    encrypted: bool,
 }
 
 impl SkillStore {
-    pub fn new(config_path: &Path) -> Self {
+    pub fn new(config_path: &Path, key: Option<&crypto::DiskKey>, encrypted: bool) -> Self {
         let root = config_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("chat-skills");
-        Self { root }
+        Self {
+            root,
+            key: key.cloned(),
+            encrypted,
+        }
     }
 
     pub fn list(&self) -> Result<Vec<UserSkill>> {
@@ -211,7 +219,10 @@ impl SkillStore {
         }
         let raw = fs::read_to_string(&path)
             .with_context(|| format!("could not read {}", path.display()))?;
-        serde_json::from_str(&raw)
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("invalid skill index {}", path.display()))?;
+        let value = self.decode(value, crypto::AAD_SKILL_INDEX)?;
+        serde_json::from_value(value)
             .with_context(|| format!("invalid skill index {}", path.display()))
     }
 
@@ -219,7 +230,9 @@ impl SkillStore {
         fs::create_dir_all(&self.root)
             .with_context(|| format!("could not create {}", self.root.display()))?;
         let path = self.index_path();
-        let raw = serde_json::to_string_pretty(index).context("serialize skill index")?;
+        let value = serde_json::to_value(index).context("serialize skill index")?;
+        let value = self.encode(&value, crypto::AAD_SKILL_INDEX)?;
+        let raw = serde_json::to_string_pretty(&value).context("serialize skill index")?;
         fs::write(&path, raw).with_context(|| format!("could not write {}", path.display()))
     }
 
@@ -233,15 +246,81 @@ impl SkillStore {
 
     fn read_content(&self, id: &str) -> Result<String> {
         let path = self.content_path(id);
-        fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("could not read {}", path.display()))?;
+        if !self.encrypted {
+            return Ok(raw);
+        }
+        let value = serde_json::from_str(&raw)
+            .with_context(|| format!("invalid encrypted skill {}", path.display()))?;
+        let aad = skill_content_aad(id);
+        self.decode(value, &aad)?
+            .as_str()
+            .map(str::to_string)
+            .context("decrypted skill content is not a string")
     }
 
     fn write_content(&self, id: &str, content: &str) -> Result<()> {
         fs::create_dir_all(&self.root)
             .with_context(|| format!("could not create {}", self.root.display()))?;
         let path = self.content_path(id);
-        fs::write(&path, content).with_context(|| format!("could not write {}", path.display()))
+        let raw = if self.encrypted {
+            let aad = skill_content_aad(id);
+            let value = self.encode(&serde_json::Value::String(content.into()), &aad)?;
+            serde_json::to_string_pretty(&value).context("serialize encrypted skill")?
+        } else {
+            content.to_string()
+        };
+        fs::write(&path, raw).with_context(|| format!("could not write {}", path.display()))
     }
+
+    fn encode(&self, value: &serde_json::Value, aad: &[u8]) -> Result<serde_json::Value> {
+        if !self.encrypted {
+            return Ok(value.clone());
+        }
+        let key = self
+            .key
+            .as_ref()
+            .context("Local data is encrypted and locked")?;
+        crypto::encrypt_value(key, value, aad)
+    }
+
+    fn decode(&self, value: serde_json::Value, aad: &[u8]) -> Result<serde_json::Value> {
+        if !self.encrypted {
+            return Ok(value);
+        }
+        let key = self
+            .key
+            .as_ref()
+            .context("Local data is encrypted and locked")?;
+        crypto::decrypt_value(key, &value, aad)
+    }
+
+    pub fn rewrite(&self, skills: &[UserSkill]) -> Result<()> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("could not create {}", self.root.display()))?;
+        let mut index = SkillIndex::default();
+        for skill in skills {
+            self.write_content(&skill.id, &skill.content)?;
+            index.skills.push(SkillMeta {
+                id: skill.id.clone(),
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                enabled: skill.enabled,
+                source_filename: skill.source_filename.clone(),
+                created_at: skill.created_at,
+                updated_at: skill.updated_at,
+            });
+        }
+        self.save_index(&index)
+    }
+}
+
+fn skill_content_aad(id: &str) -> Vec<u8> {
+    let mut aad = crypto::AAD_SKILL_CONTENT.to_vec();
+    aad.push(b':');
+    aad.extend_from_slice(id.as_bytes());
+    aad
 }
 
 impl UserSkill {
@@ -407,7 +486,7 @@ mod tests {
     fn import_parses_frontmatter_and_persists() {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("config.toml");
-        let store = SkillStore::new(&config);
+        let store = SkillStore::new(&config, None, false);
         let skill = store
             .import_markdown(
                 Some("code-review.md"),
@@ -435,7 +514,7 @@ mod tests {
     #[test]
     fn update_and_delete_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SkillStore::new(&dir.path().join("config.toml"));
+        let store = SkillStore::new(&dir.path().join("config.toml"), None, false);
         let created = store
             .create(SkillUpsert {
                 name: Some("Draft".into()),
@@ -462,5 +541,30 @@ mod tests {
         assert_eq!(updated.content, "new body");
         store.delete(&created.id).unwrap();
         assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn encrypted_store_hides_skill_metadata_and_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("a sufficiently long passphrase", &salt).unwrap();
+        let store = SkillStore::new(&config, Some(&key), true);
+        let created = store
+            .create(SkillUpsert {
+                name: Some("Private skill".into()),
+                description: Some("Sensitive description".into()),
+                content: Some("secret instructions".into()),
+                enabled: Some(true),
+                source_filename: None,
+            })
+            .unwrap();
+
+        let index = fs::read_to_string(store.index_path()).unwrap();
+        let content = fs::read_to_string(store.content_path(&created.id)).unwrap();
+        assert!(!index.contains("Private skill"));
+        assert!(!index.contains("Sensitive description"));
+        assert!(!content.contains("secret instructions"));
+        assert_eq!(store.list().unwrap()[0], created);
     }
 }

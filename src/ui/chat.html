@@ -5507,14 +5507,14 @@
               <div id="settingsEncryptionEnable" class="settings-encryption-form">
                 <label class="field">
                   <span class="field-label">Passphrase</span>
-                  <input class="field-input" id="encryptionPassphrase" type="password" autocomplete="new-password" spellcheck="false">
+                  <input class="field-input" id="encryptionPassphrase" type="password" minlength="16" autocomplete="new-password" spellcheck="false">
                 </label>
                 <label class="field">
                   <span class="field-label">Confirm passphrase</span>
-                  <input class="field-input" id="encryptionPassphraseConfirm" type="password" autocomplete="new-password" spellcheck="false">
+                  <input class="field-input" id="encryptionPassphraseConfirm" type="password" minlength="16" autocomplete="new-password" spellcheck="false">
                 </label>
                 <button type="button" class="btn" id="btnEnableEncryption">Enable encryption</button>
-                <p class="field-hint" style="margin:0.45rem 0 0">Uses Argon2id + AES-256-GCM. You must unlock with this passphrase after each app restart. Forgotten passphrases cannot be recovered.</p>
+                <p class="field-hint" style="margin:0.45rem 0 0">Encrypts chats, settings, provider tokens, and skill contents with Argon2id + AES-256-GCM. Use at least 16 characters. You must unlock after each restart; forgotten passphrases cannot be recovered.</p>
               </div>
               <div id="settingsEncryptionUnlock" class="settings-encryption-form is-hidden">
                 <label class="field">
@@ -6631,7 +6631,7 @@
           filesEl.textContent = 'Browser mode ignores the data folder for chats and settings. Providers, appearance, and skills still use disk.';
         } else if (dataInfo) {
           filesEl.textContent = dataInfo.encryption_enabled
-            ? 'Includes config.toml, encrypted chats.json / preferences.json, encryption.json, and chat-skills/. Providers & appearance stay in config.toml.'
+            ? 'Chats, preferences, provider tokens, and skill contents are encrypted. Non-secret app configuration remains in config.toml.'
             : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Providers & appearance stay in config.toml.';
         } else {
           filesEl.textContent = '—';
@@ -6677,7 +6677,7 @@
       }
 
       if (!enabled) {
-        statusEl.textContent = 'Off — chats and settings are stored as plain JSON on disk.';
+        statusEl.textContent = 'Off — chats, settings, provider tokens, and skills are stored unencrypted on disk.';
         enableEl.classList.remove('is-hidden');
         return;
       }
@@ -6688,7 +6688,7 @@
         return;
       }
 
-      statusEl.textContent = 'Unlocked — chats and settings are encrypted on disk for this session.';
+      statusEl.textContent = 'Unlocked — chats, settings, provider tokens, and skill contents are encrypted on disk.';
       activeEl.classList.remove('is-hidden');
     }
 

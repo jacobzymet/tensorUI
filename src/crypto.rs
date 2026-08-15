@@ -1,11 +1,12 @@
 //! Passphrase-based encryption at rest for local chat data (Argon2id + AES-256-GCM).
 //!
-//! Threat model: protects `chats.json` / `preferences.json` on disk against offline
-//! reading (stolen laptop backup, casual filesystem access). The passphrase is never
-//! stored. The derived key lives only in process memory until lock / exit.
+//! Threat model: protects chats, preferences, provider credentials, and user skills
+//! against offline reading (stolen laptop backup, casual filesystem access). The
+//! passphrase is never stored. The derived key lives only in process memory until
+//! lock / exit.
 //!
-//! Not covered: provider tokens in `config.toml`, skills markdown, OS memory dumps,
-//! malware in the same user session, or a forgotten passphrase.
+//! Not covered: pre-existing copies/backups, filenames and timestamps, OS memory
+//! dumps, malware in the same unlocked user session, or a forgotten passphrase.
 
 use std::{
     fs::{self, OpenOptions},
@@ -26,7 +27,7 @@ use serde_json::Value;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const META_FILE: &str = "encryption.json";
-pub const MIN_PASSPHRASE_CHARS: usize = 8;
+pub const MIN_PASSPHRASE_CHARS: usize = 16;
 pub const MAX_PASSPHRASE_CHARS: usize = 1024;
 
 const SALT_LEN: usize = 32;
@@ -39,13 +40,18 @@ const ENVELOPE_V1: u32 = 1;
 const ENVELOPE_V2: u32 = 2;
 const META_VERSION: u32 = 2;
 
-/// OWASP interactive Argon2id minimum (m=19 MiB, t=2, p=1).
-const KDF_MEMORY_KIB: u32 = 19_456;
-const KDF_ITERATIONS: u32 = 2;
+/// Deliberately above the OWASP interactive Argon2id minimum.
+const KDF_MEMORY_KIB: u32 = 65_536;
+const KDF_ITERATIONS: u32 = 3;
 const KDF_PARALLELISM: u32 = 1;
+const LEGACY_KDF_MEMORY_KIB: u32 = 19_456;
+const LEGACY_KDF_ITERATIONS: u32 = 2;
 
 pub const AAD_CHATS: &[u8] = b"tensorui:v1:chats";
 pub const AAD_PREFERENCES: &[u8] = b"tensorui:v1:preferences";
+pub const AAD_PROVIDER_TOKENS: &[u8] = b"tensorui:v1:provider-tokens";
+pub const AAD_SKILL_INDEX: &[u8] = b"tensorui:v1:skill-index";
+pub const AAD_SKILL_CONTENT: &[u8] = b"tensorui:v1:skill-content";
 const AAD_VERIFIER: &[u8] = b"tensorui:v1:verifier";
 const VERIFIER_PLAINTEXT: &[u8] = b"tensorui-ok";
 
@@ -67,10 +73,10 @@ pub struct EncryptionMeta {
 }
 
 fn default_kdf_memory() -> u32 {
-    KDF_MEMORY_KIB
+    LEGACY_KDF_MEMORY_KIB
 }
 fn default_kdf_iterations() -> u32 {
-    KDF_ITERATIONS
+    LEGACY_KDF_ITERATIONS
 }
 fn default_kdf_parallelism() -> u32 {
     KDF_PARALLELISM
@@ -467,7 +473,7 @@ mod tests {
     #[test]
     fn passphrase_validation() {
         assert!(validate_passphrase("short").is_err());
-        assert!(validate_passphrase("long enough").is_ok());
+        assert!(validate_passphrase("a long enough passphrase").is_ok());
         assert!(validate_passphrase(&"x".repeat(MAX_PASSPHRASE_CHARS + 1)).is_err());
     }
 }
