@@ -7,7 +7,12 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use tensorui::{app::App, config::{self, Config}, system::open_in_browser, web};
+use tensorui::{
+    app::App,
+    config::{self, Config},
+    system::open_in_browser,
+    web,
+};
 use tokio::net::TcpListener;
 
 #[derive(Debug, Parser)]

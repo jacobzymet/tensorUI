@@ -8,7 +8,10 @@ fn main() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/app.ico");
         res.set("ProductName", "TensorMI Harness");
-        res.set("FileDescription", "A local, lightweight, open source LLM harness for humanity");
+        res.set(
+            "FileDescription",
+            "A local, lightweight, open source LLM harness for humanity",
+        );
         res.compile()
             .expect("failed to compile Windows resources for app icon");
     }

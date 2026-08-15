@@ -2181,9 +2181,8 @@ async fn execute_tool(
                 .arguments
                 .get("offset")
                 .and_then(|v| {
-                    v.as_u64().or_else(|| {
-                        v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
-                    })
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
                 })
                 .unwrap_or(0) as usize;
             let custom_max = call
@@ -2191,12 +2190,13 @@ async fn execute_tool(
                 .get("max_chars")
                 .or_else(|| call.arguments.get("limit"))
                 .and_then(|v| {
-                    v.as_u64().or_else(|| {
-                        v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
-                    })
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
                 })
                 .map(|n| n as usize);
-            Ok(ToolOutcome::text(fetch_single_url(url, skills, offset, custom_max).await?))
+            Ok(ToolOutcome::text(
+                fetch_single_url(url, skills, offset, custom_max).await?,
+            ))
         }
         "activate_skill" | "read_skill" => {
             let key = call
@@ -2218,12 +2218,7 @@ async fn execute_tool(
     }
 }
 
-fn format_page_window(
-    url: &str,
-    full_text: &str,
-    offset: usize,
-    max_chars: usize,
-) -> String {
+fn format_page_window(url: &str, full_text: &str, offset: usize, max_chars: usize) -> String {
     let total_chars = full_text.chars().count();
     if total_chars == 0 {
         return format!("Fetched {url} but extracted no readable text.");
@@ -2256,7 +2251,9 @@ fn format_page_window(
     let header = if total_chars <= max_chars && offset == 0 {
         format!("Fetched page text from {url} ({total_chars} characters):\n")
     } else {
-        format!("Fetched page text from {url} (characters {offset}..{end_offset} of {total_chars} total):\n")
+        format!(
+            "Fetched page text from {url} (characters {offset}..{end_offset} of {total_chars} total):\n"
+        )
     };
 
     format!("{header}{prefix}{slice}{suffix}")
@@ -3599,7 +3596,9 @@ mod tests {
         let chunk1 = format_page_window("https://example.com/test", sample, 0, 10);
         assert!(chunk1.contains("characters 0..10 of 36 total"));
         assert!(chunk1.contains("ABCDEFGHIJ"));
-        assert!(chunk1.contains("Call fetch_url with url=\"https://example.com/test\" and offset=10"));
+        assert!(
+            chunk1.contains("Call fetch_url with url=\"https://example.com/test\" and offset=10")
+        );
 
         // 3. Middle chunk
         let chunk2 = format_page_window("https://example.com/test", sample, 10, 10);
