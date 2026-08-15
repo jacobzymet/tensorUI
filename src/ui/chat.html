@@ -862,6 +862,7 @@
     }
     .convo-delete,
     .convo-move,
+    .convo-pin,
     .project-settings-btn {
       flex: 0 0 auto;
       appearance: none;
@@ -885,7 +886,8 @@
         min-width var(--dur-short) var(--ease-out);
     }
     .convo-delete,
-    .convo-move {
+    .convo-move,
+    .convo-pin {
       /* Collapse when idle so titles keep the full row; expand on hover/focus. */
       width: 0;
       min-width: 0;
@@ -895,15 +897,30 @@
     }
     .convo-delete:hover,
     .convo-move:hover,
+    .convo-pin:hover,
     .project-settings-btn:hover { background: var(--surface-active); }
     .convo-move { font-size: var(--text-sm); }
+    .convo-pin svg {
+      width: 0.82rem;
+      height: 0.82rem;
+    }
+    .convo-item.is-pinned .convo-pin {
+      width: 1.35rem;
+      min-width: 1.35rem;
+      opacity: 1;
+      pointer-events: auto;
+      color: var(--color-accent);
+    }
     .project-settings-btn { font-size: var(--text-sm); opacity: 1; }
     .convo-item:hover .convo-delete,
     .convo-item:hover .convo-move,
+    .convo-item:hover .convo-pin,
     .convo-item:focus-within .convo-delete,
     .convo-item:focus-within .convo-move,
+    .convo-item:focus-within .convo-pin,
     .convo-delete:focus-visible,
     .convo-move:focus-visible,
+    .convo-pin:focus-visible,
     .project-settings-btn:focus-visible {
       width: 1.35rem;
       min-width: 1.35rem;
@@ -912,6 +929,7 @@
     }
     .convo-delete:hover { color: var(--color-danger); }
     .convo-move:hover,
+    .convo-pin:hover,
     .project-settings-btn:hover { color: var(--color-accent); }
     .convo-menu {
       position: fixed;
@@ -4871,6 +4889,10 @@
             <span>Projects</span>
           </button>
         </div>
+        <div class="sidebar-section is-hidden" id="sidebarPinnedSection" aria-label="Pinned conversations">
+          <p class="sidebar-label">Pinned</p>
+          <nav class="convo-list" id="pinnedConvoList" aria-label="Pinned conversations"></nav>
+        </div>
         <div id="sidebarProjectContext" class="sidebar-project-context is-hidden"></div>
         <p class="sidebar-label" id="sidebarConvoLabel">Recents</p>
         <nav class="convo-list" id="convoList" aria-label="Conversations"></nav>
@@ -5717,6 +5739,8 @@
     const btnProjectsNav = document.getElementById('btnProjectsNav');
     const sidebarProjectContext = document.getElementById('sidebarProjectContext');
     const sidebarConvoLabel = document.getElementById('sidebarConvoLabel');
+    const sidebarPinnedSection = document.getElementById('sidebarPinnedSection');
+    const pinnedConvoList = document.getElementById('pinnedConvoList');
     const topbarProject = document.getElementById('topbarProject');
     const emptyEyebrow = document.getElementById('emptyEyebrow');
     const btnNewChat = document.getElementById('btnNewChat');
@@ -6128,6 +6152,10 @@
           ? convo.sortOrder
           : null,
         incognito: !!convo.incognito,
+        pinned: !!convo.pinned && !convo.incognito,
+        pinnedAt: typeof convo.pinnedAt === 'number' && Number.isFinite(convo.pinnedAt)
+          ? convo.pinnedAt
+          : null,
       };
     }
 
@@ -10863,7 +10891,13 @@
     }
 
     function uncategorizedConversations() {
-      return bySidebarOrder(conversations.filter((convo) => !convo.projectId));
+      return bySidebarOrder(conversations.filter((convo) => !convo.projectId && !convo.pinned));
+    }
+
+    function pinnedConversations() {
+      return conversations
+        .filter((convo) => convo.pinned && !convo.incognito)
+        .sort((a, b) => (b.pinnedAt || b.updatedAt) - (a.pinnedAt || a.updatedAt));
     }
 
     function conversationsForProject(projectId) {
@@ -10975,6 +11009,7 @@
       const item = document.createElement('div');
       item.className = 'convo-item' + (convo.id === activeId && mainView !== 'projects' ? ' is-active' : '');
       if (convo.incognito) item.classList.add('is-incognito');
+      if (convo.pinned) item.classList.add('is-pinned');
       item.dataset.convoId = convo.id;
       if (nested) item.classList.add('is-nested');
       if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
@@ -11000,6 +11035,17 @@
       title.textContent = fullTitle;
       title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
       item.title = title.title;
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'convo-pin';
+      pin.setAttribute('aria-label', convo.pinned ? 'Unpin conversation' : 'Pin conversation');
+      pin.title = convo.pinned ? 'Unpin' : 'Pin';
+      pin.draggable = false;
+      pin.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M5 17h14"/><path d="m7 10 1-7h8l1 7 2 3H5z"/></svg>';
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation();
+        togglePinnedConversation(convo.id);
+      });
       const move = document.createElement('button');
       move.type = 'button';
       move.className = 'convo-move';
@@ -11022,6 +11068,7 @@
         deleteConversation(convo.id);
       });
       item.appendChild(title);
+      if (!convo.incognito) item.appendChild(pin);
       item.appendChild(move);
       item.appendChild(del);
       item.addEventListener('click', () => {
@@ -11097,6 +11144,15 @@
       renderSidebar();
       if (mainView === 'projects') renderProjectsPage();
       updateGreeting();
+    }
+
+    function togglePinnedConversation(convoId) {
+      const convo = conversations.find((item) => item.id === convoId);
+      if (!convo || convo.incognito) return;
+      convo.pinned = !convo.pinned;
+      convo.pinnedAt = convo.pinned ? Date.now() : null;
+      saveStore();
+      renderSidebar();
     }
 
     function formatProjectDate(ts) {
@@ -12046,6 +12102,13 @@
       sidebarProjectContext.classList.add('is-hidden');
       btnProjectsNav.classList.toggle('is-active', mainView === 'projects');
 
+      const pinned = pinnedConversations();
+      sidebarPinnedSection.classList.toggle('is-hidden', pinned.length === 0);
+      pinnedConvoList.innerHTML = '';
+      for (const convo of pinned) {
+        pinnedConvoList.appendChild(createConvoItem(convo));
+      }
+
       const project = getProject(activeProjectId);
       if (project && mainView === 'chat') {
         sidebarProjectContext.classList.remove('is-hidden');
@@ -12076,7 +12139,7 @@
         sidebarProjectContext.appendChild(chip);
         sidebarProjectContext.appendChild(leave);
         sidebarConvoLabel.textContent = 'Project chats';
-        const projectConvos = conversationsForProject(project.id);
+        const projectConvos = conversationsForProject(project.id).filter((convo) => !convo.pinned);
         if (projectConvos.length === 0) {
           const hint = document.createElement('p');
           hint.className = 'convo-empty-hint';
@@ -12907,6 +12970,8 @@
           projectId,
           sortOrder: nextTopSortOrder(projectId),
           incognito: !!source.incognito,
+          pinned: false,
+          pinnedAt: null,
         };
         conversations.push(convo);
         if (activeId) stickByConvo.set(activeId, stickToBottom);
@@ -12933,6 +12998,8 @@
           projectId: activeProjectId || null,
           sortOrder: nextTopSortOrder(activeProjectId || null),
           incognito: !!draftIncognito,
+          pinned: false,
+          pinnedAt: null,
         };
         conversations.push(convo);
         activeId = id;
