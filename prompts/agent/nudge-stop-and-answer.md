@@ -1,1 +1,1 @@
-Stop calling tools. Write the final answer now in the normal reply text (not inside thinking/reasoning). Lead with the conclusion, use the sources you already found, and cite them as markdown links.
+Stop calling tools. Write the final answer now in normal reply text (not thinking/reasoning). Lead with the conclusion, use the sources already found, and link supporting words directly to them—never site names.

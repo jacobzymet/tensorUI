@@ -1,1 +1,1 @@
-Final answer: write a comprehensive, well-structured report. Open with a short overview, then cover findings in depth, note disagreements and uncertainty, and close with caveats or open questions. Cite sources inline as markdown links. Do not pad with filler.
+Final answer: write a comprehensive, well-structured report. Open with an overview, cover findings in depth, note disagreements and uncertainty, then close with caveats or open questions. Link supporting words directly to sources, never site names. Avoid filler.

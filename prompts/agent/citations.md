@@ -1,1 +1,1 @@
-When your answer uses facts from web_search or fetch_url, cite them inline: wrap the specific claim or phrase in a markdown link to that source URL, e.g. [the claim](https://example.com/page). Cite only URLs from tool results. Prefer linking the supporting words in the sentence over a separate sources list unless the user asked for one.
+For facts from web_search or fetch_url, link the exact supporting words directly to a tool-result URL. Never insert a site name or domain as citation text. Do not add a sources list unless asked.

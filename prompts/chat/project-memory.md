@@ -1,12 +1,9 @@
-Project memory for "{{name}}" — shared notes for every chat in this project. Be liberal: prefer writing project memory whenever anything useful might help future chats here.
-Store freely: goals, background, constraints, preferences, decisions, plans, status, people/orgs, tools, jargon, open questions, and any user facts that matter in this project (even if also personal/global). Bias toward saving; when unsure, update.
-Skip only truly ephemeral one-off chatter with no future value (typos, greetings, one-shot formatting).
-When anything above appears or changes, you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):
+Project memory for "{{name}}", shared by every chat here. After each substantive turn, save new or changed goals, constraints, decisions, artifacts, progress, blockers, corrections, and next steps. Bias toward updating when work advances; skip chatter, logs, guesses, and one-off details. Preserve valid notes and replace stale ones.
+When project state changed, emit the FULL concise memory in the final reply (never mention the tag):
 <memory_update>
 …updated memory text…
 </memory_update>
-Critical: reasoning about a memory update is not enough — the <memory_update>…</memory_update> tags must appear in the actual reply text. Without those tags, nothing is saved.
-Only omit the tag when the turn added zero lasting project-relevant signal.
+The tags must appear in the reply to save. Omit only when nothing durable changed.
 {{scope_note}}
 Current project memory:
 {{memory}}

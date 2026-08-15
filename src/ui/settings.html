@@ -70,13 +70,14 @@
       --dur-enter: 220ms;
       --dur-theme: 320ms;
 
-      --radius-pill: 999px;
-      --radius-xs: 6px;
-      --radius-sm: 9px;
-      --radius-md: 12px;
-      --radius-lg: 16px;
-      --radius-xl: 20px;
-      --radius-2xl: 26px;
+      --radius-round: 999px;
+      --radius-pill: 12px;
+      --radius-xs: 4px;
+      --radius-sm: 7px;
+      --radius-md: 10px;
+      --radius-lg: 13px;
+      --radius-xl: 16px;
+      --radius-2xl: 20px;
       --radius-input: var(--radius-pill);
       --radius-panel: var(--radius-lg);
 
@@ -281,6 +282,7 @@
       min-width: var(--control-h);
       padding: 0;
       line-height: 1;
+      border-radius: var(--radius-round);
     }
 
     .status-chip {
@@ -311,6 +313,16 @@
       border-color: color-mix(in oklch, var(--color-ok) 34%, var(--color-rule));
       background: color-mix(in oklch, var(--color-ok) 10%, transparent);
     }
+    .status-ready::before {
+      content: "✓";
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      background: transparent;
+      font-size: 0.76rem;
+      font-weight: 700;
+      line-height: 1;
+    }
     .status-failed {
       color: var(--color-danger);
       border-color: color-mix(in oklch, var(--color-danger) 34%, var(--color-rule));
@@ -321,6 +333,14 @@
       border-color: var(--accent-edge);
       background: color-mix(in oklch, var(--color-accent) 10%, transparent);
     }
+    .status-checking::before {
+      box-sizing: border-box;
+      background: transparent;
+      border: 1.5px solid color-mix(in oklch, currentColor 28%, transparent);
+      border-top-color: currentColor;
+      animation: status-spin 0.7s linear infinite;
+    }
+    @keyframes status-spin { to { transform: rotate(360deg); } }
     .status-warn {
       color: var(--color-warn);
       border-color: color-mix(in oklch, var(--color-warn) 34%, var(--color-rule));

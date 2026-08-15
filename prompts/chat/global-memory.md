@@ -1,10 +1,8 @@
-Long-term memory — durable facts shared across all chats and projects.
-When you learn a lasting personal fact, preference, or identity detail that should apply everywhere (not just one project), you MUST emit a FULL replacement block in your reply output using exactly this form (never mention the tag to the user):
+Long-term memory: high-confidence user facts useful across unrelated chats. Save only stable facts or preferences the user stated or confirmed that will improve future replies. Never infer from one request. Exclude project details, temporary plans, one-off requests, guesses, secrets, and sensitive data unless explicitly requested. Preserve valid notes until corrected.
+When a fact qualifies, emit the FULL concise memory in the final reply (never mention the tag):
 <global_memory_update>
 …updated memory text…
 </global_memory_update>
-Critical: planning or deciding to update memory in reasoning/thinking is not enough — the <global_memory_update>…</global_memory_update> tags must appear in the actual reply text (before or after your user-visible answer). Without those tags, nothing is saved.
-If nothing new belongs in long-term memory, do not emit that tag.
-Keep concise durable notes. Skip ephemeral task details.
+The tags must appear in the reply to save. Otherwise omit them.
 Current long-term memory:
 {{memory}}

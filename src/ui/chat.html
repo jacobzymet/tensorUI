@@ -89,16 +89,17 @@
       --dur-enter: 220ms;
       --dur-theme: 320ms;
 
-      /* Radius scale. Controls stay capsules; large surfaces open up so panels
-         and the composer read as soft objects, not outlined boxes. */
-      --radius-pill: 999px;
-      --radius-xs: 6px;
-      --radius-sm: 10px;
-      --radius-md: 14px;
-      --radius-lg: 18px;
-      --radius-xl: 22px;
-      --radius-2xl: 28px;
-      --radius-3xl: 34px;
+      /* Tighter corners keep the interface crisp; true icon circles opt into
+         radius-round instead of making every control a capsule. */
+      --radius-round: 999px;
+      --radius-pill: 12px;
+      --radius-xs: 4px;
+      --radius-sm: 7px;
+      --radius-md: 10px;
+      --radius-lg: 13px;
+      --radius-xl: 16px;
+      --radius-2xl: 20px;
+      --radius-3xl: 24px;
       --radius-input: var(--radius-pill);
       --radius-panel: var(--radius-xl);
       --radius-composer: var(--radius-3xl);
@@ -365,6 +366,7 @@
       min-width: var(--control-h);
       padding: 0;
       line-height: 1;
+      border-radius: var(--radius-round);
     }
 
     .status-chip {
@@ -400,6 +402,16 @@
       border-color: color-mix(in oklch, var(--color-ok) 34%, var(--color-rule));
       background: color-mix(in oklch, var(--color-ok) 10%, transparent);
     }
+    .status-ready::before {
+      content: "✓";
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      background: transparent;
+      font-size: 0.76rem;
+      font-weight: 700;
+      line-height: 1;
+    }
     .status-failed, .status-stopping {
       color: var(--color-danger);
       border-color: color-mix(in oklch, var(--color-danger) 34%, var(--color-rule));
@@ -410,6 +422,16 @@
       border-color: var(--accent-edge);
       background: color-mix(in oklch, var(--color-accent) 10%, transparent);
     }
+    .status-downloading::before,
+    .status-starting::before,
+    .status-checking::before {
+      box-sizing: border-box;
+      background: transparent;
+      border: 1.5px solid color-mix(in oklch, currentColor 28%, transparent);
+      border-top-color: currentColor;
+      animation: status-spin 0.7s linear infinite;
+    }
+    @keyframes status-spin { to { transform: rotate(360deg); } }
     .status-stopped { color: var(--color-muted); }
 
     .chat-shell {
@@ -515,11 +537,15 @@
     .sidebar-actions-row {
       display: grid;
       grid-template-columns: 1fr auto;
+      align-items: stretch;
+      height: var(--control-h);
       gap: 0.35rem;
     }
     .sidebar-actions-row .btn-search-chats {
       width: var(--control-h);
       min-width: var(--control-h);
+      height: 100%;
+      min-height: 0;
       padding: 0;
       background: var(--color-paper-2);
       border-color: var(--color-rule);
@@ -534,6 +560,7 @@
       display: grid;
       grid-template-columns: 4fr 1fr;
       align-items: stretch;
+      height: var(--control-h);
       min-height: var(--control-h);
       border-radius: var(--radius-pill);
       overflow: hidden;
@@ -559,7 +586,8 @@
       border: none;
       border-radius: 0;
       box-shadow: none;
-      min-height: 100%;
+      height: 100%;
+      min-height: 0;
       color: var(--color-accent-ink);
       font-weight: 600;
     }
@@ -651,7 +679,6 @@
     .chat-shell.is-incognito .composer-card {
       border-color: color-mix(in oklch, var(--color-rule-2) 88%, transparent);
     }
-    .chat-shell.is-incognito .composer-card:focus-within,
     .chat-shell.is-incognito .composer-card.is-dragover {
       background: transparent !important;
       box-shadow: none !important;
@@ -860,9 +887,7 @@
       0%, 49% { opacity: 1; }
       50%, 100% { opacity: 0; }
     }
-    .convo-delete,
-    .convo-move,
-    .convo-pin,
+    .convo-more,
     .project-settings-btn {
       flex: 0 0 auto;
       appearance: none;
@@ -885,9 +910,7 @@
         width var(--dur-short) var(--ease-out),
         min-width var(--dur-short) var(--ease-out);
     }
-    .convo-delete,
-    .convo-move,
-    .convo-pin {
+    .convo-more {
       /* Collapse when idle so titles keep the full row; expand on hover/focus. */
       width: 0;
       min-width: 0;
@@ -895,41 +918,26 @@
       opacity: 0;
       pointer-events: none;
     }
-    .convo-delete:hover,
-    .convo-move:hover,
-    .convo-pin:hover,
+    .convo-more:hover,
     .project-settings-btn:hover { background: var(--surface-active); }
-    .convo-move { font-size: var(--text-sm); }
-    .convo-pin svg {
-      width: 0.82rem;
-      height: 0.82rem;
-    }
-    .convo-item.is-pinned .convo-pin {
-      width: 1.35rem;
-      min-width: 1.35rem;
-      opacity: 1;
-      pointer-events: auto;
+    .convo-more svg { width: 0.9rem; height: 0.9rem; }
+    .convo-pinned-mark {
+      display: inline-flex;
+      flex: 0 0 auto;
       color: var(--color-accent);
     }
+    .convo-pinned-mark svg { width: 0.75rem; height: 0.75rem; }
     .project-settings-btn { font-size: var(--text-sm); opacity: 1; }
-    .convo-item:hover .convo-delete,
-    .convo-item:hover .convo-move,
-    .convo-item:hover .convo-pin,
-    .convo-item:focus-within .convo-delete,
-    .convo-item:focus-within .convo-move,
-    .convo-item:focus-within .convo-pin,
-    .convo-delete:focus-visible,
-    .convo-move:focus-visible,
-    .convo-pin:focus-visible,
+    .convo-item:hover .convo-more,
+    .convo-item:focus-within .convo-more,
+    .convo-more:focus-visible,
     .project-settings-btn:focus-visible {
       width: 1.35rem;
       min-width: 1.35rem;
       opacity: 1;
       pointer-events: auto;
     }
-    .convo-delete:hover { color: var(--color-danger); }
-    .convo-move:hover,
-    .convo-pin:hover,
+    .convo-more:hover,
     .project-settings-btn:hover { color: var(--color-accent); }
     .convo-menu {
       position: fixed;
@@ -941,6 +949,23 @@
       border-radius: var(--radius-xl);
       box-shadow: var(--shadow-3);
       padding: 0.35rem;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px) scale(0.985);
+      transform-origin: top right;
+      transition:
+        opacity var(--dur-short) var(--ease-settle),
+        transform var(--dur-short) var(--ease-settle);
+      will-change: opacity, transform;
+    }
+    .convo-menu.opens-above {
+      transform: translateY(4px) scale(0.985);
+      transform-origin: bottom right;
+    }
+    .convo-menu.is-open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
     }
     .convo-menu button {
       width: 100%;
@@ -954,7 +979,13 @@
       padding: 0.42rem 0.7rem;
       border-radius: var(--radius-pill);
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
     }
+    .convo-menu button svg { width: 0.95rem; height: 0.95rem; flex: 0 0 auto; }
+    .convo-menu button.is-danger { color: var(--color-danger); }
+    .convo-menu-separator { height: 1px; margin: 0.3rem 0.4rem; background: var(--color-rule); }
     .convo-menu button:hover {
       background: var(--accent-wash);
     }
@@ -983,6 +1014,22 @@
       padding: 0 0.35rem 0 0.75rem;
       font-size: var(--text-xs);
       color: var(--color-muted);
+    }
+    .sidebar-server-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 0.08rem;
+      min-width: 0;
+      line-height: 1.2;
+    }
+    .sidebar-server-label { color: var(--color-ink-2); font-weight: 600; }
+    .sidebar-server-provider {
+      max-width: 8.5rem;
+      overflow: hidden;
+      color: var(--color-muted);
+      font-size: 0.64rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .sidebar-footer-prefs {
       justify-content: flex-start;
@@ -1552,8 +1599,7 @@
       flex: 0 0 auto;
       z-index: 40;
       display: grid;
-      /* Equal side tracks keep the model picker geometrically centered even
-         when the conversation/project context only exists on the left. */
+      /* Equal side tracks keep the editable session title geometrically centered. */
       grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
       align-items: center;
       gap: 0.55rem;
@@ -1579,6 +1625,9 @@
     }
     .chat-topbar-trailing {
       min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
     }
     .btn-toggle-sidebar { display: inline-flex; align-items: center; justify-content: center; }
     .chat-topbar-context {
@@ -1622,14 +1671,13 @@
       background: var(--color-accent);
       flex: 0 0 auto;
     }
-    /* Closed: hug the selected model. Open: grow to fit the longest label.
-       Width is driven by --model-picker-closed-width / --model-picker-width. */
+    /* Keep the trigger compact and stable. The floating menu owns its own width. */
     .chat-model-select-wrap {
       position: relative;
       z-index: 30;
-      width: var(--model-picker-closed-width, 9.25rem);
+      width: 9.25rem;
       min-width: 0;
-      max-width: min(30rem, 42vw);
+      max-width: min(9.25rem, 42vw);
       display: inline-flex;
       align-items: center;
       gap: 0.38rem;
@@ -1644,10 +1692,6 @@
       overflow: hidden;
       box-shadow: var(--shadow-1);
       transition:
-        width var(--dur-enter) var(--ease-settle),
-        max-width var(--dur-enter) var(--ease-settle),
-        padding var(--dur-enter) var(--ease-settle),
-        gap var(--dur-enter) var(--ease-settle),
         border-color var(--dur-short) var(--ease-out),
         background var(--dur-short) var(--ease-out),
         box-shadow var(--dur-short) var(--ease-out);
@@ -1658,12 +1702,9 @@
     }
     .chat-model-select-wrap.is-open {
       z-index: 80;
-      width: var(--model-picker-width, 20rem);
-      max-width: min(36rem, 72vw);
-      padding: 0.32rem 0.65rem 0.32rem 0.85rem;
-      gap: 0.45rem;
       border-color: var(--accent-edge);
       background: var(--color-paper-3);
+      box-shadow: var(--ring);
     }
     .chat-model-select-caret {
       flex: 0 0 auto;
@@ -1671,11 +1712,9 @@
       height: 0.82rem;
       color: var(--color-muted);
       pointer-events: none;
-      transition: transform 0.15s ease, width var(--dur-enter) var(--ease-settle), height var(--dur-enter) var(--ease-settle);
+      transition: transform var(--dur-short) var(--ease-settle);
     }
     .chat-model-select-wrap.is-open .chat-model-select-caret {
-      width: 0.85rem;
-      height: 0.85rem;
       transform: rotate(180deg);
     }
     .chat-model-select {
@@ -1698,12 +1737,6 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      transition: font-size var(--dur-enter) var(--ease-settle), padding var(--dur-enter) var(--ease-settle);
-    }
-    .chat-model-select-wrap.is-open .chat-model-select {
-      font-size: var(--text-sm);
-      padding: 0.15rem 0.1rem;
-      letter-spacing: -0.005em;
     }
     .chat-model-select:focus {
       outline: none;
@@ -1741,27 +1774,15 @@
       border-width: 0;
       overflow: hidden;
       pointer-events: none;
-      transition:
-        max-width var(--dur-enter) var(--ease-settle),
-        padding var(--dur-enter) var(--ease-settle),
-        opacity var(--dur-short) var(--ease-settle);
-    }
-    .chat-model-select-wrap.is-open > .chat-model-origin-pill {
-      /* Room for the full provider name (was hard-capped at 7rem). */
-      max-width: 16rem;
-      padding-inline: 0.48rem;
-      opacity: 1;
-      border-width: 1px;
-      overflow: visible;
-      text-overflow: clip;
     }
     .chat-model-origin-pill.is-hidden { display: none !important; }
     .chat-model-select-wrap.is-hidden { display: none !important; }
     .chat-model-menu {
       position: fixed;
       z-index: 200;
-      min-width: 15rem;
-      max-width: min(36rem, calc(100vw - 1rem));
+      width: min(22rem, calc(100vw - 1rem));
+      min-width: 0;
+      max-width: none;
       max-height: min(23rem, 60vh);
       display: flex;
       flex-direction: column;
@@ -1775,7 +1796,7 @@
       pointer-events: auto;
       transform-origin: top left;
       opacity: 0;
-      transform: translateY(-6px) scale(0.98);
+      transform: translateY(-4px);
       transition:
         opacity var(--dur-short) var(--ease-settle),
         transform var(--dur-short) var(--ease-settle);
@@ -1991,27 +2012,33 @@
       border: 0;
     }
     .chat-topbar-title {
-      flex: 0 1 auto;
+      justify-self: center;
       min-width: 0;
+      max-width: min(36rem, 58vw);
       font-size: var(--text-sm);
       font-weight: 500;
       color: var(--color-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      text-align: left;
-      padding-left: 0.5rem;
+      text-align: center;
+      padding: 0 0.5rem;
+      cursor: text;
+      border-radius: var(--radius-sm);
     }
-    /* Hairline separates the model pill from the session name. */
-    .chat-topbar-title:not(:empty)::before {
-      content: "";
-      display: inline-block;
-      width: 1px;
-      height: 0.95em;
-      margin-right: 0.7rem;
-      vertical-align: -0.14em;
-      background: var(--color-rule-2);
+    .chat-topbar-title:hover { color: var(--color-ink); }
+    .chat-title-input,
+    .convo-title-input {
+      min-width: 0;
+      border: 1px solid var(--color-accent);
+      background: var(--color-paper-2);
+      color: var(--color-ink);
+      font: inherit;
+      border-radius: var(--radius-sm);
+      outline: none;
     }
+    .chat-title-input { width: min(24rem, 42vw); padding: 0.24rem 0.45rem; }
+    .convo-title-input { flex: 1 1 auto; width: 0; padding: 0.18rem 0.4rem; }
     .chat-shell.is-in-project .chat-topbar.has-thread {
       border-bottom-color: color-mix(in oklch, var(--color-accent) 35%, var(--color-rule));
     }
@@ -2691,10 +2718,6 @@
     }
     .think-stream .md-code-block,
     .think-body .md-code-block { margin: 0 0 0.55rem; }
-    @keyframes think-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.45; }
-    }
     @keyframes agent-step-spin {
       to { transform: rotate(360deg); }
     }
@@ -3429,10 +3452,11 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.55rem;
+      gap: 0;
     }
     .composer-card {
       position: relative;
+      z-index: 2;
       width: 100%;
       background: var(--color-paper-3);
       border: 1px solid color-mix(in oklch, var(--color-rule-2) 62%, transparent);
@@ -3447,10 +3471,59 @@
         box-shadow var(--dur-enter) var(--ease-settle),
         transform var(--dur-enter) var(--ease-settle);
     }
-    .composer-card:focus-within {
-      border-color: color-mix(in oklch, var(--color-accent) 42%, var(--color-rule-2));
-      box-shadow: var(--ring), var(--shadow-composer);
-      transform: translateY(-2px);
+    .composer-model-tab {
+      position: relative;
+      z-index: 1;
+      align-self: center;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 0.75rem;
+      width: calc(100% - 3rem);
+      min-height: 2.7rem;
+      margin: -1px 1.5rem 0;
+      padding: 0.35rem 0.65rem 0.42rem;
+      box-sizing: border-box;
+      border: 1px solid color-mix(in oklch, var(--color-rule-2) 62%, transparent);
+      border-top: 0;
+      border-radius: 0 0 var(--radius-composer) var(--radius-composer);
+      background: var(--color-paper-2);
+      box-shadow: var(--shadow-1);
+      transition: transform var(--dur-enter) var(--ease-settle), border-color var(--dur-short) var(--ease-out);
+    }
+    .composer-model-tab .chat-model-select-wrap {
+      justify-self: end;
+      align-self: start;
+      width: 9.25rem;
+      max-width: min(9.25rem, 62vw);
+      padding: 0.08rem 0.3rem;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .composer-model-tab .chat-model-select-wrap:hover,
+    .composer-model-tab .chat-model-select-wrap.is-open {
+      background: transparent;
+      box-shadow: none;
+    }
+    .composer-tab-capabilities {
+      display: grid;
+      grid-template-columns: repeat(3, max-content);
+      align-items: center;
+      gap: 0.35rem;
+      min-width: 0;
+      padding-top: 0.04rem;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .composer-tab-capabilities::-webkit-scrollbar { display: none; }
+    .composer-tab-capabilities .composer-modes,
+    .composer-tab-capabilities .composer-mentions {
+      display: contents;
+    }
+    .composer-tab-capabilities .composer-mentions { margin: 0; }
+    .composer-model-tab + .composer-hint {
+      margin-top: 0.55rem;
     }
     .composer-textarea {
       width: 100%;
@@ -3536,7 +3609,7 @@
       width: 2.1rem;
       padding: 0;
       border: 1px solid var(--color-rule);
-      border-radius: var(--radius-pill);
+      border-radius: var(--radius-round);
       background: transparent;
       color: var(--color-ink-2);
       cursor: pointer;
@@ -3777,7 +3850,7 @@
       width: 2.1rem;
       min-width: 2.1rem;
       padding: 0;
-      border-radius: var(--radius-pill);
+      border-radius: var(--radius-round);
     }
     .composer-buttons .btn-mic svg,
     .composer-buttons .btn-send svg,
@@ -4813,12 +4886,8 @@
          provider badge here only — every row in the open menu still shows it. */
       .chat-model-select-wrap > .chat-model-origin-pill { display: none !important; }
       .chat-model-select-wrap {
-        width: clamp(8rem, var(--model-picker-closed-width, 9.25rem), 74vw);
+        width: min(9.25rem, 74vw);
         min-width: 0;
-        max-width: 74vw;
-      }
-      .chat-model-select-wrap.is-open {
-        width: clamp(12rem, var(--model-picker-width, 20rem), 74vw);
         max-width: 74vw;
       }
       .chat-model-select { max-width: none; }
@@ -4839,6 +4908,7 @@
       .dialog-backdrop > .search-dialog,
       .dialog-backdrop > .unlock-dialog,
       .dialog-backdrop > .project-dialog,
+      .convo-menu,
       .chat-model-menu {
         transform: none !important;
       }
@@ -4899,8 +4969,11 @@
       </div>
       <div class="sidebar-footer">
         <div class="sidebar-footer-row">
-          <span>Server</span>
-          <span id="serverChip" class="status-chip status-stopped">disconnected</span>
+          <span class="sidebar-server-copy">
+            <span class="sidebar-server-label">Server</span>
+            <span class="sidebar-server-provider" id="serverProviderName">No provider</span>
+          </span>
+          <span id="serverChip" class="status-chip status-stopped">Not configured</span>
         </div>
         <button type="button" class="btn btn-ghost sidebar-footer-prefs" id="btnSettings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
@@ -4951,45 +5024,14 @@
           <header class="chat-topbar" id="chatTopbar">
             <div class="chat-topbar-leading">
               <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
-              <div class="chat-topbar-title" id="convoTitle"></div>
+            </div>
+            <div class="chat-topbar-title" id="convoTitle"></div>
+            <div class="chat-topbar-trailing">
               <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk or browser storage">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
                 Temporary Session
               </span>
             </div>
-            <div class="chat-model-select-wrap" id="chatModelSelectWrap">
-              <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
-              <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
-              <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-              <div id="chatModelMenu" class="chat-model-menu is-hidden">
-                <div class="chat-model-search is-hidden" id="chatModelSearchWrap">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-                  <input
-                    type="text"
-                    id="chatModelSearch"
-                    class="chat-model-search-input"
-                    placeholder="Search models"
-                    autocomplete="off"
-                    autocorrect="off"
-                    spellcheck="false"
-                    role="combobox"
-                    aria-expanded="true"
-                    aria-autocomplete="list"
-                    aria-controls="chatModelList"
-                    aria-label="Search models"
-                  >
-                  <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
-                </div>
-                <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
-                  <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
-                  <button type="button" class="chat-model-tab" id="chatModelTabPins" role="tab" aria-selected="false" data-model-tab="pins">Pins</button>
-                  <button type="button" class="chat-model-tab" id="chatModelTabAll" role="tab" aria-selected="false" data-model-tab="all">All</button>
-                </div>
-                <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
-                <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
-              </div>
-            </div>
-            <div class="chat-topbar-trailing" aria-hidden="true"></div>
           </header>
           <div class="chat-viewport" id="chatViewport" tabindex="0">
             <div class="empty-state" id="emptyState">
@@ -5040,8 +5082,6 @@
   <div class="composer-shell" id="composerShell">
     <div class="composer-card" id="composerCard">
       <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
-      <div class="composer-modes" id="composerModes" aria-live="polite"></div>
-      <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
       <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
       <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
       <textarea
@@ -5097,7 +5137,32 @@
       </div>
       <div class="plus-menu is-hidden" id="plusMenu" role="menu" aria-label="Add files and capabilities"></div>
     </div>
-    <p class="composer-hint" id="composerHint">Shift+Enter for a new line · @ to use a tool once</p>
+    <div class="composer-model-tab">
+      <div class="composer-tab-capabilities">
+        <div class="composer-modes" id="composerModes" aria-live="polite"></div>
+        <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
+      </div>
+      <div class="chat-model-select-wrap" id="chatModelSelectWrap">
+        <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
+        <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
+        <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        <div id="chatModelMenu" class="chat-model-menu is-hidden">
+          <div class="chat-model-search is-hidden" id="chatModelSearchWrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="text" id="chatModelSearch" class="chat-model-search-input" placeholder="Search models" autocomplete="off" autocorrect="off" spellcheck="false" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="chatModelList" aria-label="Search models">
+            <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
+          </div>
+          <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
+            <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
+            <button type="button" class="chat-model-tab" id="chatModelTabPins" role="tab" aria-selected="false" data-model-tab="pins">Pins</button>
+            <button type="button" class="chat-model-tab" id="chatModelTabAll" role="tab" aria-selected="false" data-model-tab="all">All</button>
+          </div>
+          <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
+          <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
+        </div>
+      </div>
+    </div>
+    <p class="composer-hint is-hidden" id="composerHint"></p>
   </div>
 
   <div id="settingsModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -5998,6 +6063,7 @@
     const greetingEl = document.getElementById('greeting');
     const modelHintEl = document.getElementById('modelHint');
     const serverChip = document.getElementById('serverChip');
+    const serverProviderName = document.getElementById('serverProviderName');
     const chatModelSelect = document.getElementById('chatModelSelect');
     const chatModelSelectWrap = document.getElementById('chatModelSelectWrap');
     const chatModelOriginPill = document.getElementById('chatModelOriginPill');
@@ -6145,6 +6211,7 @@
       return {
         id: convo.id || newId('c'),
         title: typeof convo.title === 'string' ? convo.title : 'New chat',
+        titleEdited: !!convo.titleEdited,
         messages: Array.isArray(convo.messages) ? convo.messages : [],
         updatedAt: typeof convo.updatedAt === 'number' ? convo.updatedAt : Date.now(),
         projectId: typeof convo.projectId === 'string' ? convo.projectId : null,
@@ -6344,6 +6411,7 @@
 
     function needsGeneratedTitle(convo) {
       if (!convo || convo.incognito) return false;
+      if (convo.titleEdited) return false;
       const userText = firstUserText(convo);
       if (!userText) return false;
       const current = String(convo.title || '').trim();
@@ -7366,10 +7434,23 @@
       }
     }
 
-    function showVoiceHint(message, { warn = true, ms = 8000 } = {}) {
+    function showComposerHint(message, { warn = false } = {}) {
       if (!composerHint || !message) return;
       composerHint.textContent = message;
       composerHint.classList.toggle('is-warn', !!warn);
+      composerHint.classList.remove('is-hidden');
+    }
+
+    function hideComposerHint() {
+      if (!composerHint) return;
+      composerHint.textContent = '';
+      composerHint.classList.remove('is-warn');
+      composerHint.classList.add('is-hidden');
+    }
+
+    function showVoiceHint(message, { warn = true, ms = 8000 } = {}) {
+      if (!message) return;
+      showComposerHint(message, { warn });
       voiceHintUntil = Date.now() + ms;
     }
 
@@ -7525,8 +7606,7 @@
       voiceHintUntil = 0;
       playVoiceCue('start');
       syncMicButton();
-      composerHint.classList.remove('is-warn');
-      composerHint.textContent = 'Listening… click the mic or press Esc to stop';
+      showComposerHint('Listening… click the mic or press Esc to stop');
       composerInput.focus();
     }
 
@@ -7595,9 +7675,8 @@
 
     let attachHintUntil = 0;
     function showAttachHint(message, { warn = true } = {}) {
-      if (!composerHint || !message) return;
-      composerHint.textContent = message;
-      composerHint.classList.toggle('is-warn', !!warn);
+      if (!message) return;
+      showComposerHint(message, { warn });
       attachHintUntil = Date.now() + 8000;
     }
 
@@ -7922,16 +8001,14 @@
       mentionState = null;
       mentionMenu.classList.add('is-hidden');
       mentionMenu.innerHTML = '';
-      if (mentionMenu.parentElement !== composerCard) {
-        composerCard.insertBefore(mentionMenu, composerMentions);
-      }
+      if (mentionMenu.parentElement !== composerCard) composerCard.prepend(mentionMenu);
     }
 
     function placeMentionMenu() {
       const host = mentionInput?.closest('.msg-edit') || composerCard;
       if (mentionMenu.parentElement !== host) {
         if (host === composerCard) {
-          composerCard.insertBefore(mentionMenu, composerMentions);
+          composerCard.prepend(mentionMenu);
         } else {
           host.appendChild(mentionMenu);
         }
@@ -10790,6 +10867,7 @@
       updateComposerHint();
       // Refresh model line without waiting for the next poll.
       if (serverReady) {
+        modelHintEl.classList.remove('is-hidden');
         const suffix = project ? ' · Project: ' + project.name : '';
         const current = modelHintEl.textContent || '';
         if (incognito && !activeId) {
@@ -10803,10 +10881,9 @@
         } else if (project && !activeId) {
           modelHintEl.textContent = 'Shared instructions and memory apply to chats in this project.';
         }
-      } else if (incognito && !activeId) {
-        modelHintEl.textContent = 'Temporary session — nothing saved · start the model to chat.';
-      } else if (project && !activeId) {
-        modelHintEl.textContent = 'Shared instructions and memory apply · start the model to chat.';
+      } else {
+        modelHintEl.textContent = '';
+        modelHintEl.classList.add('is-hidden');
       }
     }
 
@@ -10824,14 +10901,15 @@
 
     function updateComposerHint() {
       if (diskEncryptionLocked()) {
-        composerHint.textContent = 'Unlock local data to chat and save messages.';
-        composerHint.classList.add('is-warn');
+        showComposerHint('Unlock local data to chat and save messages.', { warn: true });
         return;
       }
-      if (!serverReady) return;
+      if (!serverReady) {
+        hideComposerHint();
+        return;
+      }
       if (voiceListening) {
-        composerHint.classList.remove('is-warn');
-        composerHint.textContent = 'Listening… click the mic or press Esc to stop';
+        showComposerHint('Listening… click the mic or press Esc to stop');
         return;
       }
       // Keep recent attachment / voice warnings visible; pollState would otherwise wipe them.
@@ -10843,15 +10921,14 @@
       }
       attachHintUntil = 0;
       voiceHintUntil = 0;
-      composerHint.classList.remove('is-warn');
       const queueLen = activeId ? getOutboundQueue(activeId).length : 0;
       if (queueLen > 0) {
         if (isQueuePausedForEdit(activeId)) {
-          composerHint.textContent = 'Queue paused · save or cancel the edit to continue';
+          showComposerHint('Queue paused · save or cancel the edit to continue');
           return;
         }
         const busy = isConvoBusy(activeId);
-        composerHint.textContent = queueLen === 1
+        const queueHint = queueLen === 1
           ? (busy
             ? (canSteerLiveStream()
               ? '1 message queued · Steer to guide live activity, or waits until this reply finishes'
@@ -10862,23 +10939,10 @@
               ? queueLen + ' messages queued · Steer one to guide live activity, or they send in order'
               : queueLen + ' messages queued · sending in order')
             : queueLen + ' messages queued');
+        showComposerHint(queueHint);
         return;
       }
-      const sendHint = settings.enterSends
-        ? 'Shift+Enter for a new line'
-        : 'Ctrl+Enter to send';
-      const project = inProjectChat() ? getProject(activeProjectId) : null;
-      if (
-        settings.skillDeepResearch !== false
-        && (settings.deepResearch === 'long' || settings.deepResearch === 'brief')
-      ) {
-        composerHint.textContent = sendHint + ' · deep research ('
-          + (settings.deepResearch === 'brief' ? 'concise' : 'comprehensive') + ')';
-        return;
-      }
-      composerHint.textContent = project
-        ? sendHint + ' · chatting in ' + project.name
-        : sendHint + ' · + for tools · Branch to fork';
+      hideComposerHint();
     }
 
     function bySidebarOrder(list = conversations) {
@@ -10924,10 +10988,23 @@
     }
 
     function closeConvoMenu() {
-      if (openConvoMenu) {
-        openConvoMenu.remove();
-        openConvoMenu = null;
+      if (!openConvoMenu) return;
+      const menu = openConvoMenu;
+      menu._anchor?.setAttribute('aria-expanded', 'false');
+      openConvoMenu = null;
+      menu.classList.remove('is-open');
+
+      if (prefersReducedMotion()) {
+        menu.remove();
+        return;
       }
+
+      const removeMenu = () => {
+        window.clearTimeout(menu._closeTimer);
+        menu.remove();
+      };
+      menu.addEventListener('transitionend', removeMenu, { once: true });
+      menu._closeTimer = window.setTimeout(removeMenu, 200);
     }
 
     let draggingConvoId = null;
@@ -11035,42 +11112,28 @@
       title.textContent = fullTitle;
       title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
       item.title = title.title;
-      const pin = document.createElement('button');
-      pin.type = 'button';
-      pin.className = 'convo-pin';
-      pin.setAttribute('aria-label', convo.pinned ? 'Unpin conversation' : 'Pin conversation');
-      pin.title = convo.pinned ? 'Unpin' : 'Pin';
-      pin.draggable = false;
-      pin.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M5 17h14"/><path d="m7 10 1-7h8l1 7 2 3H5z"/></svg>';
-      pin.addEventListener('click', (event) => {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'convo-more';
+      more.setAttribute('aria-label', 'Conversation actions');
+      more.setAttribute('aria-haspopup', 'menu');
+      more.setAttribute('aria-expanded', 'false');
+      more.title = 'More';
+      more.draggable = false;
+      more.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.45"/><circle cx="12" cy="12" r="1.45"/><circle cx="19" cy="12" r="1.45"/></svg>';
+      more.addEventListener('click', (event) => {
         event.stopPropagation();
-        togglePinnedConversation(convo.id);
+        openConversationMenu(more, convo, item);
       });
-      const move = document.createElement('button');
-      move.type = 'button';
-      move.className = 'convo-move';
-      move.setAttribute('aria-label', 'Move conversation');
-      move.title = 'Move';
-      move.draggable = false;
-      move.textContent = '⇄';
-      move.addEventListener('click', (event) => {
-        event.stopPropagation();
-        openMoveMenu(move, convo);
-      });
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'convo-delete';
-      del.setAttribute('aria-label', 'Delete conversation');
-      del.draggable = false;
-      del.textContent = '×';
-      del.addEventListener('click', (event) => {
-        event.stopPropagation();
-        deleteConversation(convo.id);
-      });
+      if (convo.pinned) {
+        const pinnedMark = document.createElement('span');
+        pinnedMark.className = 'convo-pinned-mark';
+        pinnedMark.setAttribute('aria-hidden', 'true');
+        pinnedMark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M5 17h14"/><path d="m7 10 1-7h8l1 7 2 3H5z"/></svg>';
+        item.appendChild(pinnedMark);
+      }
       item.appendChild(title);
-      if (!convo.incognito) item.appendChild(pin);
-      item.appendChild(move);
-      item.appendChild(del);
+      item.appendChild(more);
       item.addEventListener('click', () => {
         if (convoDragMoved) {
           convoDragMoved = false;
@@ -11081,46 +11144,76 @@
       return item;
     }
 
-    function openMoveMenu(anchor, convo) {
+    function convoMenuButton(label, icon, onClick, { danger = false } = {}) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      if (danger) button.classList.add('is-danger');
+      button.innerHTML = icon + '<span>' + escapeHtml(label) + '</span>';
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onClick();
+      });
+      return button;
+    }
+
+    function openConversationMenu(anchor, convo, row) {
+      if (openConvoMenu?._anchor === anchor) {
+        closeConvoMenu();
+        return;
+      }
       closeConvoMenu();
       const menu = document.createElement('div');
       menu.className = 'convo-menu';
-      const label = document.createElement('div');
-      label.className = 'convo-menu-label';
-      label.textContent = 'Move to';
-      menu.appendChild(label);
+      menu.setAttribute('role', 'menu');
+      menu._anchor = anchor;
+      anchor.setAttribute('aria-expanded', 'true');
+      const pinIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M5 17h14"/><path d="m7 10 1-7h8l1 7 2 3H5z"/></svg>';
+      const renameIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+      const folderIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h6l2 2h10v11H3z"/></svg>';
+      const trashIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>';
 
-      if (convo.projectId) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.textContent = 'Recents (no project)';
-        remove.addEventListener('click', (event) => {
-          event.stopPropagation();
-          moveConversation(convo.id, null);
+      if (!convo.incognito) {
+        menu.appendChild(convoMenuButton(convo.pinned ? 'Unpin' : 'Pin', pinIcon, () => {
           closeConvoMenu();
-        });
-        menu.appendChild(remove);
+          togglePinnedConversation(convo.id);
+        }));
       }
+      menu.appendChild(convoMenuButton('Rename', renameIcon, () => {
+        closeConvoMenu();
+        beginSidebarTitleEdit(convo, row);
+      }));
 
       const targets = projects.filter((project) => project.id !== convo.projectId);
-      if (targets.length === 0 && !convo.projectId) {
-        const empty = document.createElement('button');
-        empty.type = 'button';
-        empty.textContent = 'No projects yet';
-        empty.disabled = true;
-        menu.appendChild(empty);
+      if (convo.projectId || targets.length) {
+        const label = document.createElement('div');
+        label.className = 'convo-menu-label';
+        label.textContent = 'Move to project';
+        menu.appendChild(label);
       }
+
+      if (convo.projectId) {
+        menu.appendChild(convoMenuButton('Recents (no project)', folderIcon, () => {
+          moveConversation(convo.id, null);
+          closeConvoMenu();
+        }));
+      }
+
       for (const project of targets) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = project.name;
-        btn.addEventListener('click', (event) => {
-          event.stopPropagation();
+        menu.appendChild(convoMenuButton(project.name, folderIcon, () => {
           moveConversation(convo.id, project.id);
           closeConvoMenu();
-        });
-        menu.appendChild(btn);
+        }));
       }
+
+      const separator = document.createElement('div');
+      separator.className = 'convo-menu-separator';
+      separator.setAttribute('role', 'separator');
+      menu.appendChild(separator);
+      menu.appendChild(convoMenuButton('Delete', trashIcon, () => {
+        closeConvoMenu();
+        deleteConversation(convo.id);
+      }, { danger: true }));
 
       document.body.appendChild(menu);
       openConvoMenu = menu;
@@ -11129,6 +11222,14 @@
       const left = Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8);
       menu.style.top = Math.max(8, top) + 'px';
       menu.style.left = Math.max(8, left) + 'px';
+      menu.classList.toggle('opens-above', top < rect.top);
+      if (prefersReducedMotion()) {
+        menu.classList.add('is-open');
+      } else {
+        window.requestAnimationFrame(() => {
+          if (openConvoMenu === menu && menu.isConnected) menu.classList.add('is-open');
+        });
+      }
     }
 
     function moveConversation(convoId, projectId) {
@@ -11153,6 +11254,89 @@
       convo.pinnedAt = convo.pinned ? Date.now() : null;
       saveStore();
       renderSidebar();
+    }
+
+    function commitConversationTitle(convo, rawTitle) {
+      if (!convo) return false;
+      const next = String(rawTitle || '').trim().slice(0, 120);
+      if (!next || next === convo.title) return false;
+      convo.title = next;
+      convo.titleEdited = true;
+      convo.updatedAt = Date.now();
+      convo._titleReq = (convo._titleReq || 0) + 1;
+      convo._titleBusy = false;
+      saveConversations();
+      renderSidebar();
+      if (activeId === convo.id) convoTitleEl.textContent = next;
+      return true;
+    }
+
+    function beginSidebarTitleEdit(convo, row) {
+      if (!convo || !row?.isConnected) return;
+      const title = row.querySelector('.convo-title');
+      if (!title) return;
+      const input = document.createElement('input');
+      input.className = 'convo-title-input';
+      input.type = 'text';
+      input.maxLength = 120;
+      input.value = convo.title || 'New chat';
+      input.setAttribute('aria-label', 'Chat title');
+      let cancelled = false;
+      input.addEventListener('click', (event) => event.stopPropagation());
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          input.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelled = true;
+          renderSidebar();
+        }
+      });
+      input.addEventListener('blur', () => {
+        if (!cancelled) {
+          commitConversationTitle(convo, input.value);
+          if (input.isConnected) renderSidebar();
+        }
+      });
+      title.replaceWith(input);
+      input.focus();
+      input.select();
+    }
+
+    function beginTopbarTitleEdit() {
+      const convo = conversations.find((item) => item.id === activeId);
+      if (!convo || convo.incognito || convoTitleEl.querySelector('input')) return;
+      stopTitleTyping(convoTitleEl);
+      const original = convo.title || 'New chat';
+      const input = document.createElement('input');
+      input.className = 'chat-title-input';
+      input.type = 'text';
+      input.maxLength = 120;
+      input.value = original;
+      input.setAttribute('aria-label', 'Chat title');
+      let cancelled = false;
+      input.addEventListener('click', (event) => event.stopPropagation());
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          input.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelled = true;
+          convoTitleEl.textContent = original;
+          convoTitleEl.focus();
+        }
+      });
+      input.addEventListener('blur', () => {
+        if (cancelled) return;
+        commitConversationTitle(convo, input.value);
+        if (input.isConnected) convoTitleEl.textContent = convo.title || original;
+      });
+      convoTitleEl.textContent = '';
+      convoTitleEl.appendChild(input);
+      input.focus();
+      input.select();
     }
 
     function formatProjectDate(ts) {
@@ -11654,6 +11838,9 @@
       emptyState.classList.remove('is-hidden');
       threadWrap.classList.add('is-hidden');
       chatTopbar.classList.remove('has-thread');
+      convoTitleEl.removeAttribute('role');
+      convoTitleEl.removeAttribute('tabindex');
+      convoTitleEl.removeAttribute('title');
       // Drop the previous thread's nodes — sendMessage appends to whatever is
       // here, so leaving them would splice the old conversation into the new one.
       chatThread.innerHTML = '';
@@ -11666,6 +11853,15 @@
       threadWrap.classList.remove('is-hidden');
       chatTopbar.classList.add('has-thread');
       convoTitleEl.textContent = convo?.incognito ? '' : (convo.title || 'New chat');
+      if (convo?.incognito) {
+        convoTitleEl.removeAttribute('role');
+        convoTitleEl.removeAttribute('tabindex');
+        convoTitleEl.removeAttribute('title');
+      } else {
+        convoTitleEl.setAttribute('role', 'button');
+        convoTitleEl.setAttribute('tabindex', '0');
+        convoTitleEl.title = 'Rename chat';
+      }
       composerDock.appendChild(composerShell);
       syncProjectChrome();
     }
@@ -11834,7 +12030,7 @@
       const editedMessage = { role: 'user', content: displayText };
       if (priorAttachments.length) editedMessage.attachments = priorAttachments;
       convo.messages[index] = editedMessage;
-      if (index === 0) {
+      if (index === 0 && !convo.titleEdited) {
         // Provisional slug for the sidebar; real title is generated after the
         // first assistant reply so local servers aren't hit with two requests at once.
         convo.title = provisionalTitle(text || displayText);
@@ -12566,22 +12762,23 @@
     function positionModelMenu() {
       if (!chatModelMenu || !chatModelSelectWrap) return;
       const rect = chatModelSelectWrap.getBoundingClientRect();
-      // Size to the open target width, not the mid-animation trigger rect.
-      const openTarget = Number.parseFloat(
-        chatModelSelectWrap.style.getPropertyValue('--model-picker-width')
-      ) || rect.width;
-      const preferred = Math.max(rect.width, openTarget);
-      // Never wider than the window can hold, or the menu hangs off the edge.
-      const menuWidth = Math.min(preferred, window.innerWidth - 16);
+      // CSS owns a stable menu width; model and provider text never resize it.
+      const menuWidth = chatModelMenu.offsetWidth || Math.min(352, window.innerWidth - 16);
       const maxLeft = window.innerWidth - menuWidth - 8;
-      // Align to the centered trigger, clamping only near viewport edges.
-      // Prefer centering under the expanding capsule's eventual width.
+      // Center on the trigger, clamping only near viewport edges.
       const idealLeft = rect.left + (rect.width - menuWidth) / 2;
       const left = Math.min(Math.max(8, idealLeft), maxLeft);
-      chatModelMenu.style.top = Math.round(rect.bottom + 6) + 'px';
+      const menuHeight = chatModelMenu.offsetHeight || Math.min(368, window.innerHeight * 0.6);
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const openAbove = spaceBelow < Math.min(menuHeight, 260) && rect.top > spaceBelow;
+      const top = openAbove
+        ? Math.max(8, rect.top - menuHeight - 6)
+        : rect.bottom + 6;
+      chatModelMenu.style.top = Math.round(top) + 'px';
       chatModelMenu.style.left = Math.round(left) + 'px';
       chatModelMenu.style.width = Math.round(menuWidth) + 'px';
       chatModelMenu.style.right = 'auto';
+      chatModelMenu.style.transformOrigin = openAbove ? 'bottom center' : 'top center';
     }
 
     function closeModelMenu({ restoreFocus = false } = {}) {
@@ -12636,7 +12833,6 @@
       }
       syncModelMenuTabs();
       chatModelMenu.classList.remove('is-hidden');
-      syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
       chatModelSelectWrap.classList.add('is-open');
       chatModelSelect.setAttribute('aria-expanded', 'true');
       computeModelMatches();
@@ -12644,16 +12840,6 @@
       modelMenuActiveIndex = Math.max(0, modelMenuMatches.findIndex((o) => o.value === selectedChatModel));
       positionModelMenu();
       paintModelMenuActive();
-      // Keep the floating menu aligned while the trigger width eases open.
-      if (!prefersReducedMotion()) {
-        const started = performance.now();
-        const track = (now) => {
-          if (!modelMenuIsOpen()) return;
-          positionModelMenu();
-          if (now - started < 260) requestAnimationFrame(track);
-        };
-        requestAnimationFrame(track);
-      }
       // Typing filters immediately when the field is there; otherwise the
       // trigger keeps focus and its own arrow-key handler stays in charge.
       if (searchable) chatModelSearch.focus();
@@ -12678,7 +12864,6 @@
           ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
           : '';
         syncModelOriginPill(true, selected && selected.provider);
-        syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
         chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
           const isSelected = btn.getAttribute('data-value') === selectedChatModel;
           btn.classList.toggle('is-selected', isSelected);
@@ -12704,63 +12889,6 @@
       return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;');
-    }
-
-    const modelWidthCanvas = document.createElement('canvas');
-
-    function measuredTextWidth(element, value) {
-      const context = modelWidthCanvas.getContext('2d');
-      if (!context || !element) return String(value || '').length * 8;
-      const style = getComputedStyle(element);
-      context.font = style.font;
-      const text = String(value || '');
-      const spacing = Number.parseFloat(style.letterSpacing) || 0;
-      return context.measureText(text).width + Math.max(0, text.length - 1) * spacing;
-    }
-
-    /** Closed width hugs the selected model; open width fits the longest label
-     * plus provider badge and caret. CSS applies the final clamps. */
-    function syncModelSelectorWidth(options, selectedValue = selectedChatModel) {
-      const list = Array.isArray(options) ? options : modelMenuOptions;
-      if (!chatModelSelectWrap) return;
-      if (!list.length) {
-        chatModelSelectWrap.style.removeProperty('--model-picker-closed-width');
-        chatModelSelectWrap.style.removeProperty('--model-picker-width');
-        return;
-      }
-      const longestModel = list.reduce(
-        (width, option) => Math.max(width, measuredTextWidth(chatModelSelect, option.label)),
-        0
-      );
-      const longestProvider = list.reduce(
-        (width, option) => Math.max(width, measuredTextWidth(chatModelOriginPill, option.provider)),
-        0
-      );
-      const selected = list.find((option) => option.value === selectedValue) || list[0];
-      const selectedModel = measuredTextWidth(chatModelSelect, selected?.label || 'Model');
-      // Closed trigger hides the provider pill — size to the model name only,
-      // and cap so long ids stay compact with an ellipsis.
-      const closedChrome = 48;
-      const openChrome = 58;
-      const openProviderRoom = longestProvider
-        ? longestProvider + 22
-        : 0;
-      const pillVisible = window.matchMedia('(min-width: 521px)').matches;
-      const closed = Math.min(
-        Math.ceil(selectedModel + closedChrome),
-        188
-      );
-      const preferred = Math.ceil(
-        longestModel + (pillVisible ? openProviderRoom : 0) + openChrome
-      );
-      chatModelSelectWrap.style.setProperty(
-        '--model-picker-closed-width',
-        Math.max(closed, 92) + 'px'
-      );
-      chatModelSelectWrap.style.setProperty(
-        '--model-picker-width',
-        Math.max(preferred, closed, 160) + 'px'
-      );
     }
 
     function syncModelSelector(data) {
@@ -12794,8 +12922,6 @@
       if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
         rememberRecentModel(selectedChatModel);
       }
-      syncModelSelectorWidth(remoteOptions);
-
       const allValues = remoteOptions.map((o) => o.value);
       if (!allValues.includes(selectedChatModel)) {
         // Migrate older localStorage ids (remote|base|model) by matching model+base suffix.
@@ -12868,22 +12994,33 @@
       serverChip.className = 'status-chip status-' + (
         connected ? 'ready' : (remoteChecking ? 'checking' : (!network.remote_saved ? 'stopped' : 'failed'))
       );
-      serverChip.textContent = connected ? 'connected' : 'disconnected';
+      serverChip.textContent = connected
+        ? 'Connected'
+        : (remoteChecking ? 'Checking…' : (!network.remote_saved ? 'Not configured' : 'Unavailable'));
+      serverChip.title = connected
+        ? 'Connected to ' + providerLabel
+        : (remoteChecking ? 'Checking ' + providerLabel + ' connection' : 'Provider connection unavailable');
+      if (serverProviderName) {
+        serverProviderName.textContent = network.remote_saved ? providerLabel : 'No provider';
+        serverProviderName.title = network.remote_saved ? providerLabel : '';
+      }
 
       const project = inProjectChat() ? getProject(activeProjectId) : null;
       const viaSuffix = ' · via ' + providerLabel;
       if (remoteChecking) {
-        modelHintEl.textContent = 'Connecting to ' + providerLabel + '…';
-        composerHint.textContent = 'Checking provider connection…';
-        composerHint.classList.remove('is-warn');
+        modelHintEl.textContent = '';
+        modelHintEl.classList.add('is-hidden');
+        hideComposerHint();
       } else if (!serverReady) {
-        modelHintEl.textContent = 'Remote model is unreachable.';
-        composerHint.textContent = 'Fix the provider in Server, or pick another model in the selector.';
-        composerHint.classList.add('is-warn');
+        modelHintEl.textContent = '';
+        modelHintEl.classList.add('is-hidden');
+        hideComposerHint();
       } else if (project && !activeId) {
+        modelHintEl.classList.remove('is-hidden');
         modelHintEl.textContent = 'Shared instructions & memory apply · ' + modelName + viaSuffix;
         updateComposerHint();
       } else {
+        modelHintEl.classList.remove('is-hidden');
         modelHintEl.textContent = project
           ? 'Chatting with ' + modelName + ' · Project: ' + project.name + viaSuffix
           : ('Chatting with ' + modelName + viaSuffix);
@@ -12924,8 +13061,7 @@
       try {
         if (queuedFiles.length) {
           attachHintUntil = 0;
-          composerHint.textContent = 'Preparing attachments…';
-          composerHint.classList.remove('is-warn');
+          showComposerHint('Preparing attachments…');
           prepared = await prepareAttachmentsForSend(queuedFiles);
         } else {
           prepared = [];
@@ -12965,6 +13101,7 @@
         convo = {
           id: newId('c'),
           title: branchConversationTitle(source),
+          titleEdited: false,
           messages: cloneConversationMessages(source.messages),
           updatedAt: Date.now(),
           projectId,
@@ -12993,6 +13130,7 @@
         convo = {
           id,
           title: draftIncognito ? 'Ghost Chat' : 'New chat',
+          titleEdited: false,
           messages: [],
           updatedAt: Date.now(),
           projectId: activeProjectId || null,
@@ -14604,8 +14742,15 @@
       if (event.target === projectModal) closeProjectSettings();
     });
     document.addEventListener('click', (event) => {
-      if (openConvoMenu && !openConvoMenu.contains(event.target) && !event.target.closest('.convo-move')) {
+      if (openConvoMenu && !openConvoMenu.contains(event.target) && !event.target.closest('.convo-more')) {
         closeConvoMenu();
+      }
+    });
+    convoTitleEl.addEventListener('click', beginTopbarTitleEdit);
+    convoTitleEl.addEventListener('keydown', (event) => {
+      if ((event.key === 'Enter' || event.key === ' ') && !convoTitleEl.querySelector('input')) {
+        event.preventDefault();
+        beginTopbarTitleEdit();
       }
     });
     document.addEventListener('keydown', (event) => {
@@ -14754,7 +14899,6 @@
       closeModelMenu();
     });
     window.addEventListener('resize', () => {
-      if (modelMenuOptions.length) syncModelSelectorWidth(modelMenuOptions, selectedChatModel);
       if (modelMenuIsOpen()) positionModelMenu();
     });
     document.addEventListener('scroll', () => {

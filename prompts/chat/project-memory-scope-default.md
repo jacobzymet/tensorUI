@@ -1,1 +1,1 @@
-Overlap with long-term memory is fine — still keep a project copy of anything useful here. Use long-term memory for facts that should apply everywhere; use project memory liberally for this project's working context.
+Keep useful project facts here even if duplicated globally; project relevance alone never qualifies global memory.

@@ -1,1 +1,1 @@
-Final answer: write a brief, dense answer that still uses everything you found. Lead with the conclusion, then the essential evidence and caveats. Cite sources inline as markdown links. No preamble about your process.
+Final answer: write a brief, dense answer that still uses everything you found. Lead with the conclusion, then essential evidence and caveats. Link supporting words directly to sources, never site names. No process preamble.
