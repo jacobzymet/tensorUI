@@ -31,8 +31,8 @@ use crate::{
     system,
 };
 use embed::{
-    APP_ICON_PNG, CHAT_HTML, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS, SETTINGS_HTML,
-    UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
+    APP_ICON_PNG, CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS,
+    SETTINGS_HTML, UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
 };
 
 pub type SharedApp = Arc<Mutex<App>>;
@@ -271,6 +271,8 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/settings", get(settings_page))
         .route("/admin", get(|| async { Redirect::permanent("/settings") }))
         .route("/chat", get(|| async { Redirect::permanent("/") }))
+        .route("/chat.css", get(chat_stylesheet))
+        .route("/chat.js", get(chat_script))
         .route("/orb.js", get(orb_script))
         .route("/prompts.js", get(prompts_script))
         .route("/highlight.min.js", get(highlight_script))
@@ -327,6 +329,20 @@ async fn chat_page() -> Html<&'static str> {
 
 async fn settings_page() -> Html<&'static str> {
     Html(SETTINGS_HTML)
+}
+
+async fn chat_stylesheet() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        CHAT_CSS,
+    )
+}
+
+async fn chat_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        CHAT_JS,
+    )
 }
 
 async fn orb_script() -> impl IntoResponse {

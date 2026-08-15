@@ -1,0 +1,2668 @@
+function parseSseEvent(raw) {
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  let event = 'message';
+  const dataLines = [];
+  for (const line of lines) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+  }
+  return { event, data: dataLines.join('\n') };
+}
+
+/**
+ * Reveal streamed text a few code points per frame so chunks feel like a
+ * typewriter. Catches up when backlog grows, and snap-flushes on end so
+ * we never trail the network after the response finishes.
+ */
+function createStreamTyper(onPaint) {
+  let target = '';
+  let shown = '';
+  let raf = 0;
+  let inReasoning = false;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function pending() {
+    return target.length - shown.length;
+  }
+
+  function advance(step) {
+    let i = shown.length;
+    let taken = 0;
+    while (i < target.length && taken < step) {
+      const code = target.charCodeAt(i);
+      // Keep surrogate pairs intact.
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < target.length) i += 2;
+      else i += 1;
+      taken += 1;
+    }
+    shown = target.slice(0, i);
+  }
+
+  function tick() {
+    raf = 0;
+    const behind = pending();
+    if (behind <= 0) return;
+    // ~1–3 code points/frame when near real-time; sprint when buffered.
+    let step = 1;
+    if (behind > 96) step = Math.ceil(behind / 6);
+    else if (behind > 32) step = 4;
+    else if (behind > 10) step = 2;
+    advance(step);
+    onPaint(shown, true);
+    if (pending() > 0) raf = requestAnimationFrame(tick);
+  }
+
+  function schedule() {
+    if (reduceMotion) {
+      shown = target;
+      onPaint(shown, true);
+      return;
+    }
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+
+  function closeReasoning() {
+    if (!inReasoning) return;
+    target += '</think>';
+    inReasoning = false;
+  }
+
+  return {
+    get target() { return target; },
+    get shown() { return shown; },
+    /** OpenAI / llama.cpp reasoning channel (separate from answer content). */
+    pushReasoning(delta) {
+      if (!delta) return;
+      if (!inReasoning) {
+        target += '<think>';
+        inReasoning = true;
+      }
+      target += delta;
+      schedule();
+    },
+    push(delta) {
+      if (!delta) return;
+      closeReasoning();
+      target += delta;
+      schedule();
+    },
+    clear() {
+      target = '';
+      shown = '';
+      inReasoning = false;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    },
+    /** Instantly catch up — call when the SSE stream closes or aborts. */
+    flush() {
+      closeReasoning();
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      if (shown !== target) {
+        shown = target;
+        onPaint(shown, false);
+      }
+    },
+  };
+}
+
+function updateSendEnabled() {
+  const hasText = composerInput.value.trim() !== '';
+  const hasFiles = pendingAttachments.length > 0;
+  const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
+  const canCompose = !diskEncryptionLocked()
+    && serverReady
+    && (hasText || hasFiles || hasQuote);
+  btnSend.disabled = !canCompose;
+  if (btnBranch) {
+    btnBranch.disabled = !canCompose || !canBranchFromActiveConversation();
+  }
+}
+
+function syncModelOriginPill(visible, providerName) {
+  if (!chatModelOriginPill) return;
+  const name = (providerName || '').trim();
+  if (!visible || !name || chatModelSelectWrap.classList.contains('is-hidden')) {
+    chatModelOriginPill.classList.add('is-hidden');
+    chatModelOriginPill.setAttribute('aria-hidden', 'true');
+    chatModelOriginPill.textContent = '';
+    chatModelOriginPill.removeAttribute('title');
+    return;
+  }
+  chatModelOriginPill.classList.remove('is-hidden');
+  chatModelOriginPill.setAttribute('aria-hidden', 'false');
+  chatModelOriginPill.textContent = name;
+  chatModelOriginPill.title = name;
+}
+
+function modelMenuIsOpen() {
+  return chatModelMenu && !chatModelMenu.classList.contains('is-hidden');
+}
+
+function modelSearchEnabled() {
+  return modelMenuOptions.length >= MODEL_SEARCH_MIN_OPTIONS;
+}
+
+function modelFilterTerms() {
+  return modelMenuFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function modelMenuSourceOptions() {
+  if (modelMenuTab === 'all') return modelMenuOptions.slice();
+  const byValue = new Map(modelMenuOptions.map((option) => [option.value, option]));
+  const order = modelMenuTab === 'pins' ? pinnedModelIds : recentModelIds;
+  return order
+    .map((id) => byValue.get(id))
+    .filter(Boolean);
+}
+
+function syncModelMenuTabs() {
+  const tabs = chatModelMenu?.querySelectorAll('[data-model-tab]');
+  if (!tabs) return;
+  tabs.forEach((tab) => {
+    const active = tab.getAttribute('data-model-tab') === modelMenuTab;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (chatModelList) {
+    const label = modelMenuTab === 'recents'
+      ? 'Recent models'
+      : (modelMenuTab === 'pins' ? 'Pinned models' : 'All models');
+    chatModelList.setAttribute('aria-label', label);
+  }
+}
+
+function setModelMenuTab(tab, { keepActive = false } = {}) {
+  const next = tab === 'recents' || tab === 'pins' ? tab : 'all';
+  if (modelMenuTab === next && modelMenuIsOpen()) {
+    applyModelFilter({ keepActive });
+    return;
+  }
+  modelMenuTab = next;
+  syncModelMenuTabs();
+  if (modelMenuIsOpen()) applyModelFilter({ keepActive });
+}
+
+/**
+ * Every term must appear somewhere in "<label> <provider>". Ranked so
+ * label-prefix hits float above mid-string ones; ties keep source order.
+ */
+function computeModelMatches() {
+  const source = modelMenuSourceOptions();
+  const terms = modelFilterTerms();
+  if (!terms.length) {
+    modelMenuMatches = source;
+    return;
+  }
+  const scored = [];
+  source.forEach((option, index) => {
+    const label = String(option.label || '').toLowerCase();
+    const haystack = (label + ' ' + String(option.provider || '')).toLowerCase();
+    if (!terms.every((term) => haystack.includes(term))) return;
+    let rank = 2;
+    if (label.startsWith(terms[0])) rank = 0;
+    else if (label.includes(terms[0])) rank = 1;
+    scored.push({ option, rank, index });
+  });
+  scored.sort((a, b) => (a.rank - b.rank) || (a.index - b.index));
+  modelMenuMatches = scored.map((entry) => entry.option);
+}
+
+/** Escape, then wrap matched runs in <mark>. Overlapping terms merge. */
+function highlightModelText(value, terms) {
+  const raw = String(value || '');
+  if (!terms.length || !raw) return escapeModelText(raw);
+  const lower = raw.toLowerCase();
+  const hit = new Array(raw.length).fill(false);
+  terms.forEach((term) => {
+    if (!term) return;
+    let from = 0;
+    for (;;) {
+      const at = lower.indexOf(term, from);
+      if (at === -1) break;
+      for (let i = at; i < at + term.length; i += 1) hit[i] = true;
+      from = at + 1;
+    }
+  });
+  let out = '';
+  let i = 0;
+  while (i < raw.length) {
+    const on = hit[i];
+    let j = i;
+    while (j < raw.length && hit[j] === on) j += 1;
+    const chunk = escapeModelText(raw.slice(i, j));
+    out += on ? '<mark class="chat-model-mark">' + chunk + '</mark>' : chunk;
+    i = j;
+  }
+  return out;
+}
+
+function renderModelMenuList() {
+  const terms = modelFilterTerms();
+  const sourceCount = modelMenuSourceOptions().length;
+  chatModelList.innerHTML = modelMenuMatches.map((option, index) => {
+    const isSelected = option.value === selectedChatModel;
+    const pinned = isModelPinned(option.value);
+    const badge = option.provider
+      ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(option.provider) + '">'
+        + highlightModelText(option.provider, terms) + '</span>'
+      : '';
+    return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
+      + '" role="option" id="chat-model-option-' + index + '"'
+      + ' data-value="' + escapeModelAttr(option.value) + '"'
+      + ' title="' + escapeModelAttr(option.provider ? option.label + ' · ' + option.provider : option.label) + '"'
+      + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
+      + '<button type="button" class="chat-model-option-main" data-model-pick="'
+      + escapeModelAttr(option.value) + '">'
+      + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
+      + badge
+      + '</button>'
+      + '<button type="button" class="chat-model-pin' + (pinned ? ' is-pinned' : '') + '"'
+      + ' data-model-pin="' + escapeModelAttr(option.value) + '"'
+      + ' aria-label="' + (pinned ? 'Unpin model' : 'Pin model') + '"'
+      + ' aria-pressed="' + (pinned ? 'true' : 'false') + '"'
+      + ' title="' + (pinned ? 'Unpin' : 'Pin') + '">'
+      + MODEL_PIN_ICON
+      + '</button>'
+      + '</div>';
+  }).join('');
+
+  const empty = !modelMenuMatches.length;
+  chatModelEmpty.classList.toggle('is-hidden', !empty);
+  chatModelList.classList.toggle('is-hidden', empty);
+  if (empty) {
+    if (modelMenuTab === 'recents' && !terms.length) {
+      chatModelEmpty.textContent = 'Models you pick will show up here.';
+    } else if (modelMenuTab === 'pins' && !terms.length) {
+      chatModelEmpty.textContent = 'Pin models from All or Recents to keep them here.';
+    } else if (terms.length) {
+      chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
+    } else {
+      chatModelEmpty.textContent = 'No models available.';
+    }
+  }
+  if (chatModelSearchCount) {
+    chatModelSearchCount.textContent = terms.length
+      ? modelMenuMatches.length + '/' + sourceCount
+      : String(sourceCount);
+  }
+}
+
+/** Re-filter and repaint the open menu after the query changed. */
+function applyModelFilter({ keepActive = false } = {}) {
+  const previous = keepActive && modelMenuActiveIndex >= 0
+    ? modelMenuMatches[modelMenuActiveIndex]
+    : null;
+  computeModelMatches();
+  renderModelMenuList();
+  const restored = previous
+    ? modelMenuMatches.findIndex((option) => option.value === previous.value)
+    : -1;
+  if (restored >= 0) modelMenuActiveIndex = restored;
+  else {
+    const selected = modelMenuMatches.findIndex((option) => option.value === selectedChatModel);
+    modelMenuActiveIndex = modelMenuMatches.length ? Math.max(0, selected) : -1;
+  }
+  paintModelMenuActive();
+  if (modelMenuIsOpen()) positionModelMenu();
+}
+
+function positionModelMenu() {
+  if (!chatModelMenu || !chatModelSelectWrap) return;
+  const rect = chatModelSelectWrap.getBoundingClientRect();
+  // CSS owns a stable menu width; model and provider text never resize it.
+  const menuWidth = chatModelMenu.offsetWidth || Math.min(352, window.innerWidth - 16);
+  const maxLeft = window.innerWidth - menuWidth - 8;
+  // Center on the trigger, clamping only near viewport edges.
+  const idealLeft = rect.left + (rect.width - menuWidth) / 2;
+  const left = Math.min(Math.max(8, idealLeft), maxLeft);
+  const menuHeight = chatModelMenu.offsetHeight || Math.min(368, window.innerHeight * 0.6);
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const openAbove = spaceBelow < Math.min(menuHeight, 260) && rect.top > spaceBelow;
+  const top = openAbove
+    ? Math.max(8, rect.top - menuHeight - 6)
+    : rect.bottom + 6;
+  chatModelMenu.style.top = Math.round(top) + 'px';
+  chatModelMenu.style.left = Math.round(left) + 'px';
+  chatModelMenu.style.width = Math.round(menuWidth) + 'px';
+  chatModelMenu.style.right = 'auto';
+  chatModelMenu.style.transformOrigin = openAbove ? 'bottom center' : 'top center';
+}
+
+function closeModelMenu({ restoreFocus = false } = {}) {
+  if (!chatModelMenu || chatModelMenu.classList.contains('is-hidden')) return;
+  chatModelMenu.classList.remove('is-open');
+  chatModelSelectWrap.classList.remove('is-open');
+  chatModelSelect.setAttribute('aria-expanded', 'false');
+  modelMenuActiveIndex = -1;
+  // Drop the query so the next open starts from the full list.
+  modelMenuFilter = '';
+  if (chatModelSearch) chatModelSearch.value = '';
+  if (restoreFocus) chatModelSelect.focus();
+  const finish = () => {
+    chatModelMenu.classList.add('is-hidden');
+    if (chatModelMenu.parentElement !== chatModelSelectWrap) {
+      chatModelSelectWrap.appendChild(chatModelMenu);
+    }
+  };
+  if (prefersReducedMotion()) {
+    finish();
+    return;
+  }
+  window.setTimeout(finish, 180);
+}
+
+function paintModelMenuActive() {
+  const options = chatModelList.querySelectorAll('.chat-model-option');
+  options.forEach((btn, index) => {
+    btn.classList.toggle('is-active', index === modelMenuActiveIndex);
+  });
+  const active = options[modelMenuActiveIndex];
+  if (active) active.scrollIntoView({ block: 'nearest' });
+  if (chatModelSearch) {
+    if (active) chatModelSearch.setAttribute('aria-activedescendant', active.id);
+    else chatModelSearch.removeAttribute('aria-activedescendant');
+  }
+}
+
+function openModelMenu() {
+  if (!modelMenuOptions.length || chatModelSelectWrap.classList.contains('is-hidden')) return;
+  if (chatModelMenu.parentElement !== document.body) {
+    document.body.appendChild(chatModelMenu);
+  }
+  const searchable = modelSearchEnabled();
+  chatModelSearchWrap.classList.toggle('is-hidden', !searchable);
+  modelMenuFilter = '';
+  if (chatModelSearch) chatModelSearch.value = '';
+  if (modelMenuTab === 'recents' && !recentModelIds.length) {
+    modelMenuTab = pinnedModelIds.length ? 'pins' : 'all';
+  } else if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
+    modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+  }
+  syncModelMenuTabs();
+  chatModelMenu.classList.remove('is-hidden');
+  chatModelSelectWrap.classList.add('is-open');
+  chatModelSelect.setAttribute('aria-expanded', 'true');
+  computeModelMatches();
+  renderModelMenuList();
+  modelMenuActiveIndex = Math.max(0, modelMenuMatches.findIndex((o) => o.value === selectedChatModel));
+  positionModelMenu();
+  paintModelMenuActive();
+  // Typing filters immediately when the field is there; otherwise the
+  // trigger keeps focus and its own arrow-key handler stays in charge.
+  if (searchable) chatModelSearch.focus();
+  void chatModelMenu.offsetWidth;
+  requestAnimationFrame(() => chatModelMenu.classList.add('is-open'));
+}
+
+function chooseModelOption(value) {
+  if (!value) {
+    closeModelMenu({ restoreFocus: true });
+    return;
+  }
+  rememberRecentModel(value);
+  if (value !== selectedChatModel) {
+    selectedChatModel = value;
+    selectedRemoteModelId = selectedChatModel;
+    localStorage.setItem(CHAT_MODEL_KEY, selectedChatModel);
+    localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
+    const selected = modelMenuOptions.find((o) => o.value === selectedChatModel);
+    chatModelSelect.textContent = selected ? selected.label : 'Model';
+    chatModelSelect.title = selected
+      ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
+      : '';
+    syncModelOriginPill(true, selected && selected.provider);
+    chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
+      const isSelected = btn.getAttribute('data-value') === selectedChatModel;
+      btn.classList.toggle('is-selected', isSelected);
+      btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    });
+  }
+  closeModelMenu({ restoreFocus: true });
+  if (latestState) updateServerChip(latestState);
+}
+
+function refreshStarfieldClearZone() {
+  if (typeof repaintStarfield === 'function') repaintStarfield();
+}
+
+function escapeModelAttr(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+function escapeModelText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;');
+}
+
+function syncModelSelector(data) {
+  const network = data.network || {};
+  const remoteModels = network.remote_models || [];
+  const wasHidden = chatModelSelectWrap.classList.contains('is-hidden');
+  const menuOpen = modelMenuIsOpen();
+
+  if (!remoteModels.length) {
+    if (!menuOpen) closeModelMenu();
+    chatModelSelectWrap.classList.add('is-hidden');
+    syncModelOriginPill(false);
+    modelMenuOptions = [];
+    if (!wasHidden) refreshStarfieldClearZone();
+    return;
+  }
+  chatModelSelectWrap.classList.remove('is-hidden');
+  if (wasHidden) refreshStarfieldClearZone();
+
+  const remoteOptions = remoteModels.map((m) => ({
+    value: m.id,
+    label: m.model || m.label,
+    provider: (m.provider_name || '').trim(),
+    providerId: (m.provider_id || '').trim(),
+    ready: !!m.ready,
+    thinking: !!m.thinking_supported,
+  }));
+  modelMenuOptions = remoteOptions;
+  pruneRecentModels(remoteOptions.map((o) => o.value));
+  prunePinnedModels(remoteOptions.map((o) => o.value));
+  if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
+    rememberRecentModel(selectedChatModel);
+  }
+  const allValues = remoteOptions.map((o) => o.value);
+  if (!allValues.includes(selectedChatModel)) {
+    // Migrate older localStorage ids (remote|base|model) by matching model+base suffix.
+    const legacy = selectedRemoteModelId || selectedChatModel;
+    const migrated = remoteOptions.find((o) => {
+      if (!legacy) return false;
+      if (o.value === legacy) return true;
+      return o.value.endsWith('|' + legacy.replace(/^remote\|/, ''))
+        || legacy.endsWith('|' + (o.label || ''));
+    });
+    if (migrated) {
+      selectedChatModel = migrated.value;
+    } else if (!menuOpen) {
+      selectedChatModel = remoteOptions[0].value;
+    }
+    localStorage.setItem(CHAT_MODEL_KEY, selectedChatModel);
+  }
+
+  const signature = [
+    selectedChatModel,
+    ...remoteOptions.map((o) => o.value + '|' + o.label + '|' + o.provider),
+  ].join(';');
+  // Avoid nuking option nodes under the cursor while the menu is open
+  // (state poll runs every 2s and was cancelling clicks).
+  if (!menuOpen && chatModelMenu.dataset.signature !== signature) {
+    chatModelMenu.dataset.signature = signature;
+    // Menu is closed, so there is no live filter to preserve.
+    modelMenuFilter = '';
+    computeModelMatches();
+    renderModelMenuList();
+  }
+  const selected = remoteOptions.find((o) => o.value === selectedChatModel);
+  if (!menuOpen) {
+    chatModelSelect.textContent = selected ? selected.label : 'Model';
+    chatModelSelect.title = selected
+      ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
+      : '';
+  }
+  selectedRemoteModelId = selectedChatModel;
+  localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
+  syncModelOriginPill(true, selected && selected.provider);
+  if (menuOpen) positionModelMenu();
+}
+
+function selectedRemoteModel(data) {
+  const models = data?.network?.remote_models || [];
+  return models.find((m) => m.id === selectedRemoteModelId)
+    || models.find((m) => m.id === selectedChatModel)
+    || models[0]
+    || null;
+}
+
+function updateServerChip(data) {
+  latestState = data;
+  applyAppearance(data);
+  syncModelSelector(data);
+  const network = data.network || {};
+  const remoteOk = !!network.remote_ok || !!(network.remote_models || []).length;
+  const remoteChecking = !!network.remote_checking
+    || (!!network.remote_saved && !remoteOk && !network.remote_kind && !(network.remote_models || []).length);
+  const remoteSelected = selectedRemoteModel(data);
+  const modelName = remoteSelected?.model || network.remote_model || 'remote model';
+  const providerLabel = remoteSelected?.provider_name
+    || network.remote_name
+    || network.remote_label
+    || 'provider';
+  const connected = !!(remoteSelected?.ready || remoteOk);
+  serverReady = connected;
+
+  serverChip.className = 'status-chip status-' + (
+    connected ? 'ready' : (remoteChecking ? 'checking' : (!network.remote_saved ? 'stopped' : 'failed'))
+  );
+  serverChip.textContent = connected
+    ? 'Connected'
+    : (remoteChecking ? 'Checking…' : (!network.remote_saved ? 'Not configured' : 'Unavailable'));
+  serverChip.title = connected
+    ? 'Connected to ' + providerLabel
+    : (remoteChecking ? 'Checking ' + providerLabel + ' connection' : 'Provider connection unavailable');
+  if (serverProviderName) {
+    serverProviderName.textContent = network.remote_saved ? providerLabel : 'No provider';
+    serverProviderName.title = network.remote_saved ? providerLabel : '';
+  }
+
+  const project = inProjectChat() ? getProject(activeProjectId) : null;
+  const viaSuffix = ' · via ' + providerLabel;
+  if (remoteChecking) {
+    modelHintEl.textContent = '';
+    modelHintEl.classList.add('is-hidden');
+    hideComposerHint();
+  } else if (!serverReady) {
+    modelHintEl.textContent = '';
+    modelHintEl.classList.add('is-hidden');
+    hideComposerHint();
+  } else if (project && !activeId) {
+    modelHintEl.classList.remove('is-hidden');
+    modelHintEl.textContent = 'Shared instructions & memory apply · ' + modelName + viaSuffix;
+    updateComposerHint();
+  } else {
+    modelHintEl.classList.remove('is-hidden');
+    modelHintEl.textContent = project
+      ? 'Chatting with ' + modelName + ' · Project: ' + project.name + viaSuffix
+      : ('Chatting with ' + modelName + viaSuffix);
+    updateComposerHint();
+  }
+  syncComposerThinkVisibility(remoteSelected);
+  syncAttachButton();
+  updateSendEnabled();
+}
+
+async function pollState() {
+  try {
+    const response = await fetch('/api/state');
+    if (!response.ok) return;
+    updateServerChip(await response.json());
+  } catch {
+    // control server briefly unreachable — retry on the next tick
+  }
+}
+
+async function sendMessage({ branch = false } = {}) {
+  const typed = composerInput.value.trim();
+  const queuedFiles = pendingAttachments.slice();
+  const replyQuote = typeof pendingReplyQuote === 'string' ? pendingReplyQuote.trim() : '';
+  if ((!typed && !queuedFiles.length && !replyQuote) || !serverReady) return;
+  if (!requireUnlockedData()) return;
+
+  let source = conversations.find((item) => item.id === activeId);
+  if (branch) {
+    if (!source || !Array.isArray(source.messages) || !source.messages.length) return;
+  }
+
+  stopVoiceInput({ silent: true });
+  cancelMessageEdit();
+  showChatView();
+
+  let prepared;
+  try {
+    if (queuedFiles.length) {
+      attachHintUntil = 0;
+      showComposerHint('Preparing attachments…');
+      prepared = await prepareAttachmentsForSend(queuedFiles);
+    } else {
+      prepared = [];
+    }
+  } catch (error) {
+    showAttachHint(error?.message || 'Attachment prep failed');
+    focusComposer();
+    return;
+  }
+
+  if (branch) {
+    source = conversations.find((item) => item.id === source.id) || source;
+    if (!source.messages?.length) {
+      focusComposer();
+      return;
+    }
+  }
+
+  const mentioned = parseCapabilityMentions(typed);
+  const text = mentioned.text;
+  const mentionIds = new Set([
+    ...composerMentionIds,
+    ...mentioned.mentions,
+  ]);
+  // Drop legacy chip id if somehow present.
+  mentionIds.delete('agent');
+  const turn = resolveTurnSkills(mentionIds);
+  const displayText = displayTextWithMentions(text, mentioned.mentions);
+  const storedAttachments = storedAttachmentsFromPrepared(prepared);
+  const apiText = buildUserApiContent(text, prepared, replyQuote);
+
+  let convo = branch
+    ? null
+    : conversations.find((item) => item.id === activeId);
+  if (branch) {
+    const projectId = source.projectId || null;
+    convo = {
+      id: newId('c'),
+      title: branchConversationTitle(source),
+      titleEdited: false,
+      messages: cloneConversationMessages(source.messages),
+      updatedAt: Date.now(),
+      projectId,
+      sortOrder: nextTopSortOrder(projectId),
+      incognito: !!source.incognito,
+      pinned: false,
+      pinnedAt: null,
+    };
+    conversations.push(convo);
+    if (activeId) stickByConvo.set(activeId, stickToBottom);
+    activeId = convo.id;
+    draftIncognito = !!convo.incognito;
+    activeProjectId = projectId;
+    stickToBottom = true;
+    userScrollOverride = false;
+    resumeBottomIntent = false;
+    selectedTraceMsgIndex = null;
+    resetTraceAutoOpenState();
+    syncUrlFromState();
+    showThread(convo);
+    renderThread(convo);
+    renderSidebar();
+    syncComposerStreamUi();
+  } else if (!convo) {
+    const id = newId('c');
+    convo = {
+      id,
+      title: draftIncognito ? 'Ghost Chat' : 'New chat',
+      titleEdited: false,
+      messages: [],
+      updatedAt: Date.now(),
+      projectId: activeProjectId || null,
+      sortOrder: nextTopSortOrder(activeProjectId || null),
+      incognito: !!draftIncognito,
+      pinned: false,
+      pinnedAt: null,
+    };
+    conversations.push(convo);
+    activeId = id;
+    syncUrlFromState({ replace: true });
+  }
+
+  composerInput.value = '';
+  clearPendingAttachments();
+  clearPendingReplyQuote();
+  autoResize(composerInput);
+  renderComposerMentions();
+  renderComposerModes();
+  closeMentionMenu();
+
+  const outbound = {
+    id: newId('q'),
+    editText: typed,
+    displayText: displayText || (storedAttachments.length ? '(attachment)' : ''),
+    apiText,
+    attachments: storedAttachments,
+    replyQuote: replyQuote || '',
+    turn: {
+      useAgent: turn.useAgent,
+      skills: turn.skills,
+      deepResearch: turn.deepResearch,
+      deepResearchOutput: turn.deepResearchOutput,
+      forceTools: turn.forceTools,
+    },
+  };
+
+  // Branch always starts a fresh turn on the new chat (never queue on the parent).
+  if (!branch && isConvoBusy(convo.id)) {
+    enqueueOutbound(convo, outbound);
+    focusComposer();
+    return;
+  }
+
+  dispatchOutboundTurn(convo, outbound);
+  focusComposer();
+}
+
+function focusComposer() {
+  if (!composerInput) return;
+  // Defer so a clicked Send button does not steal focus back.
+  queueMicrotask(() => {
+    if (document.activeElement === composerInput) return;
+    composerInput.focus({ preventScroll: true });
+  });
+}
+
+function ensureStreamDom(convo, stream) {
+  if (activeId !== convo.id) return null;
+  if (stream.dom && stream.dom.row.isConnected) return stream.dom;
+
+  const assistantRow = document.createElement('div');
+  assistantRow.className = 'msg msg-role-assistant';
+  assistantRow.dataset.streamId = convo.id;
+  assistantRow.dataset.msgIndex = String(convo.messages.length);
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+
+  const statusEl = document.createElement('div');
+  statusEl.className = 'thinking';
+  const orbCanvas = document.createElement('canvas');
+  orbCanvas.className = 'orb-sm';
+  const thinkingLabel = document.createElement('span');
+  thinkingLabel.className = 'thinking-label';
+  thinkingLabel.textContent = 'Processing…';
+  statusEl.appendChild(orbCanvas);
+  statusEl.appendChild(thinkingLabel);
+
+  const traceEl = document.createElement('div');
+  traceEl.className = 'agent-trace is-hidden';
+  const answerEl = document.createElement('div');
+  answerEl.className = 'agent-answer';
+
+  bubble.appendChild(statusEl);
+  bubble.appendChild(traceEl);
+  bubble.appendChild(answerEl);
+  assistantRow.appendChild(bubble);
+  attachMessageActions(assistantRow);
+  chatThread.appendChild(assistantRow);
+  queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
+  const thinkingOrb = mountOrb(orbCanvas, 20);
+  stream.dom = {
+    row: assistantRow,
+    statusEl,
+    thinkingLabel,
+    traceEl,
+    answerEl,
+    thinkingOrb,
+    enteredSteps: 0,
+  };
+  const liveClarify = stream.timeline.find((part) => part.type === 'clarify');
+  if (liveClarify) mountClarifyForm(stream, liveClarify);
+  return stream.dom;
+}
+
+/**
+ * While an open <think> block is streaming alone, patch the existing
+ * .think-stream markdown instead of rebuilding the whole answer tree every
+ * typer frame (full rebuilds starve the canvas orb's rAF and reset CSS animations).
+ */
+function paintLiveThinkOnly(rootEl, cleaned) {
+  if (settings.thinking === 'hidden') {
+    if (rootEl.innerHTML) rootEl.innerHTML = '';
+    return true;
+  }
+  const segments = parseThinkSegments(cleaned);
+  const openThink = segments.find((segment) => segment.type === 'think' && segment.open);
+  if (!openThink) return false;
+  const otherSegments = segments.filter((segment) => {
+    if (segment === openThink) return false;
+    return segment.type !== 'think' ? !!segment.content.trim() : (!segment.open && !!segment.content.trim());
+  });
+  const closedSig = otherSegments.map((s) => s.type + ':' + s.content).join('\0');
+  let streamEl = rootEl.querySelector(
+    ':scope > .agent-step.is-live-think .think-stream, :scope > .agent-step.is-think .think-stream, :scope > .think-live > .think-stream, :scope > .think-block.is-streaming > .think-stream'
+  );
+  if (!streamEl || rootEl.dataset.closedSig !== closedSig) {
+    let prefixHtml = '';
+    for (const seg of otherSegments) {
+      if (seg.type === 'think') {
+        prefixHtml += renderThinkBlock(seg.content, { open: false, streaming: false });
+      } else {
+        prefixHtml += renderMarkdown(seg.content);
+      }
+    }
+    rootEl.innerHTML = prefixHtml + renderThinkBlock(openThink.content, { open: true, streaming: true });
+    rootEl.dataset.closedSig = closedSig;
+    const liveStep = rootEl.querySelector(':scope > .agent-step:last-child');
+    if (liveStep) liveStep.classList.add('is-live-think');
+    streamEl = rootEl.querySelector('.is-live-think .think-stream, .think-stream');
+  }
+  if (!streamEl) return false;
+  if (streamEl.dataset.thinkRaw !== openThink.content) {
+    streamEl.dataset.thinkRaw = openThink.content;
+    streamEl.innerHTML = renderThinkMarkdown(openThink.content);
+  }
+  streamEl.scrollTop = streamEl.scrollHeight;
+  return true;
+}
+
+function timelineSignature(timeline) {
+  return (timeline || []).map((part) => {
+    if (!part) return '';
+    if (part.type === 'tool') {
+      return ['tool', part.name, part.detail, part.result, part.note || '', part.live ? '1' : '0'].join('\0');
+    }
+    if (part.type === 'clarify') {
+      return ['clarify', part.id || '', part.live ? '1' : '0', part.summary || ''].join('\0');
+    }
+    return [part.type, part.content || ''].join('\0');
+  }).join('\n');
+}
+
+function streamingAnswerText(text) {
+  if (!text) return '';
+  let out = '';
+  for (const segment of parseThinkSegments(text)) {
+    if (segment.type === 'think') continue;
+    out += segment.content || '';
+  }
+  return out;
+}
+
+function renderStreamingAnswerHtml(text) {
+  const answer = streamingAnswerText(text);
+  if (!answer.trim()) return '';
+  return '<div class="agent-final-answer">' + renderMarkdown(answer) + '</div>';
+}
+
+function paintStreamIntoView(convo, stream, replyText, streaming) {
+  stream.partial = replyText;
+  const extracted = applyMemoryUpdateProtocol(replyText, { streaming });
+  const { cleaned } = extracted;
+  if (activeId !== convo.id) {
+    // Background stream — keep state only; sidebar shows the live marker.
+    return;
+  }
+  const dom = ensureStreamDom(convo, stream);
+  if (!dom) return;
+  const { row, statusEl, thinkingLabel, traceEl, answerEl, thinkingOrb } = dom;
+  const savedClarifyHost = preserveClarifyHost(answerEl);
+  if (traceEl) {
+    traceEl.innerHTML = '';
+    traceEl.classList.add('is-hidden');
+  }
+  const thinkingOpen = streaming && isThinkingOpen(cleaned);
+  const hasTimeline = stream.timeline.length > 0;
+  const desktop = isDesktopTraceLayout();
+  const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline, {
+    notesCollapsed: !streaming,
+  });
+  const liveAnswerHtml = renderStreamingAnswerHtml(cleaned);
+  const answerHtml = desktop ? (sealedAnswerHtml + liveAnswerHtml) : '';
+  const hasVisibleAnswer = desktop
+    ? !!answerHtml
+    : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
+
+  if (desktop) {
+    if (answerHtml) {
+      if (answerEl.dataset.renderedHtml !== answerHtml) {
+        answerEl.innerHTML = answerHtml;
+        answerEl.dataset.renderedHtml = answerHtml;
+        if (!streaming) enhanceCodeBlocks(answerEl);
+      }
+    } else if (!streaming) {
+      if (answerEl.innerHTML) answerEl.innerHTML = '';
+      delete answerEl.dataset.renderedHtml;
+    } else if (!hasTimeline && !thinkingOpen) {
+      const nextHtml = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
+      if (answerEl.dataset.renderedHtml !== nextHtml) {
+        answerEl.innerHTML = nextHtml;
+        answerEl.dataset.renderedHtml = nextHtml;
+      }
+    } else {
+      const nextHtml = sealedAnswerHtml || '';
+      if (answerEl.dataset.renderedHtml !== nextHtml) {
+        answerEl.innerHTML = nextHtml;
+        answerEl.dataset.renderedHtml = nextHtml;
+      }
+    }
+    delete answerEl.dataset.committedSig;
+    stream.enteredSteps = 0;
+  } else if (cleaned || hasTimeline || sealedAnswerHtml) {
+    const committedHtml = renderCommittedParts(stream.timeline);
+    const committedSig = timelineSignature(stream.timeline) + '\0' + sealedAnswerHtml;
+    const liveOnly =
+      streaming &&
+      thinkingOpen &&
+      !hasTimeline &&
+      !sealedAnswerHtml &&
+      paintLiveThinkOnly(answerEl, cleaned);
+
+    if (!liveOnly) {
+      let liveRoot = answerEl.querySelector(':scope > .agent-live');
+      if ((hasTimeline || sealedAnswerHtml) && streaming && cleaned) {
+        if (answerEl.dataset.committedSig !== committedSig || !liveRoot) {
+          answerEl.innerHTML = committedHtml + sealedAnswerHtml + '<div class="agent-live"></div>';
+          answerEl.dataset.committedSig = committedSig;
+          liveRoot = answerEl.querySelector(':scope > .agent-live');
+        }
+        if (liveRoot && !(thinkingOpen && paintLiveThinkOnly(liveRoot, cleaned))) {
+          liveRoot.innerHTML = renderAssistantHtml(cleaned, { streaming: true });
+        }
+      } else {
+        answerEl.innerHTML = committedHtml + sealedAnswerHtml + (cleaned ? renderAssistantHtml(cleaned, { streaming }) : '');
+        answerEl.dataset.committedSig = committedSig;
+      }
+      answerEl.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
+      if (!streaming) enhanceCodeBlocks(answerEl);
+      scrollThinkStreams(answerEl);
+      const steps = answerEl.querySelectorAll(':scope > .agent-step');
+      const seen = stream.enteredSteps || 0;
+      steps.forEach((el, index) => {
+        if (index >= seen) motionEnter(el, { y: 10, duration: 200, delay: Math.min(index - seen, 6) * 28 });
+      });
+      stream.enteredSteps = steps.length;
+    }
+  } else if (!streaming) {
+    if (answerEl.innerHTML) answerEl.innerHTML = '';
+    delete answerEl.dataset.committedSig;
+    delete answerEl.dataset.renderedHtml;
+    stream.enteredSteps = 0;
+  }
+
+  const toolLive = stream.timeline.some((part) => part.type === 'tool' && part.live);
+  const clarifyLive = stream.timeline.some((part) => part.type === 'clarify' && part.live);
+  restoreClarifyHost(answerEl, savedClarifyHost || stream.dom?.clarifyHost);
+  // Agent turns keep the status chip for the whole stream — including the quiet
+  // gap after a tool finishes and before the next think/answer tokens arrive.
+  const agentStreaming = streaming && !!stream.useAgent;
+  if (toolLive || clarifyLive || thinkingOpen || agentStreaming || (streaming && !cleaned && !hasTimeline)) {
+    statusEl.classList.remove('is-hidden');
+    thinkingOrb.play();
+    if (toolLive) {
+      // Label is set by the tool_call agent event.
+    } else if (clarifyLive) {
+      if (thinkingLabel.textContent !== 'Waiting for your answers…') {
+        thinkingLabel.textContent = 'Waiting for your answers…';
+      }
+    } else if (thinkingOpen) {
+      if (thinkingLabel.textContent !== 'Reasoning…') {
+        thinkingLabel.textContent = 'Reasoning…';
+      }
+    } else if (agentStreaming) {
+      const label = String(thinkingLabel.textContent || '').trim();
+      // After tools, never leave a blank/stale chip — fall back to Processing.
+      if (!label || label === 'Reading results') {
+        if (thinkingLabel.textContent !== 'Processing…') {
+          thinkingLabel.textContent = 'Processing…';
+        }
+      }
+    }
+  } else if (hasVisibleAnswer || (!streaming && (cleaned || hasTimeline))) {
+    statusEl.classList.add('is-hidden');
+    // Pause only — stop() is irreversible and a brief think/answer flicker
+    // would leave a dead orb while the label shimmer keeps running.
+    thinkingOrb.pause();
+  }
+  row.dataset.raw = cleaned;
+  // Never force — respect user scroll-away while tokens arrive.
+  scrollToBottom();
+  if (desktop) {
+    const idx = Number(row.dataset.msgIndex);
+    const hasActivity = hasTimeline || thinkingOpen;
+    if (selectedTraceMsgIndex !== idx) {
+      selectTraceMessage(idx, { animate: false, ensureOpen: false });
+    } else {
+      refreshTraceSidebar({ animate: false });
+    }
+    if (hasActivity) maybeAutoOpenTraceSidebar(convo.id);
+  }
+}
+
+/** Stream an assistant reply; safe to leave the conversation while it runs. */
+async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = false, deepResearchOutput = 'long', forceTools = [] }) {
+  if (!serverReady || activeStreams.has(convo.id)) return;
+  resetTraceAutoOpenState();
+
+  const turnSkills = skills || {
+    web_search: !!settings.skillWebSearch,
+    web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
+      ? settings.webSearchDepth
+      : 'auto',
+    web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
+      ? settings.webSearchBackend
+      : 'auto',
+    web_search_max_results: Math.min(20, Math.max(1, Number(settings.webSearchResults) || 6)),
+    web_search_region: /^[a-z]{2}-[a-z]{2}$/.test(settings.webSearchRegion)
+      ? settings.webSearchRegion
+      : 'us-en',
+    web_search_safesearch: WEB_SEARCH_SAFESEARCH.includes(settings.webSearchSafeSearch)
+      ? settings.webSearchSafeSearch
+      : 'moderate',
+    web_search_recency: WEB_SEARCH_RECENCIES.includes(settings.webSearchRecency)
+      ? settings.webSearchRecency
+      : 'any',
+    fetch_url: !!settings.skillFetchUrl,
+    fetch_url_max_chars: Math.min(
+      200000,
+      Math.max(1000, Number(settings.fetchUrlMaxChars) || 8000)
+    ),
+    web_search_page_max_chars: (() => {
+      const raw = Number(settings.webSearchPageMaxChars);
+      if (!Number.isFinite(raw) || raw <= 0) return 0;
+      return Math.min(200000, Math.max(1000, Math.round(raw)));
+    })(),
+  };
+  if (deepResearch) {
+    useAgent = true;
+    turnSkills.web_search = true;
+    turnSkills.fetch_url = true;
+    turnSkills.web_search_depth = 'deep';
+    turnSkills.web_search_max_results = Math.max(turnSkills.web_search_max_results || 6, 10);
+  }
+  const turnForceTools = Array.isArray(forceTools)
+    ? forceTools.filter((name) => name === 'web_search' || name === 'fetch_url')
+    : [];
+  if (deepResearch || !useAgent || !settings.agentMode) {
+    turnForceTools.length = 0;
+  } else {
+    if (turnForceTools.includes('web_search')) turnSkills.web_search = true;
+    if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
+  }
+
+  const stream = {
+    controller: new AbortController(),
+    useAgent,
+    deepResearch,
+    deepResearchOutput,
+    turnSkills,
+    turnForceTools,
+    partial: '',
+    timeline: [],
+    errorMessage: null,
+    dom: null,
+    steerId: null,
+    pendingSteers: [],
+  };
+  activeStreams.set(convo.id, stream);
+  renderSidebar();
+  syncComposerStreamUi();
+  if (activeId === convo.id) {
+    ensureStreamDom(convo, stream);
+    scrollToBottom({ force: true });
+  }
+
+  const remote = selectedRemoteModel(latestState);
+  const turnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
+  const usageStats = {
+    completionTokens: 0,
+    promptTokens: 0,
+    providerTokPerSec: null,
+    upstreamModel: null,
+  };
+  let firstTokenAt = null;
+
+  const typer = createStreamTyper((replyText, streaming) => {
+    if (activeId === convo.id && stream.dom) {
+      const nextLabel = isThinkingOpen(replyText)
+        ? 'Reasoning…'
+        : useAgent
+          ? (deepResearch
+            ? (deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
+            : 'Writing answer')
+          : (replyText && replyText.trim())
+            ? 'Writing…'
+            : 'Processing…';
+      if (stream.dom.thinkingLabel.textContent !== nextLabel) {
+        stream.dom.thinkingLabel.textContent = nextLabel;
+      }
+    }
+    paintStreamIntoView(convo, stream, replyText, streaming);
+  });
+  const markFirstToken = () => {
+    if (firstTokenAt == null) firstTokenAt = Date.now();
+  };
+  const onAgentEvent = (payload) => {
+    if (payload.phase === 'content_clear') {
+      // Keep prior think/tool cards — seal the live buffer, then apply any
+      // authoritative preface the server resolved for this tool round.
+      commitStreamBuffer(stream, typer);
+      if (payload.reasoning != null) ensureSealedTimelineThink(stream, payload.reasoning);
+      if (payload.text != null) ensureSealedTimelineText(stream, payload.text);
+      if (stream.dom) stream.dom.row.dataset.raw = '';
+      if (activeId === convo.id && stream.dom) {
+        paintStreamIntoView(convo, stream, typer.shown || '', true);
+      }
+    } else if (payload.phase === 'tool_call') {
+      commitStreamBuffer(stream, typer);
+      if (stream.dom) stream.dom.row.dataset.raw = '';
+      const args = payload.arguments || {};
+      const detail = args.url
+        ? String(args.url)
+        : args.query
+          ? String(args.query)
+          : args.name
+            ? String(args.name)
+            : args.id
+              ? String(args.id)
+              : '';
+      stream.timeline.forEach((part) => {
+        if (part.type === 'tool') part.live = false;
+      });
+      stream.timeline.push({
+        type: 'tool',
+        name: payload.name || 'skill',
+        detail,
+        kind: args.kind ? String(args.kind) : '',
+        result: '',
+        note: '',
+        live: true,
+      });
+      if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name, args) + '…';
+    } else if (payload.phase === 'tool_result') {
+      const tools = stream.timeline.filter((part) => part.type === 'tool');
+      const last = tools[tools.length - 1];
+      const resultText = payload.result
+        ? String(payload.result).trim()
+        : payload.preview
+          ? String(payload.preview).trim()
+          : 'Done';
+      const note = payload.note ? String(payload.note).trim() : '';
+      if (last && last.name === (payload.name || last.name)) {
+        last.live = false;
+        last.result = resultText;
+        if (note) last.note = note;
+      } else {
+        stream.timeline.push({
+          type: 'tool',
+          name: payload.name || 'skill',
+          detail: '',
+          result: resultText,
+          note,
+          live: false,
+        });
+      }
+      if (stream.dom) {
+        stream.dom.thinkingLabel.textContent = note
+          ? skillLabel(payload.name, last) + ' · ' + note
+          : 'Processing…';
+      }
+    } else if (payload.phase === 'clarify') {
+      commitStreamBuffer(stream, typer);
+      if (stream.dom) stream.dom.row.dataset.raw = '';
+      const clarifyPart = {
+        type: 'clarify',
+        id: String(payload.id || ''),
+        questions: Array.isArray(payload.questions) ? payload.questions : [],
+        draft: {},
+        answers: null,
+        summary: '',
+        live: true,
+        submitting: false,
+      };
+      stream.timeline.push(clarifyPart);
+      if (stream.dom) {
+        stream.dom.thinkingLabel.textContent = 'Waiting for your answers…';
+        mountClarifyForm(stream, clarifyPart);
+      }
+    } else if (payload.phase === 'clarify_done') {
+      const part = findClarifyPart(stream, String(payload.id || ''));
+      if (part) {
+        part.live = false;
+        part.submitting = false;
+        part.answers = payload.answers || {};
+        part.summary = String(payload.summary || '').trim();
+        mountClarifyForm(stream, part);
+      }
+      if (stream.dom) stream.dom.thinkingLabel.textContent = 'Researching…';
+    } else if (payload.phase === 'steer_ready' && payload.id) {
+      stream.steerId = String(payload.id);
+      void flushPendingSteers(stream);
+      if (activeId === convo.id) renderOutboundQueue(convo);
+    } else if (payload.phase === 'steer' && payload.content != null) {
+      const text = String(payload.content).trim();
+      const clientId = payload.client_id != null ? String(payload.client_id) : '';
+      const pending = stream.pendingSteers || [];
+      let entryIdx = -1;
+      if (clientId) {
+        entryIdx = pending.findIndex(
+          (entry) => !entry.applied && entry.item?.id === clientId
+        );
+      }
+      if (entryIdx < 0) {
+        entryIdx = pending.findIndex((entry) => entry.text === text && !entry.applied);
+      }
+      if (entryIdx < 0) {
+        entryIdx = pending.findIndex((entry) => !entry.applied);
+      }
+      const entry = entryIdx >= 0 ? pending.splice(entryIdx, 1)[0] : null;
+      if (entry) entry.applied = true;
+      applySteeredEntry(convo, stream, text, entry);
+      if (stream.dom) stream.dom.thinkingLabel.textContent = 'Steering…';
+    } else if (payload.phase === 'status' && payload.message) {
+      if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
+    } else if (payload.phase === 'notice' && payload.message) {
+      const text = String(payload.message).trim();
+      if (text && !stream.timeline.some((part) => part.type === 'notice' && part.content === text)) {
+        stream.timeline.push({ type: 'notice', content: text });
+      }
+      if (stream.dom) stream.dom.thinkingLabel.textContent = text || stream.dom.thinkingLabel.textContent;
+    }
+    paintStreamIntoView(convo, stream, typer.shown, true);
+  };
+
+  const apiMessages = convo.messages.map((message) => {
+    if (message.role !== 'user') {
+      return { role: message.role, content: message.content };
+    }
+    return {
+      role: 'user',
+      content: userMessageApiContent(message),
+    };
+  });
+  if (apiMessages.length > 0) {
+    const last = apiMessages[apiMessages.length - 1];
+    if (last.role === 'user') last.content = text;
+  }
+  const systemPrompt = buildSystemPrompt(convo.projectId, { excludeConvoId: convo.id });
+  if (systemPrompt) {
+    apiMessages.unshift({ role: 'system', content: systemPrompt });
+  }
+
+  const requestBody = {
+    messages: apiMessages,
+    agent: useAgent,
+    skills: turnSkills,
+    force_tools: turnForceTools,
+    ...(thinkingSupported && activeThinkingEffort !== 'auto'
+      ? { thinking_effort: activeThinkingEffort }
+      : {}),
+  };
+  if (deepResearch) {
+    requestBody.deep_research = true;
+    requestBody.deep_research_output = deepResearchOutput === 'brief' ? 'brief' : 'long';
+  }
+  if (remote) {
+    requestBody.remote_base = remote.base;
+    requestBody.model = remote.model;
+  }
+
+  try {
+    const response = await fetch('/api/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: stream.controller.signal,
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null);
+      throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() ?? '';
+      for (const rawEvent of events) {
+        const parsed = parseSseEvent(rawEvent);
+        if (!parsed || parsed.data === '' || parsed.data === '[DONE]') continue;
+        if (parsed.event === 'error') {
+          try {
+            stream.errorMessage = JSON.parse(parsed.data).error || parsed.data;
+          } catch {
+            stream.errorMessage = parsed.data;
+          }
+          continue;
+        }
+        if (parsed.event === 'agent') {
+          try {
+            onAgentEvent(JSON.parse(parsed.data));
+          } catch {
+            // ignore malformed agent frames
+          }
+          continue;
+        }
+        let json;
+        try {
+          json = JSON.parse(parsed.data);
+        } catch {
+          continue;
+        }
+        ingestStreamUsage(usageStats, json);
+        const choice = json.choices && json.choices[0];
+        const deltaObj = (choice && choice.delta) || {};
+        const reasoning =
+          deltaObj.reasoning_content ||
+          deltaObj.reasoning ||
+          (choice && choice.message && (choice.message.reasoning_content || choice.message.reasoning)) ||
+          '';
+        if (reasoning) {
+          markFirstToken();
+          typer.pushReasoning(String(reasoning));
+        }
+        const delta = deltaObj.content || '';
+        if (delta) {
+          markFirstToken();
+          typer.push(delta);
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      stream.errorMessage = error.message || 'The request failed.';
+    }
+  }
+
+  typer.flush();
+  const endedAt = Date.now();
+  const finalStats = finalizeTurnStats(usageStats, firstTokenAt, endedAt);
+  if (!conversations.some((item) => item.id === convo.id)) {
+    if (stream.dom?.thinkingOrb) stream.dom.thinkingOrb.stop();
+    activeStreams.delete(convo.id);
+    reclaimUnappliedSteers(convo.id, stream);
+    renderSidebar();
+    syncComposerStreamUi();
+    return;
+  }
+  const extracted = collectTurnMemoryExtraction(stream, typer.target);
+  const memoryChanges = applyExtractedMemories(convo, extracted);
+  const memoryNotices = memoryNoticeLabels(memoryChanges);
+  // Memory chips live on the message; do not also push tone:ok notices into the
+  // timeline (those were deferred to the bottom and duplicated the chips).
+  let assistantText = extracted.cleaned;
+  if (!assistantText && !stream.errorMessage) {
+    assistantText = memoryOnlyAssistantFallback(extracted);
+  }
+  const visibleAnswer = streamingAnswerText(assistantText).trim();
+  // Think-only finals used to persist a blank desktop bubble while Activity looked fine.
+  if (!visibleAnswer && !stream.errorMessage && stream.timeline.length) {
+    stream.errorMessage = 'No user-visible answer after tools. Try again.';
+  }
+
+  stream.timeline.forEach((part) => {
+    if (part.type === 'tool' || part.type === 'clarify') part.live = false;
+  });
+  // Seal any leftover buffer so a final think/answer round joins the timeline
+  // only as live content (not duplicated into parts).
+  const viewing = activeId === convo.id;
+  let dom = viewing ? ensureStreamDom(convo, stream) : stream.dom;
+  const persistedParts = stream.timeline.length
+    ? stream.timeline.map((part) => (
+      part.type === 'tool'
+        ? {
+          type: 'tool',
+          name: part.name,
+          detail: part.detail,
+          result: part.result,
+          ...(part.note ? { note: part.note } : {}),
+          live: false,
+        }
+        : part.type === 'clarify'
+          ? {
+            type: 'clarify',
+            id: part.id,
+            questions: part.questions || [],
+            answers: part.answers || null,
+            summary: part.summary || '',
+            live: false,
+          }
+        : part.type === 'notice'
+          ? {
+            type: 'notice',
+            content: part.content,
+            ...(part.tone ? { tone: part.tone } : {}),
+            ...(part.kind ? { kind: part.kind } : {}),
+          }
+          : { type: part.type, content: part.content }
+    ))
+    : null;
+
+  if (viewing && dom) {
+    const savedClarify = preserveClarifyHost(dom.answerEl);
+    if (stream.errorMessage && !visibleAnswer) {
+      const errHtml = '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>';
+      dom.answerEl.innerHTML = isDesktopTraceLayout()
+        ? errHtml
+        : (renderCommittedParts(stream.timeline) + errHtml);
+    } else if (stream.errorMessage) {
+      paintStreamIntoView(convo, stream, assistantText, false);
+      dom = stream.dom;
+      if (dom) {
+        dom.answerEl.insertAdjacentHTML(
+          'beforeend',
+          '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>'
+        );
+      }
+    } else if (!visibleAnswer) {
+      if (isDesktopTraceLayout()) {
+        dom.answerEl.innerHTML = '<span class="msg-error">No response.</span>';
+      } else {
+        const committed = renderCommittedParts(stream.timeline);
+        dom.answerEl.innerHTML = committed
+          ? committed + '<span class="msg-error">No response.</span>'
+          : '<span class="msg-error">No response.</span>';
+      }
+    } else {
+      paintStreamIntoView(convo, stream, assistantText, false);
+      dom = stream.dom;
+    }
+    if (dom) {
+      restoreClarifyHost(dom.answerEl, savedClarify || dom.clarifyHost);
+      const doneClarify = stream.timeline.find((part) => part.type === 'clarify');
+      if (doneClarify) mountClarifyForm(stream, doneClarify);
+      dom.thinkingOrb.stop();
+      dom.statusEl.classList.add('is-hidden');
+      delete dom.row.dataset.streamId;
+    }
+  }
+
+  if (assistantText || persistedParts || memoryNotices.length || stream.errorMessage) {
+    const message = {
+      role: 'assistant',
+      content: visibleAnswer ? assistantText : '',
+      model: turnModel || finalStats?.upstreamModel || '',
+    };
+    if (persistedParts) message.parts = persistedParts;
+    if (memoryNotices.length) message.memoryNotices = memoryNotices;
+    if (stream.errorMessage && !visibleAnswer) {
+      message.error = stream.errorMessage;
+      if (!message.content) message.content = stream.errorMessage;
+    }
+    if (finalStats?.tokensPerSec != null) message.tokensPerSec = finalStats.tokensPerSec;
+    if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
+    if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
+    convo.messages.push(message);
+    const msgIndex = convo.messages.length - 1;
+    if (dom && dom.row.isConnected) {
+      dom.row.dataset.msgIndex = String(msgIndex);
+      dom.row.dataset.raw = message.content || '';
+      settleAssistantRow(dom.row, message, { animateCollapse: true });
+    }
+    convo.updatedAt = Date.now();
+    if (convo.projectId) {
+      const project = getProject(convo.projectId);
+      if (project) project.updatedAt = Date.now();
+    }
+    saveConversations();
+    if (activeId === convo.id) {
+      selectTraceMessage(msgIndex, {
+        animate: true,
+        ensureOpen: false,
+      });
+      if (messageHasActivity(message)) maybeAutoOpenTraceSidebar(convo.id);
+    }
+  } else if (!viewing && stream.errorMessage) {
+    // Persist a short error so returning to the chat is not blank after a failed background turn.
+    convo.messages.push({
+      role: 'assistant',
+      content: 'Error: ' + stream.errorMessage,
+    });
+    convo.updatedAt = Date.now();
+    saveConversations();
+  }
+
+  activeStreams.delete(convo.id);
+  reclaimUnappliedSteers(convo.id, stream);
+  renderSidebar();
+  syncComposerStreamUi();
+  // After the first reply finishes — local servers often reject concurrent
+  // title + chat requests, so we wait until the stream is done.
+  if (needsGeneratedTitle(convo)) {
+    generateConversationTitle(convo, firstUserText(convo));
+  }
+  if (activeId === convo.id) {
+    // If we finished while away and came back to a thread without the row, re-render.
+    if (!dom || !dom.row.isConnected) {
+      renderThread(convo);
+    }
+    composerInput.focus();
+  }
+  maybeSendNextQueued(convo.id);
+}
+
+chatThread.addEventListener('click', (event) => {
+  const queueSteer = event.target.closest('[data-queue-steer]');
+  if (queueSteer && chatThread.contains(queueSteer)) {
+    event.preventDefault();
+    const queueId = queueSteer.getAttribute('data-queue-steer');
+    if (activeId && queueId) steerQueuedOutbound(activeId, queueId);
+    return;
+  }
+  const steerCancel = event.target.closest('[data-steer-cancel]');
+  if (steerCancel && chatThread.contains(steerCancel)) {
+    event.preventDefault();
+    const queueId = steerCancel.getAttribute('data-steer-cancel');
+    if (activeId && queueId) cancelPendingSteer(activeId, queueId);
+    return;
+  }
+  const queueRemove = event.target.closest('[data-queue-remove]');
+  if (queueRemove && chatThread.contains(queueRemove)) {
+    event.preventDefault();
+    const queueId = queueRemove.getAttribute('data-queue-remove');
+    if (activeId && queueId) removeQueuedOutbound(activeId, queueId);
+    return;
+  }
+  const queueEdit = event.target.closest('[data-queue-edit]');
+  if (queueEdit && chatThread.contains(queueEdit)) {
+    event.preventDefault();
+    const queueId = queueEdit.getAttribute('data-queue-edit');
+    const row = queueId
+      ? [...chatThread.querySelectorAll('.msg-queued')].find((el) => el.dataset.queueId === queueId)
+      : null;
+    if (row) beginQueuedMessageEdit(row);
+    return;
+  }
+  const clarifySubmit = event.target.closest('[data-clarify-submit]');
+  if (clarifySubmit && chatThread.contains(clarifySubmit)) {
+    event.preventDefault();
+    const clarifyId = clarifySubmit.getAttribute('data-clarify-submit');
+    const stream = activeStream();
+    if (stream && clarifyId) void submitClarifyForm(stream, clarifyId);
+    return;
+  }
+  const foldToggle = event.target.closest('.agent-timeline-fold-toggle');
+  if (foldToggle && chatThread.contains(foldToggle)) {
+    event.preventDefault();
+    const fold = foldToggle.closest('.agent-timeline-fold');
+    if (!fold) return;
+    const collapsed = fold.classList.toggle('is-collapsed');
+    foldToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    return;
+  }
+  const btn = event.target.closest('.md-code-copy');
+  if (btn && chatThread.contains(btn)) {
+    event.preventDefault();
+    copyCodeBlock(btn);
+    return;
+  }
+  if (event.target.closest('.msg-action, a, button, summary, details, input, textarea, .clarify-card, #selectionReplyBar')) {
+    return;
+  }
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && String(sel.toString() || '').trim()) {
+    // Don't steal focus from a text selection / Reply affordance.
+    return;
+  }
+  const row = event.target.closest('.msg-role-assistant');
+  if (!row || !chatThread.contains(row)) return;
+  const index = Number(row.dataset.msgIndex);
+  if (!Number.isFinite(index)) return;
+  selectTraceMessage(index, { animate: true, ensureOpen: false });
+});
+
+chatThread.addEventListener('change', (event) => {
+  const input = event.target.closest('.clarify-card input');
+  if (!input || !chatThread.contains(input)) return;
+  const card = input.closest('.clarify-card');
+  const host = card?.closest('.clarify-host');
+  const clarifyId = card?.dataset.clarifyId;
+  const stream = activeStream();
+  const part = stream && clarifyId ? findClarifyPart(stream, clarifyId) : null;
+  if (!part || !part.live) return;
+  const qi = Number(input.dataset.clarifyQ);
+  if (!Number.isFinite(qi)) return;
+  if (!part.draft) part.draft = {};
+  const qEl = card.querySelector('.clarify-q[data-clarify-q="' + qi + '"]');
+  const multi = !!part.questions?.[qi]?.multiSelect;
+  if (input.dataset.clarifyOther) {
+    if (input.checked) {
+      if (!multi) {
+        qEl?.querySelectorAll('input[data-clarify-opt]').forEach((el) => { el.checked = false; });
+      }
+      part.draft[qi] = {
+        labels: [],
+        custom: String(qEl?.querySelector('[data-clarify-custom]')?.value || ''),
+        useCustom: true,
+      };
+    }
+  } else if (input.dataset.clarifyOpt != null) {
+    const other = qEl?.querySelector('input[data-clarify-other]');
+    if (other && !multi) other.checked = false;
+    const labels = [...(qEl?.querySelectorAll('input[data-clarify-opt]:checked') || [])].map((el) => el.value);
+    part.draft[qi] = {
+      labels,
+      custom: String(part.draft[qi]?.custom || ''),
+      useCustom: false,
+    };
+  }
+  mountClarifyForm(stream, part);
+  const custom = host?.querySelector('.clarify-q[data-clarify-q="' + qi + '"] [data-clarify-custom]');
+  if (part.draft[qi]?.useCustom && custom) {
+    custom.focus();
+    custom.selectionStart = custom.value.length;
+  }
+});
+
+chatThread.addEventListener('input', (event) => {
+  const custom = event.target.closest('[data-clarify-custom]');
+  if (!custom || !chatThread.contains(custom)) return;
+  const card = custom.closest('.clarify-card');
+  const host = card?.closest('.clarify-host');
+  const clarifyId = card?.dataset.clarifyId;
+  const stream = activeStream();
+  const part = stream && clarifyId ? findClarifyPart(stream, clarifyId) : null;
+  if (!part || !part.live) return;
+  const qi = Number(custom.dataset.clarifyQ);
+  if (!Number.isFinite(qi)) return;
+  if (!part.draft) part.draft = {};
+  part.draft[qi] = {
+    labels: [],
+    custom: custom.value,
+    useCustom: true,
+  };
+  syncClarifySubmitEnabled(host);
+});
+
+btnSend.addEventListener('click', () => { void sendMessage(); });
+btnBranch?.addEventListener('click', () => { void sendMessage({ branch: true }); });
+btnSelectionReply?.addEventListener('mousedown', (event) => {
+  // Keep the selection until we capture it in the click handler.
+  event.preventDefault();
+});
+btnSelectionReply?.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const quote = assistantSelectionQuote();
+  if (quote) setPendingReplyQuote(quote.text);
+  else hideSelectionReplyBar();
+});
+document.addEventListener('selectionchange', () => {
+  // Defer so mouseup can finish updating the range first.
+  queueMicrotask(syncSelectionReplyBar);
+});
+document.addEventListener('mouseup', () => {
+  queueMicrotask(syncSelectionReplyBar);
+});
+chatViewport?.addEventListener('scroll', hideSelectionReplyBar, { passive: true });
+window.addEventListener('scroll', hideSelectionReplyBar, true);
+window.addEventListener('resize', hideSelectionReplyBar);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideSelectionReplyBar();
+});
+btnStop.addEventListener('click', () => {
+  if (activeId) abortStream(activeId);
+});
+btnPlus?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setPlusMenuOpen(!plusMenuIsOpen());
+});
+plusMenu?.addEventListener('click', (event) => {
+  const item = event.target.closest('[data-plus-action]');
+  if (!item || item.disabled) return;
+  handlePlusMenuAction(item.dataset.plusAction);
+});
+btnMic?.addEventListener('click', () => {
+  if (btnMic.getAttribute('aria-disabled') === 'true') {
+    showVoiceHint(
+      diskEncryptionLocked()
+        ? 'Unlock local data to use voice input.'
+        : 'Connect a provider before using voice input.'
+    );
+    return;
+  }
+  toggleVoiceInput();
+});
+attachFileInput.addEventListener('change', async (event) => {
+  const files = event.target.files;
+  event.target.value = '';
+  if (files && files.length) await addFilesToPending(files);
+});
+composerAttachmentsEl.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-attach-remove]');
+  if (!btn) return;
+  removePendingAttachment(btn.getAttribute('data-attach-remove'));
+});
+;['dragenter', 'dragover'].forEach((type) => {
+  composerCard.addEventListener(type, (event) => {
+    if (!attachmentsUiEnabled()) return;
+    event.preventDefault();
+    composerCard.classList.add('is-dragover');
+  });
+});
+;['dragleave', 'drop'].forEach((type) => {
+  composerCard.addEventListener(type, (event) => {
+    event.preventDefault();
+    if (type === 'dragleave' && composerCard.contains(event.relatedTarget)) return;
+    composerCard.classList.remove('is-dragover');
+    if (type === 'drop' && event.dataTransfer?.files?.length) {
+      void addFilesToPending(event.dataTransfer.files);
+    }
+  });
+});
+composerInput.addEventListener('paste', (event) => {
+  const items = event.clipboardData?.items;
+  if (!items || !attachmentsUiEnabled()) return;
+  const files = [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  if (!files.length) return;
+  event.preventDefault();
+  void addFilesToPending(files);
+});
+document.getElementById('settingAttachmentTextFallback').addEventListener('change', syncAttachmentFallbackControls);
+document.getElementById('btnThink').addEventListener('click', (event) => {
+  event.stopPropagation();
+  setThinkMenuOpen(!thinkMenuIsOpen());
+});
+document.getElementById('thinkMenu').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-effort]');
+  if (!item) return;
+  setThinkingEffort(item.dataset.effort, true);
+  setThinkMenuOpen(false);
+});
+document.addEventListener('click', (event) => {
+  const thinkWrap = document.getElementById('composerThinkWrap');
+  const plusWrap = document.getElementById('composerPlusWrap');
+  if (thinkWrap && !thinkWrap.contains(event.target) && thinkMenuIsOpen()) {
+    setThinkMenuOpen(false);
+  }
+  const clickedPlus = (plusWrap && plusWrap.contains(event.target))
+    || (plusMenu && plusMenu.contains(event.target));
+  if (!clickedPlus && plusMenuIsOpen()) {
+    setPlusMenuOpen(false);
+  }
+});
+document.getElementById('settingThinkingEffort').addEventListener('change', (event) => {
+  setThinkingEffort(event.target.value, true);
+});
+syncThinkingEffortControls(settings.thinkingEffort);
+syncResearchControls();
+renderPlusMenu();
+syncComposerThinkVisibility(null);
+syncAttachButton();
+syncMicButton();
+syncAttachmentFallbackControls();
+document.getElementById('btnNewChat').addEventListener('click', () => {
+  // New chat stays in the current project context when one is active.
+  startDraft({ incognito: false });
+});
+btnNewIncognitoChat?.addEventListener('click', () => {
+  startDraft({ incognito: true });
+});
+btnProjectsNav.addEventListener('click', showProjectsView);
+document.getElementById('btnNewProject').addEventListener('click', createProject);
+projectsSearch.addEventListener('input', renderProjectsPage);
+projectsSort.addEventListener('change', renderProjectsPage);
+const btnToggleSidebar = document.getElementById('btnToggleSidebar');
+const btnExpandSidebar = document.getElementById('btnExpandSidebar');
+const sidebarMobileMq = window.matchMedia('(max-width: 820px)');
+
+initTraceSidebarPreferred();
+btnToggleTrace?.addEventListener('click', () => {
+  const open = chatShell.classList.contains('trace-collapsed');
+  setTraceSidebarOpen(open, { fromUser: true });
+});
+btnExpandTrace?.addEventListener('click', () => {
+  stickTraceSidebar = true;
+  setTraceSidebarOpen(true, { fromUser: true });
+  scrollTraceSidebarToBottom({ force: true });
+});
+if (traceSidebarBody) {
+  let lastTraceScrollTop = 0;
+  traceSidebarBody.addEventListener('scroll', () => {
+    const top = traceSidebarBody.scrollTop;
+    const goingUp = top < lastTraceScrollTop - 1;
+    lastTraceScrollTop = top;
+    if (goingUp && !isTraceSidebarNearBottom()) {
+      stickTraceSidebar = false;
+    } else if (isTraceSidebarNearBottom()) {
+      stickTraceSidebar = true;
+    }
+  }, { passive: true });
+}
+TRACE_DESKTOP_MQ.addEventListener('change', () => {
+  const convo = conversations.find((item) => item.id === activeId);
+  if (convo && !threadWrap.classList.contains('is-hidden')) {
+    // Re-render so bubbles pick the desktop/mobile activity layout.
+    const keep = selectedTraceMsgIndex;
+    const wasLive = activeStreams.has(convo.id);
+    renderThread(convo);
+    // Live reattach already reselects the in-flight row.
+    if (!wasLive && keep != null) selectTraceMessage(keep, { animate: false });
+  } else {
+    refreshTraceSidebar({ animate: false });
+  }
+});
+
+function sidebarIsMobileDrawer() {
+  return sidebarMobileMq.matches;
+}
+
+function sidebarIsOpen() {
+  return sidebarIsMobileDrawer()
+    ? chatShell.classList.contains('sidebar-open')
+    : !chatShell.classList.contains('sidebar-collapsed');
+}
+
+function syncSidebarToggleUi() {
+  const open = sidebarIsOpen();
+  if (btnToggleSidebar) {
+    btnToggleSidebar.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btnToggleSidebar.setAttribute('aria-label', open ? 'Hide sidebar' : 'Show sidebar');
+    btnToggleSidebar.title = open ? 'Hide sidebar' : 'Show sidebar';
+  }
+  if (btnExpandSidebar) {
+    btnExpandSidebar.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btnExpandSidebar.setAttribute('aria-label', 'Show sidebar');
+    btnExpandSidebar.title = 'Show sidebar';
+  }
+}
+
+function setSidebarOpen(open) {
+  if (sidebarIsMobileDrawer()) {
+    chatShell.classList.toggle('sidebar-open', open);
+  } else {
+    chatShell.classList.toggle('sidebar-collapsed', !open);
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, open ? '0' : '1');
+    } catch { /* ignore */ }
+  }
+  syncSidebarToggleUi();
+}
+
+function closeMobileSidebar() {
+  if (sidebarIsMobileDrawer()) setSidebarOpen(false);
+  else syncSidebarToggleUi();
+}
+
+function applyStoredSidebarCollapsed() {
+  if (sidebarIsMobileDrawer()) {
+    syncSidebarToggleUi();
+    return;
+  }
+  const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  chatShell.classList.toggle('sidebar-collapsed', collapsed);
+  syncSidebarToggleUi();
+}
+
+btnToggleSidebar?.addEventListener('click', () => setSidebarOpen(false));
+btnExpandSidebar?.addEventListener('click', () => setSidebarOpen(true));
+document.getElementById('sidebarBackdrop')?.addEventListener('click', () => {
+  closeMobileSidebar();
+});
+sidebarMobileMq.addEventListener?.('change', () => {
+  if (!sidebarIsMobileDrawer()) {
+    chatShell.classList.remove('sidebar-open');
+    applyStoredSidebarCollapsed();
+  } else {
+    chatShell.classList.remove('sidebar-collapsed');
+    syncSidebarToggleUi();
+  }
+});
+applyStoredSidebarCollapsed();
+
+// —— Search chats / projects ——
+const searchModal = document.getElementById('searchModal');
+const searchModalInput = document.getElementById('searchModalInput');
+const searchModalResults = document.getElementById('searchModalResults');
+let searchActiveIndex = 0;
+let searchResultItems = [];
+
+function closeSearchModal() {
+  if (!searchModal) return;
+  closeBackdrop(searchModal);
+  if (searchModalInput) searchModalInput.value = '';
+  searchActiveIndex = 0;
+  searchResultItems = [];
+}
+
+function openSearchModal() {
+  if (!searchModal || !requireUnlockedData()) return;
+  closeSettings();
+  openBackdrop(searchModal);
+  if (searchModalInput) {
+    searchModalInput.value = '';
+    queueMicrotask(() => searchModalInput.focus());
+  }
+  renderSearchResults('');
+}
+
+function renderSearchResults(query) {
+  if (!searchModalResults) return;
+  const q = String(query || '').trim().toLowerCase();
+  const matchedProjects = projects.filter((project) => {
+    if (!q) return true;
+    const hay = [project.name, project.instructions, project.memory]
+      .filter(Boolean)
+      .join('\n')
+      .toLowerCase();
+    return hay.includes(q);
+  });
+  const matchedConvos = bySidebarOrder(conversations).filter((convo) => {
+    if (!q) return true;
+    const projectName = getProject(convo.projectId)?.name || '';
+    const hay = [
+      convo.title,
+      projectName,
+      ...(convo.messages || []).slice(0, 6).map((m) => m.content || ''),
+    ]
+      .join('\n')
+      .toLowerCase();
+    return hay.includes(q);
+  });
+
+  searchModalResults.innerHTML = '';
+  searchResultItems = [];
+  if (matchedProjects.length === 0 && matchedConvos.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'search-dialog-empty';
+    empty.textContent = q ? 'No matches.' : 'No chats or projects yet.';
+    searchModalResults.appendChild(empty);
+    return;
+  }
+
+  const pushItem = (kind, title, meta, onPick) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'search-dialog-item';
+    btn.dataset.kind = kind;
+    btn.innerHTML =
+      '<span class="search-dialog-item-title"></span>' +
+      '<span class="search-dialog-item-meta"></span>';
+    btn.querySelector('.search-dialog-item-title').textContent = title;
+    btn.querySelector('.search-dialog-item-meta').textContent = meta;
+    btn.addEventListener('click', () => {
+      onPick();
+      closeSearchModal();
+    });
+    searchModalResults.appendChild(btn);
+    searchResultItems.push(btn);
+  };
+
+  if (matchedProjects.length) {
+    const label = document.createElement('div');
+    label.className = 'search-dialog-group';
+    label.textContent = 'Projects';
+    searchModalResults.appendChild(label);
+    for (const project of matchedProjects.slice(0, 12)) {
+      const n = conversationsForProject(project.id).length;
+      pushItem(
+        'project',
+        project.name || 'Untitled project',
+        n + (n === 1 ? ' chat' : ' chats'),
+        () => openProject(project.id)
+      );
+    }
+  }
+  if (matchedConvos.length) {
+    const label = document.createElement('div');
+    label.className = 'search-dialog-group';
+    label.textContent = 'Chats';
+    searchModalResults.appendChild(label);
+    for (const convo of matchedConvos.slice(0, 24)) {
+      const project = getProject(convo.projectId);
+      const preview = (convo.messages || [])
+        .find((m) => m.role === 'user')
+        ?.content
+        ?.replace(/\s+/g, ' ')
+        .trim() || 'Empty chat';
+      pushItem(
+        'chat',
+        convo.title || 'New chat',
+        (project ? project.name + ' · ' : '') + preview.slice(0, 80),
+        () => selectConversation(convo.id)
+      );
+    }
+  }
+  searchActiveIndex = 0;
+  syncSearchActiveItem();
+}
+
+function syncSearchActiveItem() {
+  searchResultItems.forEach((el, index) => {
+    el.classList.toggle('is-active', index === searchActiveIndex);
+  });
+  const active = searchResultItems[searchActiveIndex];
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+document.getElementById('btnSearchChats')?.addEventListener('click', openSearchModal);
+searchModalInput?.addEventListener('input', () => {
+  renderSearchResults(searchModalInput.value);
+});
+searchModalInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    if (!searchResultItems.length) return;
+    searchActiveIndex = (searchActiveIndex + 1) % searchResultItems.length;
+    syncSearchActiveItem();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (!searchResultItems.length) return;
+    searchActiveIndex =
+      (searchActiveIndex - 1 + searchResultItems.length) % searchResultItems.length;
+    syncSearchActiveItem();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    searchResultItems[searchActiveIndex]?.click();
+  }
+});
+searchModal?.addEventListener('click', (event) => {
+  if (event.target === searchModal) closeSearchModal();
+});
+document.getElementById('btnSettings').addEventListener('click', openSettings);
+document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
+document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
+document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
+settingsModal.querySelector('.settings-dialog')?.addEventListener('input', (event) => {
+  if (!event.target.closest('input, textarea, select')) return;
+  syncWebSearchControls();
+  syncFetchUrlControls();
+  syncAttachmentFallbackControls();
+  syncSettingsSaveButton();
+});
+settingsModal.querySelector('.settings-dialog')?.addEventListener('change', (event) => {
+  if (!event.target.closest('input, textarea, select')) return;
+  syncWebSearchControls();
+  syncFetchUrlControls();
+  syncAttachmentFallbackControls();
+  syncSettingsSaveButton();
+});
+document.getElementById('settingSkillWebSearch').addEventListener('change', syncWebSearchControls);
+document.getElementById('btnWebSearchAdvanced')?.addEventListener('click', () => {
+  const toggle = document.getElementById('btnWebSearchAdvanced');
+  const panel = document.getElementById('webSearchOptions');
+  if (!toggle || toggle.disabled) return;
+  setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+});
+document.getElementById('settingSkillFetchUrl').addEventListener('change', syncFetchUrlControls);
+document.getElementById('btnFetchUrlAdvanced')?.addEventListener('click', () => {
+  const toggle = document.getElementById('btnFetchUrlAdvanced');
+  const panel = document.getElementById('fetchUrlOptions');
+  if (!toggle || toggle.disabled) return;
+  setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+});
+document.getElementById('btnSkillCreate').addEventListener('click', () => {
+  openSkillEditor({
+    name: '',
+    description: '',
+    content: '# Skill\n\nDescribe what the model should do when this skill applies.\n',
+    enabled: true,
+  });
+});
+document.getElementById('btnSkillUpload').addEventListener('click', () => {
+  document.getElementById('skillFileInput').click();
+});
+document.getElementById('skillFileInput').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const uploadBtn = document.getElementById('btnSkillUpload');
+  await withBusyControl(uploadBtn, 'Importing…', async () => {
+    try {
+      showSkillsError('');
+      await importSkillFile(file);
+    } catch (error) {
+      showSkillsError(error);
+    }
+  });
+});
+document.getElementById('btnSkillSave').addEventListener('click', () => {
+  saveSkillFromEditor();
+});
+document.getElementById('btnSkillCancelEdit').addEventListener('click', hideSkillEditor);
+document.getElementById('skillsList').addEventListener('click', async (event) => {
+  const row = event.target.closest('[data-skill-id]');
+  if (!row) return;
+  const id = row.getAttribute('data-skill-id');
+  const skill = userSkills.find((item) => item.id === id);
+  if (!skill) return;
+  if (event.target.closest('[data-skill-edit]')) {
+    openSkillEditor(skill);
+    return;
+  }
+  const deleteBtn = event.target.closest('[data-skill-delete]');
+  if (deleteBtn) {
+    if (!window.confirm('Delete skill “' + skill.name + '”?')) return;
+    await withBusyControl(deleteBtn, 'Deleting…', async () => {
+      try {
+        const response = await fetch('/api/skills/' + encodeURIComponent(id), { method: 'DELETE' });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Could not delete skill');
+        userSkills = body.skills || [];
+        hideSkillEditor();
+        renderUserSkills();
+      } catch (error) {
+        showSkillsError(error);
+      }
+    }, { restore: false });
+  }
+});
+document.getElementById('skillsList').addEventListener('change', async (event) => {
+  const toggle = event.target.closest('[data-skill-enabled]');
+  if (!toggle) return;
+  const row = event.target.closest('[data-skill-id]');
+  if (!row) return;
+  const id = row.getAttribute('data-skill-id');
+  toggle.disabled = true;
+  try {
+    const response = await fetch('/api/skills/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: !!toggle.checked }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Could not update skill');
+    const index = userSkills.findIndex((item) => item.id === id);
+    if (index >= 0) userSkills[index] = body;
+    renderUserSkills();
+  } catch (error) {
+    toggle.checked = !toggle.checked;
+    toggle.disabled = false;
+    showSkillsError(error);
+  }
+});
+document.getElementById('btnProjectCancel').addEventListener('click', closeProjectSettings);
+document.getElementById('btnProjectClose').addEventListener('click', closeProjectSettings);
+document.getElementById('btnProjectSave').addEventListener('click', commitProjectSettings);
+document.getElementById('projectMemoryModeToggle')?.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-memory-mode]');
+  if (!btn) return;
+  syncProjectMemoryModeControls(btn.getAttribute('data-memory-mode'));
+});
+document.getElementById('btnProjectDelete').addEventListener('click', () => {
+  if (editingProjectId) deleteProject(editingProjectId);
+});
+document.querySelectorAll('.settings-nav-btn').forEach((btn) => {
+  btn.addEventListener('click', () => showSettingsPane(btn.dataset.settingsPane));
+});
+document.getElementById('btnClearChats')?.addEventListener('click', clearAllChats);
+document.getElementById('btnClearProjects')?.addEventListener('click', clearAllProjects);
+document.getElementById('btnClearAllData')?.addEventListener('click', clearAllChatsAndProjects);
+document.getElementById('btnOpenDataDir')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btnOpenDataDir');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const response = await fetch('/api/data/open', { method: 'POST' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Could not open folder');
+    }
+  } catch (error) {
+    alert(error.message || 'Could not open folder');
+  } finally {
+    refreshLocalDataPane();
+  }
+});
+document.getElementById('settingBrowserStorage')?.addEventListener('change', async (event) => {
+  const toggle = event.target;
+  const next = !!toggle.checked;
+  toggle.disabled = true;
+  try {
+    await setBrowserStorageMode(next);
+  } catch (error) {
+    toggle.checked = !next;
+    alert(error.message || 'Could not update storage mode');
+  } finally {
+    toggle.disabled = false;
+  }
+});
+document.getElementById('btnEnableEncryption')?.addEventListener('click', async () => {
+  const passphrase = document.getElementById('encryptionPassphrase')?.value || '';
+  const confirm = document.getElementById('encryptionPassphraseConfirm')?.value || '';
+  const btn = document.getElementById('btnEnableEncryption');
+  if (btn) btn.disabled = true;
+  try {
+    await postEncryption('/api/data/encryption/enable', {
+      passphrase,
+      passphrase_confirm: confirm,
+    });
+    document.getElementById('encryptionPassphrase').value = '';
+    document.getElementById('encryptionPassphraseConfirm').value = '';
+  } catch (error) {
+    alert(error.message || 'Could not enable encryption');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+document.getElementById('btnUnlockEncryption')?.addEventListener('click', async () => {
+  const passphrase = document.getElementById('encryptionUnlockPassphrase')?.value || '';
+  const btn = document.getElementById('btnUnlockEncryption');
+  try {
+    await unlockDiskEncryption(passphrase, btn);
+  } catch (error) {
+    alert(error.message || 'Could not unlock');
+  }
+});
+document.getElementById('encryptionUnlockPassphrase')?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    document.getElementById('btnUnlockEncryption')?.click();
+  }
+});
+document.getElementById('btnUnlockModalSubmit')?.addEventListener('click', async () => {
+  const passphrase = document.getElementById('unlockModalPassphrase')?.value || '';
+  const btn = document.getElementById('btnUnlockModalSubmit');
+  try {
+    await unlockDiskEncryption(passphrase, btn);
+  } catch (error) {
+    setUnlockModalError(error.message || 'Could not unlock');
+    document.getElementById('unlockModalPassphrase')?.focus();
+  }
+});
+document.getElementById('unlockModalPassphrase')?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    document.getElementById('btnUnlockModalSubmit')?.click();
+  }
+});
+document.getElementById('btnUnlockModalDismiss')?.addEventListener('click', () => {
+  hideUnlockSession();
+});
+document.getElementById('btnLockEncryption')?.addEventListener('click', async () => {
+  try {
+    await postEncryption('/api/data/encryption/lock', {});
+    clearMemoryAfterLock();
+  } catch (error) {
+    alert(error.message || 'Could not lock');
+  }
+});
+document.getElementById('btnDisableEncryption')?.addEventListener('click', () => {
+  document.getElementById('settingsEncryptionDisable')?.classList.remove('is-hidden');
+});
+document.getElementById('btnConfirmDisableEncryption')?.addEventListener('click', async () => {
+  const passphrase = document.getElementById('encryptionDisablePassphrase')?.value || '';
+  const btn = document.getElementById('btnConfirmDisableEncryption');
+  if (btn) btn.disabled = true;
+  try {
+    await postEncryption('/api/data/encryption/disable', { passphrase });
+    document.getElementById('encryptionDisablePassphrase').value = '';
+    document.getElementById('settingsEncryptionDisable')?.classList.add('is-hidden');
+  } catch (error) {
+    alert(error.message || 'Could not disable encryption');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+document.querySelectorAll('#themeToggle [data-theme-choice]').forEach((btn) => {
+  btn.addEventListener('click', () => setTheme(btn.dataset.themeChoice));
+});
+document.querySelectorAll('#fontScaleToggle [data-font-scale]').forEach((btn) => {
+  btn.addEventListener('click', () => patchAppearance({ font_scale: btn.dataset.fontScale }));
+});
+['settingFontBody', 'settingFontDisplay'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    const key = id === 'settingFontBody' ? 'font_body' : 'font_display';
+    patchAppearance({ [key]: el.value });
+  });
+});
+document.getElementById('btnAppearanceReset').addEventListener('click', resetAppearance);
+settingsModal.addEventListener('click', (event) => {
+  if (event.target === settingsModal) closeSettings();
+});
+projectModal.addEventListener('click', (event) => {
+  if (event.target === projectModal) closeProjectSettings();
+});
+document.addEventListener('click', (event) => {
+  if (openConvoMenu && !openConvoMenu.contains(event.target) && !event.target.closest('.convo-more')) {
+    closeConvoMenu();
+  }
+});
+convoTitleEl.addEventListener('click', beginTopbarTitleEdit);
+convoTitleEl.addEventListener('keydown', (event) => {
+  if ((event.key === 'Enter' || event.key === ' ') && !convoTitleEl.querySelector('input')) {
+    event.preventDefault();
+    beginTopbarTitleEdit();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === 'k') {
+    event.preventDefault();
+    if (searchModal && !searchModal.classList.contains('is-hidden')) closeSearchModal();
+    else openSearchModal();
+    return;
+  }
+  if (event.key === 'Escape') {
+    if (voiceListening) {
+      stopVoiceInput();
+      return;
+    }
+    if (searchModal && !searchModal.classList.contains('is-hidden')) {
+      closeSearchModal();
+      return;
+    }
+    const unlockModal = document.getElementById('unlockModal');
+    if (unlockModal && !unlockModal.classList.contains('is-hidden')) {
+      hideUnlockSession();
+      return;
+    }
+    if (!projectModal.classList.contains('is-hidden')) {
+      closeProjectSettings();
+      return;
+    }
+    if (!settingsModal.classList.contains('is-hidden')) {
+      closeSettings();
+      return;
+    }
+    if (!chatModelMenu.classList.contains('is-hidden')) {
+      closeModelMenu({ restoreFocus: true });
+      return;
+    }
+    closeConvoMenu();
+  }
+});
+
+chatModelSelectWrap.addEventListener('click', (event) => {
+  if (event.target.closest('.chat-model-menu')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (modelMenuIsOpen()) {
+    closeModelMenu({ restoreFocus: true });
+    return;
+  }
+  openModelMenu();
+  // openModelMenu() puts focus in the filter field when it is shown;
+  // don't yank it back to the trigger.
+  if (!modelSearchEnabled()) chatModelSelect.focus();
+});
+
+/** Shared arrow/Enter/Escape handling for the trigger and the filter field. */
+function handleModelMenuKeydown(event) {
+  const open = modelMenuIsOpen();
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (!open) {
+      openModelMenu();
+      return;
+    }
+    const count = modelMenuMatches.length;
+    if (!count) return;
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    const from = modelMenuActiveIndex < 0 ? (delta > 0 ? -1 : 0) : modelMenuActiveIndex;
+    modelMenuActiveIndex = (from + delta + count) % count;
+    paintModelMenuActive();
+  } else if (event.key === 'Home' || event.key === 'End') {
+    if (!open || !modelMenuMatches.length) return;
+    event.preventDefault();
+    modelMenuActiveIndex = event.key === 'Home' ? 0 : modelMenuMatches.length - 1;
+    paintModelMenuActive();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (!open) {
+      openModelMenu();
+      return;
+    }
+    const choice = modelMenuMatches[modelMenuActiveIndex];
+    if (choice) chooseModelOption(choice.value);
+  } else if (event.key === ' ' && event.target === chatModelSelect) {
+    // Space only toggles from the button; inside the field it is a query character.
+    event.preventDefault();
+    if (!open) openModelMenu();
+  } else if (event.key === 'Escape' && open) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeModelMenu({ restoreFocus: true });
+  } else if (event.key === 'Tab' && open) {
+    closeModelMenu();
+  }
+}
+
+chatModelSelect.addEventListener('keydown', handleModelMenuKeydown);
+chatModelSearch.addEventListener('keydown', handleModelMenuKeydown);
+chatModelSearch.addEventListener('input', () => {
+  modelMenuFilter = chatModelSearch.value;
+  applyModelFilter();
+});
+// Clicking the field must not fall through to the wrap's toggle handler.
+chatModelSearchWrap.addEventListener('click', (event) => {
+  event.stopPropagation();
+  chatModelSearch.focus();
+});
+chatModelMenu.addEventListener('click', (event) => {
+  const tab = event.target.closest('[data-model-tab]');
+  if (tab) {
+    event.preventDefault();
+    event.stopPropagation();
+    setModelMenuTab(tab.getAttribute('data-model-tab'));
+    return;
+  }
+  if (event.target.closest('[data-model-pin], [data-model-pick], .chat-model-option')) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+});
+// pointerdown so selection wins before the document "outside click" closer.
+chatModelMenu.addEventListener('pointerdown', (event) => {
+  // Let the filter field take the caret normally.
+  if (event.target.closest('.chat-model-search')) return;
+  if (event.target.closest('[data-model-tab]')) return;
+  const pin = event.target.closest('[data-model-pin]');
+  if (pin) {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePinnedModel(pin.getAttribute('data-model-pin') || '');
+    return;
+  }
+  const pick = event.target.closest('[data-model-pick]');
+  const row = event.target.closest('.chat-model-option');
+  const value = pick?.getAttribute('data-model-pick')
+    || row?.getAttribute('data-value')
+    || '';
+  if (!value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  chooseModelOption(value);
+});
+document.addEventListener('click', (event) => {
+  if (!modelMenuIsOpen()) return;
+  if (chatModelSelectWrap.contains(event.target)) return;
+  if (chatModelMenu.contains(event.target)) return;
+  closeModelMenu();
+});
+window.addEventListener('resize', () => {
+  if (modelMenuIsOpen()) positionModelMenu();
+});
+document.addEventListener('scroll', () => {
+  if (modelMenuIsOpen()) positionModelMenu();
+}, true);
+composerInput.addEventListener('input', () => {
+  if (voiceListening) stopVoiceInput({ silent: true });
+  mentionInput = composerInput;
+  promoteTypedMentions();
+  autoResize(composerInput);
+  updateSendEnabled();
+  updateMentionMenu(composerInput);
+});
+composerInput.addEventListener('click', () => updateMentionMenu(composerInput));
+composerInput.addEventListener('keyup', (event) => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+    updateMentionMenu(composerInput);
+  }
+});
+composerInput.addEventListener('blur', () => {
+  // Delay so mousedown on a menu option can fire first.
+  setTimeout(() => {
+    if (document.activeElement !== composerInput) closeMentionMenu();
+  }, 120);
+});
+composerInput.addEventListener('keydown', (event) => {
+  mentionInput = composerInput;
+  if (handleMentionKeydown(event)) return;
+
+  if (event.key !== 'Enter') return;
+  if (settings.enterSends) {
+    if (!event.shiftKey) {
+      event.preventDefault();
+      if (!btnSend.disabled) sendMessage();
+    }
+  } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
+    event.preventDefault();
+    if (!btnSend.disabled) sendMessage();
+  }
+});
+
+function mountStarfield(canvas) {
+  if (!canvas) return;
+  const host = canvas.parentElement;
+  if (!host) return;
+
+  function rand(seed) {
+    let t = seed + 0x6d2b79f5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function paint() {
+    const width = host.clientWidth || 1;
+    const height = host.clientHeight || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(width * dpr));
+    canvas.height = Math.max(1, Math.floor(height * dpr));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    // Dense field of tiny dim dots; seeded so resize doesn't reshuffle wildly.
+    // Light mode keeps the field but uses dark ink so it reads on pale paper.
+    const light = document.documentElement.dataset.theme === 'light';
+    const ink = light ? '18, 22, 32' : '245, 248, 255';
+    // Keep stars clear of the model selector so they don't look like UI glitches.
+    const clearZones = [];
+    const modelWrap = document.getElementById('chatModelSelectWrap');
+    if (modelWrap && !modelWrap.classList.contains('is-hidden')) {
+      const hostRect = host.getBoundingClientRect();
+      const rect = modelWrap.getBoundingClientRect();
+      const pad = 16;
+      clearZones.push({
+        left: rect.left - hostRect.left - pad,
+        top: rect.top - hostRect.top - pad,
+        right: rect.right - hostRect.left + pad,
+        bottom: rect.bottom - hostRect.top + pad,
+      });
+    }
+    const inClearZone = (x, y) => clearZones.some((zone) =>
+      x >= zone.left && x <= zone.right && y >= zone.top && y <= zone.bottom
+    );
+    // Sparser and dimmer than a real starfield — this is texture on the
+    // canvas, not a subject. The host's CSS mask fades it out before the
+    // thread column, so density only has to read in the upper area.
+    const count = Math.round((width * height) / 4200);
+    for (let i = 0; i < count; i++) {
+      const x = rand(i * 1289 + 17) * width;
+      const y = rand(i * 2657 + 91) * height;
+      if (inClearZone(x, y)) continue;
+      const size = rand(i * 409 + 3) < 0.86 ? 0.5 : 0.85;
+      const alpha = light
+        ? 0.11 + rand(i * 733 + 11) * 0.18
+        : 0.09 + rand(i * 733 + 11) * 0.2;
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(' + ink + ', ' + alpha.toFixed(3) + ')';
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  repaintStarfield = paint;
+  paint();
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(paint);
+    observer.observe(host);
+  } else {
+    window.addEventListener('resize', paint);
+  }
+}
+
+mountOrb(document.getElementById('orbMark'), 64);
+mountStarfield(document.getElementById('starfieldCanvas'));
+
+const updateToast = document.getElementById('updateToast');
+const updateToastTitle = document.getElementById('updateToastTitle');
+const updateToastBody = document.getElementById('updateToastBody');
+const btnUpdateView = document.getElementById('btnUpdateView');
+const btnUpdateLater = document.getElementById('btnUpdateLater');
+const btnUpdateDismiss = document.getElementById('btnUpdateDismiss');
+
+function dismissedUpdateVersion() {
+  try {
+    return localStorage.getItem(UPDATE_DISMISS_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function dismissUpdateNotice(version) {
+  const tag = String(version || '').trim();
+  if (tag) {
+    try {
+      localStorage.setItem(UPDATE_DISMISS_KEY, tag);
+    } catch {
+      // ignore
+    }
+  }
+  hideUpdateToast();
+}
+
+function hideUpdateToast() {
+  if (!updateToast) return;
+  updateToast.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (!updateToast.classList.contains('is-visible')) {
+      updateToast.classList.add('is-hidden');
+      updateToast.hidden = true;
+    }
+  }, prefersReducedMotion() ? 0 : 220);
+}
+
+function showUpdateToast(status) {
+  if (!updateToast || !status || !status.update_available || !status.latest) return;
+  if (dismissedUpdateVersion() === String(status.latest)) return;
+  const latestLabel = 'v' + String(status.latest).replace(/^v/i, '');
+  const currentLabel = 'v' + String(status.current || '').replace(/^v/i, '');
+  if (updateToastTitle) {
+    updateToastTitle.textContent = status.release_name
+      ? String(status.release_name)
+      : ('TensorMI Harness ' + latestLabel);
+  }
+  if (updateToastBody) {
+    updateToastBody.textContent =
+      'You’re on ' + currentLabel + '. ' + latestLabel + ' is available on GitHub.';
+  }
+  if (btnUpdateView && status.release_url) {
+    btnUpdateView.href = status.release_url;
+  }
+  updateToast.dataset.latest = String(status.latest);
+  updateToast.hidden = false;
+  updateToast.classList.remove('is-hidden');
+  requestAnimationFrame(() => updateToast.classList.add('is-visible'));
+}
+
+async function checkForAppUpdate({ force = false } = {}) {
+  try {
+    const response = await fetch('/api/updates/check' + (force ? '?force=1' : ''));
+    if (!response.ok) return null;
+    const status = await response.json();
+    if (status && status.update_available) showUpdateToast(status);
+    return status;
+  } catch {
+    return null;
+  }
+}
+
+btnUpdateLater?.addEventListener('click', () => {
+  dismissUpdateNotice(updateToast?.dataset?.latest);
+});
+btnUpdateDismiss?.addEventListener('click', () => {
+  dismissUpdateNotice(updateToast?.dataset?.latest);
+});
+
+(async () => {
+  await initLocalData();
+  updateGreeting();
+  syncAgentButton();
+  syncResearchControls();
+  renderSidebar();
+  applyLocationRoute();
+  window.addEventListener('popstate', () => {
+    applyLocationRoute();
+  });
+  pollState();
+  setInterval(pollState, 2000);
+  loadUserSkills();
+  // Soft update check after the UI settles; GitHub answers are cached server-side.
+  window.setTimeout(() => { checkForAppUpdate(); }, 2500);
+  setInterval(() => { checkForAppUpdate(); }, 12 * 60 * 60 * 1000);
+})();

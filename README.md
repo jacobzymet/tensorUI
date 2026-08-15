@@ -111,7 +111,7 @@ Env override for bind: `TENSORUI_BIND=127.0.0.1:3930`. Non-loopback binds (`0.0.
 
 ## Build
 
-The Rust binary embeds Chat and Server HTML, `orb.js`, highlight.js, marked, DOMPurify, and icons:
+The Rust binary embeds Chat and Server HTML, the Chat CSS/JavaScript modules, `orb.js`, highlight.js, marked, DOMPurify, and icons:
 
 ```powershell
 cargo build --release

@@ -2,6 +2,8 @@
 
 pub const SETTINGS_HTML: &str = include_str!("../ui/settings.html");
 pub const CHAT_HTML: &str = include_str!("../ui/chat.html");
+pub const CHAT_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/chat.css"));
+pub const CHAT_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/chat.js"));
 pub const ORB_JS: &str = include_str!("../ui/orb.js");
 pub const HIGHLIGHT_JS: &str = include_str!("../ui/vendor/highlight.min.js");
 pub const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
