@@ -3768,6 +3768,15 @@
       height: 1.05rem;
       display: block;
     }
+    .composer-buttons .btn-send .send-action-icon-queue {
+      display: none;
+    }
+    .composer-buttons .btn-send.is-queueing .send-action-icon-send {
+      display: none;
+    }
+    .composer-buttons .btn-send.is-queueing .send-action-icon-queue {
+      display: block;
+    }
     .composer-buttons #btnStop {
       border-color: var(--color-rule-2);
       background: var(--color-paper-3);
@@ -5059,7 +5068,8 @@
             <span class="btn-branch-label">Branch</span>
           </button>
           <button type="button" class="btn btn-primary btn-send" id="btnSend" aria-label="Send message" title="Send message" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            <svg class="send-action-icon send-action-icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            <svg class="send-action-icon send-action-icon-queue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h12"/><path d="M3 12h8"/><path d="M3 18h8"/><path d="M17 11v8"/><path d="M13 15h8"/></svg>
           </button>
         </div>
       </div>
@@ -8241,6 +8251,7 @@
       const busy = isConvoBusy(activeId);
       // Keep Send visible while streaming so the next message can be queued.
       btnSend.classList.remove('is-hidden');
+      btnSend.classList.toggle('is-queueing', busy);
       btnStop.classList.toggle('is-hidden', !busy);
       btnSend.title = busy ? 'Queue message' : 'Send message';
       btnSend.setAttribute('aria-label', busy ? 'Queue message' : 'Send message');
