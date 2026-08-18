@@ -1361,6 +1361,7 @@ function createConvoItem(convo, { nested = false } = {}) {
   const title = document.createElement('span');
   title.className = 'convo-title';
   title.textContent = fullTitle;
+  applyPrivacyMosaic(title, 'conversation:' + convo.id);
   title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
   item.title = title.title;
   const more = document.createElement('button');
@@ -2567,6 +2568,7 @@ function renderSidebar() {
     const name = document.createElement('span');
     name.className = 'sidebar-project-chip-name';
     name.textContent = project.name;
+    applyPrivacyMosaic(name, 'project:' + project.id);
     name.title = project.name;
     const settingsBtn = document.createElement('button');
     settingsBtn.type = 'button';
@@ -2695,4 +2697,3 @@ function deleteConversation(id) {
     syncComposerStreamUi();
   }
 }
-

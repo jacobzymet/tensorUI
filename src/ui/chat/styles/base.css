@@ -489,6 +489,33 @@ button { font-family: inherit; }
   width: 1.05rem;
   height: 1.05rem;
 }
+.sidebar-head .btn-privacy-mode {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  color: var(--color-muted);
+  transition:
+    color var(--dur-short) var(--ease-settle),
+    background var(--dur-short) var(--ease-settle),
+    box-shadow var(--dur-short) var(--ease-settle),
+    transform var(--dur-short) var(--ease-release);
+}
+.sidebar-head .btn-privacy-mode svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+.sidebar-head .btn-privacy-mode:hover { color: var(--color-ink); }
+.sidebar-head .btn-privacy-mode.is-active {
+  color: var(--color-accent);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-edge);
+}
+.sidebar-head .btn-privacy-mode.is-active:hover {
+  background: var(--accent-wash-2);
+  transform: scale(1.04);
+}
 .sidebar-expand-fab {
   --sidebar-fab-size: 2rem;
   display: none;
@@ -1025,6 +1052,71 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
   padding-left: 0.7rem;
   color: var(--color-ink-2);
 }
+
+/* Privacy mode is a screen-sharing aid for the sidebar. The mosaic is
+   synthetic—not a filter over the real glyphs—and therefore carries no shape
+   information from the protected title or provider name. */
+.privacy-mask {
+  --privacy-pixel-1: color-mix(in oklch, var(--color-muted) 42%, transparent);
+  --privacy-pixel-2: color-mix(in oklch, var(--color-ink-2) 52%, transparent);
+  --privacy-pixel-3: color-mix(in oklch, var(--color-accent) 30%, var(--color-muted));
+  --privacy-pixel-4: color-mix(in oklch, var(--color-ink) 30%, transparent);
+  position: relative;
+  transition: color 180ms var(--ease-settle);
+}
+.privacy-mask::after {
+  content: none;
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 5px);
+  left: 0.1rem;
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--privacy-pixel-2);
+  box-shadow: var(--privacy-pixels);
+  pointer-events: none;
+}
+.privacy-mode .convo-item:not(.is-active) .convo-title,
+.privacy-mode .sidebar-project-chip-name,
+.privacy-mode .sidebar-server-provider {
+  color: transparent;
+}
+.privacy-mode .convo-item:not(.is-active) .privacy-mask::after,
+.privacy-mode .sidebar-project-chip-name.privacy-mask::after,
+.privacy-mode .sidebar-server-provider.privacy-mask::after {
+  content: "";
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+  transform-origin: left center;
+  transition:
+    opacity 150ms var(--ease-settle),
+    filter 220ms var(--ease-settle),
+    transform 240ms var(--ease-settle);
+}
+.privacy-mode .convo-item:not(.is-active):hover .convo-title,
+.privacy-mode .convo-item:not(.is-active):focus-within .convo-title,
+.privacy-mode .sidebar-project-chip-name:hover {
+  color: var(--color-ink);
+}
+.privacy-mode .sidebar-server-provider:hover {
+  color: var(--color-muted);
+}
+.privacy-mode .convo-item:hover .privacy-mask::after,
+.privacy-mode .convo-item:focus-within .privacy-mask::after,
+.privacy-mode .sidebar-project-chip-name:hover::after,
+.privacy-mode .sidebar-server-provider:hover::after {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .privacy-mask,
+  .privacy-mask::after {
+    transition: none;
+  }
+}
 .update-toast {
   position: fixed;
   z-index: 90;
@@ -1098,4 +1190,3 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
   background: rgba(0, 0, 0, 0.5);
   z-index: 30;
 }
-

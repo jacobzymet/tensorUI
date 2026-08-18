@@ -1,8 +1,46 @@
 const STORAGE_KEY = 'tensorui.chat.v1';
 const SETTINGS_KEY = 'tensorui.chat.settings.v1';
 const SIDEBAR_COLLAPSED_KEY = 'tensorui.chat.sidebarCollapsed';
+const PRIVACY_MODE_KEY = 'tensorui.chat.privacyMode';
 const UPDATE_DISMISS_KEY = 'tensorui.update.dismissed';
 const TRACE_DESKTOP_MQ = window.matchMedia('(min-width: 821px)');
+
+/**
+ * Build a synthetic pixel mosaic from an opaque UI identifier. The pattern is
+ * deliberately unrelated to the protected text, so it cannot be sharpened or
+ * processed back into the original words.
+ */
+function applyPrivacyMosaic(el, seed) {
+  if (!el) return;
+  let state = 2166136261;
+  const source = String(seed || 'private-surface');
+  for (let i = 0; i < source.length; i += 1) {
+    state ^= source.charCodeAt(i);
+    state = Math.imul(state, 16777619);
+  }
+  const random = () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const columns = 15 + Math.floor(random() * 12);
+  const shadows = [];
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      if (column > 0 && random() < 0.2) continue;
+      const shade = 1 + Math.floor(random() * 4);
+      const x = (column * 4).toFixed(1);
+      const y = (row * 4).toFixed(1);
+      shadows.push(x + 'px ' + y + 'px 0 var(--privacy-pixel-' + shade + ')');
+    }
+  }
+  el.classList.add('privacy-mask');
+  el.style.setProperty('--privacy-pixels', shadows.join(', '));
+}
+
 const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
 const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
 const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'brave', 'bing', 'google', 'mojeek', 'startpage', 'yahoo', 'yandex', 'wikipedia'];
@@ -331,6 +369,7 @@ const greetingEl = document.getElementById('greeting');
 const modelHintEl = document.getElementById('modelHint');
 const serverChip = document.getElementById('serverChip');
 const serverProviderName = document.getElementById('serverProviderName');
+applyPrivacyMosaic(serverProviderName, 'server-provider');
 const chatModelSelect = document.getElementById('chatModelSelect');
 const chatModelSelectWrap = document.getElementById('chatModelSelectWrap');
 const chatModelOriginPill = document.getElementById('chatModelOriginPill');
@@ -1572,4 +1611,3 @@ function parseCapabilityMentions(raw) {
     .trim();
   return { text: text || source.trim(), mentions };
 }
-

@@ -550,9 +550,13 @@ function updateServerChip(data) {
   serverChip.textContent = connected
     ? 'Connected'
     : (remoteChecking ? 'Checking…' : (!network.remote_saved ? 'Not configured' : 'Unavailable'));
-  serverChip.title = connected
+  const serverDetailTitle = connected
     ? 'Connected to ' + providerLabel
     : (remoteChecking ? 'Checking ' + providerLabel + ' connection' : 'Provider connection unavailable');
+  serverChip.dataset.detailTitle = serverDetailTitle;
+  serverChip.title = chatShell.classList.contains('privacy-mode')
+    ? 'Server connection status'
+    : serverDetailTitle;
   if (serverProviderName) {
     serverProviderName.textContent = network.remote_saved ? providerLabel : 'No provider';
     serverProviderName.title = network.remote_saved ? providerLabel : '';
@@ -1783,6 +1787,7 @@ projectsSearch.addEventListener('input', renderProjectsPage);
 projectsSort.addEventListener('change', renderProjectsPage);
 const btnToggleSidebar = document.getElementById('btnToggleSidebar');
 const btnExpandSidebar = document.getElementById('btnExpandSidebar');
+const btnPrivacyMode = document.getElementById('btnPrivacyMode');
 const sidebarMobileMq = window.matchMedia('(max-width: 820px)');
 
 initTraceSidebarPreferred();
@@ -1858,6 +1863,38 @@ function setSidebarOpen(open) {
   syncSidebarToggleUi();
 }
 
+function syncPrivacyModeUi(enabled) {
+  chatShell.classList.toggle('privacy-mode', enabled);
+  if (serverChip) {
+    serverChip.title = enabled
+      ? 'Server connection status'
+      : (serverChip.dataset.detailTitle || serverChip.title);
+  }
+  if (!btnPrivacyMode) return;
+  btnPrivacyMode.classList.toggle('is-active', enabled);
+  btnPrivacyMode.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  btnPrivacyMode.setAttribute('aria-label', enabled ? 'Turn off privacy mode' : 'Turn on privacy mode');
+  btnPrivacyMode.title = enabled
+    ? 'Privacy mode on — hover a surface to reveal it'
+    : 'Turn on privacy mode';
+}
+
+function setPrivacyMode(enabled, { persist = true } = {}) {
+  syncPrivacyModeUi(!!enabled);
+  if (!persist) return;
+  try {
+    localStorage.setItem(PRIVACY_MODE_KEY, enabled ? '1' : '0');
+  } catch { /* ignore */ }
+}
+
+function applyStoredPrivacyMode() {
+  let enabled = false;
+  try {
+    enabled = localStorage.getItem(PRIVACY_MODE_KEY) === '1';
+  } catch { /* ignore */ }
+  setPrivacyMode(enabled, { persist: false });
+}
+
 function closeMobileSidebar() {
   if (sidebarIsMobileDrawer()) setSidebarOpen(false);
   else syncSidebarToggleUi();
@@ -1875,6 +1912,9 @@ function applyStoredSidebarCollapsed() {
 
 btnToggleSidebar?.addEventListener('click', () => setSidebarOpen(false));
 btnExpandSidebar?.addEventListener('click', () => setSidebarOpen(true));
+btnPrivacyMode?.addEventListener('click', () => {
+  setPrivacyMode(!chatShell.classList.contains('privacy-mode'));
+});
 document.getElementById('sidebarBackdrop')?.addEventListener('click', () => {
   closeMobileSidebar();
 });
@@ -1888,6 +1928,7 @@ sidebarMobileMq.addEventListener?.('change', () => {
   }
 });
 applyStoredSidebarCollapsed();
+applyStoredPrivacyMode();
 
 // —— Search chats / projects ——
 const searchModal = document.getElementById('searchModal');
