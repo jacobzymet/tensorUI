@@ -68,21 +68,14 @@ mod tests {
     }
 
     #[test]
-    fn composer_scrim_tracks_the_combined_background_tone() {
-        let dark_background = CHAT_CSS
-            .split(".chat-main[data-background-tone=\"dark\"] {")
+    fn custom_backgrounds_remove_the_composer_scrim() {
+        let custom_background_scrim = CHAT_CSS
+            .split(".chat-main[data-background-tone] .chat-composer-dock::before {")
             .nth(1)
             .and_then(|css| css.split('}').next())
-            .expect("dark background tone styles should be embedded");
-        let composer_scrim = CHAT_CSS
-            .split(".chat-composer-dock::before {")
-            .nth(1)
-            .and_then(|css| css.split('}').next())
-            .expect("composer scrim styles should be embedded");
+            .expect("custom background composer styles should be embedded");
 
-        assert!(dark_background.contains("--chat-composer-scrim: oklch(5% 0.006 260);"));
-        assert!(composer_scrim.contains("var(--chat-composer-scrim)"));
-        assert!(!composer_scrim.contains("var(--color-paper)"));
+        assert!(custom_background_scrim.contains("display: none;"));
     }
 
     #[test]
