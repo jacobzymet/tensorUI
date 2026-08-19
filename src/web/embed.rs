@@ -29,4 +29,23 @@ mod tests {
         assert!(!CHAT_JS.contains("pruneRecentModels("));
         assert!(CHAT_JS.contains("pinnedModelIds: pinnedModelIds.slice()"));
     }
+
+    #[test]
+    fn code_block_controls_stay_visible_while_the_conversation_scrolls() {
+        let code_block = CHAT_CSS
+            .split(".msg-bubble .md-code-block {")
+            .nth(1)
+            .and_then(|css| css.split('}').next())
+            .expect("code block styles should be embedded");
+        let code_header = CHAT_CSS
+            .split(".msg-bubble .md-code-header {")
+            .nth(1)
+            .and_then(|css| css.split('}').next())
+            .expect("code header styles should be embedded");
+
+        assert!(code_block.contains("overflow: clip;"));
+        assert!(code_header.contains("position: sticky;"));
+        assert!(code_header.contains("top: 0;"));
+        assert!(code_header.contains("z-index: 2;"));
+    }
 }
