@@ -8,7 +8,7 @@ use std::sync::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, State},
+    extract::{OriginalUri, Path, State},
     http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
@@ -145,9 +145,47 @@ async fn secure_local_request(
     response
 }
 
+async fn require_unlocked_api(
+    State(app): State<SharedApp>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let locked = app
+        .lock()
+        .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
+        .unwrap_or(true);
+    if !locked {
+        return next.run(request).await;
+    }
+
+    if locked_api_request_allowed(request.method(), request.uri().path()) {
+        return next.run(request).await;
+    }
+
+    (
+        StatusCode::LOCKED,
+        Json(serde_json::json!({
+            "error": "Encrypted local data is locked. Unlock it before using this API.",
+            "code": "encrypted_locked"
+        })),
+    )
+        .into_response()
+}
+
+fn locked_api_request_allowed(method: &axum::http::Method, path: &str) -> bool {
+    (path == "/api/state" && *method == axum::http::Method::GET)
+        || (path == "/api/data" && *method == axum::http::Method::GET)
+        || (path == "/api/data/encryption/unlock" && *method == axum::http::Method::POST)
+        || (path == "/api/focus" && *method == axum::http::Method::POST)
+}
+
 static PROVIDER_CACHE_WARM_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static PROVIDER_CACHE_WARM_ALLOWED: AtomicBool = AtomicBool::new(true);
 
 fn schedule_provider_cache_warm(app: SharedApp) {
+    if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
+        return;
+    }
     let needs_warm = app
         .lock()
         .map(|guard| guard.remote_caches_need_warm())
@@ -187,21 +225,27 @@ fn schedule_provider_cache_warm(app: SharedApp) {
 
         let health_results: Vec<_> = health_targets
             .into_iter()
-            .map(|(style, base, token, insecure)| {
+            .filter_map(|(style, base, token, insecure)| {
+                if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
+                    return None;
+                }
                 let health = crate::http::with_insecure_provider_tls(insecure, || {
                     probe_provider_health(&base, &token, style)
                 });
-                (style, base, token, health)
+                Some((style, base, token, health))
             })
             .collect();
         let catalog_results: Vec<_> = catalog_targets
             .into_iter()
             .zip(catalog_others)
-            .map(|((style, base, token, insecure), others)| {
+            .filter_map(|((style, base, token, insecure), others)| {
+                if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
+                    return None;
+                }
                 let catalog = crate::http::with_insecure_provider_tls(insecure, || {
                     probe_provider_catalog(&base, &token, style, &[], &others)
                 });
-                (style, base, token, catalog)
+                Some((style, base, token, catalog))
             })
             .collect();
 
@@ -214,6 +258,13 @@ fn schedule_provider_cache_warm(app: SharedApp) {
             }
         }
     });
+}
+
+async fn pause_provider_cache_warm() {
+    PROVIDER_CACHE_WARM_ALLOWED.store(false, Ordering::SeqCst);
+    while PROVIDER_CACHE_WARM_IN_FLIGHT.load(Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> {
@@ -260,7 +311,11 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             axum::routing::patch(update_skill).delete(delete_skill),
         )
         .route("/api/attachments/extract", post(extract_attachment))
-        .route("/api/updates/check", get(check_updates));
+        .route("/api/updates/check", get(check_updates))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&app),
+            require_unlocked_api,
+        ));
 
     let router = Router::new()
         .route("/", get(chat_page))
@@ -324,12 +379,28 @@ async fn shutdown_signal() {
     }
 }
 
-async fn chat_page() -> Html<&'static str> {
-    Html(CHAT_HTML)
+async fn chat_page(State(app): State<SharedApp>, OriginalUri(uri): OriginalUri) -> Response {
+    let locked = app
+        .lock()
+        .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
+        .unwrap_or(true);
+    if locked && uri.path() != "/" {
+        Redirect::temporary("/").into_response()
+    } else {
+        Html(CHAT_HTML).into_response()
+    }
 }
 
-async fn settings_page() -> Html<&'static str> {
-    Html(SETTINGS_HTML)
+async fn settings_page(State(app): State<SharedApp>) -> Response {
+    let locked = app
+        .lock()
+        .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
+        .unwrap_or(true);
+    if locked {
+        Redirect::temporary("/").into_response()
+    } else {
+        Html(SETTINGS_HTML).into_response()
+    }
 }
 
 async fn chat_stylesheet() -> impl IntoResponse {
@@ -1069,17 +1140,25 @@ fn open_folder_label() -> &'static str {
 fn data_info_from_app(app: &App) -> DataInfo {
     let root = app.data_dir();
     let _ = store::ensure_data_dir(&root);
+    let locked = app.encryption_enabled() && !app.encryption_unlocked();
+    let visible_path = |path: &std::path::Path| {
+        if locked {
+            String::new()
+        } else {
+            path.display().to_string()
+        }
+    };
     DataInfo {
         storage: app.storage_mode().as_str(),
         browser_storage: app.storage_mode().is_browser(),
         encryption_enabled: app.encryption_enabled(),
         encryption_unlocked: app.encryption_unlocked(),
         encryption_transition_pending: encryption_transition::exists(&root),
-        data_dir: root.display().to_string(),
-        config_path: app.config_path.display().to_string(),
-        chats_path: store::chats_path(&root).display().to_string(),
-        preferences_path: store::preferences_path(&root).display().to_string(),
-        skills_dir: root.join("chat-skills").display().to_string(),
+        data_dir: visible_path(&root),
+        config_path: visible_path(&app.config_path),
+        chats_path: visible_path(&store::chats_path(&root)),
+        preferences_path: visible_path(&store::preferences_path(&root)),
+        skills_dir: visible_path(&root.join("chat-skills")),
         os: host_os(),
         open_label: open_folder_label(),
     }
@@ -1171,13 +1250,19 @@ async fn unlock_encryption(
     State(app): State<SharedApp>,
     Json(body): Json<PassphraseBody>,
 ) -> Result<Json<DataInfo>, ApiError> {
-    let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    app.unlock_disk_encryption(&body.passphrase)
-        .map_err(ApiError::bad_request)?;
-    Ok(Json(data_info_from_app(&app)))
+    let info = {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        app.unlock_disk_encryption(&body.passphrase)
+            .map_err(ApiError::bad_request)?;
+        data_info_from_app(&app)
+    };
+    PROVIDER_CACHE_WARM_ALLOWED.store(true, Ordering::SeqCst);
+    schedule_provider_cache_warm(Arc::clone(&app));
+    Ok(Json(info))
 }
 
 async fn lock_encryption(State(app): State<SharedApp>) -> Result<Json<DataInfo>, ApiError> {
+    pause_provider_cache_warm().await;
     let mut app = app.lock().map_err(|_| ApiError::lock())?;
     app.lock_disk_encryption();
     Ok(Json(data_info_from_app(&app)))
@@ -1378,6 +1463,27 @@ struct NetworkSummary {
 }
 
 impl NetworkSummary {
+    fn locked() -> Self {
+        Self {
+            via_remote: false,
+            remote_base: String::new(),
+            remote_label: String::new(),
+            remote_name: String::new(),
+            active_remote_id: String::new(),
+            remote_count: 0,
+            remote_saved: false,
+            remote_ok: false,
+            remote_checking: false,
+            remote_kind: None,
+            remote_error: None,
+            remote_model: None,
+            remote_status: None,
+            remote_models: Vec::new(),
+            remotes: Vec::new(),
+            inference_mode: "locked",
+        }
+    }
+
     fn from_app(app: &App) -> Self {
         let providers = &app.config.providers;
         let remotes = app.public_providers();
@@ -1454,6 +1560,20 @@ impl NetworkSummary {
 
 impl AppState {
     fn from_app(app: &App) -> Self {
+        if app.encryption_enabled() && !app.encryption_unlocked() {
+            return Self {
+                version: app.app_version(),
+                theme: "dark",
+                font_body: crate::config::DEFAULT_UI_FONT_BODY.into(),
+                font_display: crate::config::DEFAULT_UI_FONT_DISPLAY.into(),
+                font_mono: crate::config::DEFAULT_UI_FONT_MONO.into(),
+                font_scale: "default",
+                thinking_supported: false,
+                config_path: String::new(),
+                network: NetworkSummary::locked(),
+                providers: Vec::new(),
+            };
+        }
         Self {
             version: app.app_version(),
             theme: app.config.ui.theme.as_str(),
@@ -1509,5 +1629,80 @@ impl IntoResponse for ApiError {
                 .map(|obj| obj.insert("code".into(), serde_json::Value::String(code.into())));
         }
         (self.status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locked_api_allowlist_is_minimal_and_exact() {
+        use axum::http::Method;
+
+        assert!(locked_api_request_allowed(&Method::GET, "/api/state"));
+        assert!(locked_api_request_allowed(&Method::GET, "/api/data"));
+        assert!(locked_api_request_allowed(
+            &Method::POST,
+            "/api/data/encryption/unlock"
+        ));
+        assert!(locked_api_request_allowed(&Method::POST, "/api/focus"));
+
+        for (method, path) in [
+            (Method::GET, "/api/providers"),
+            (Method::POST, "/api/providers/test"),
+            (Method::POST, "/api/chat/completions"),
+            (Method::GET, "/api/data/store"),
+            (Method::GET, "/api/data/preferences"),
+            (Method::GET, "/api/skills"),
+            (Method::GET, "/api/local-llms"),
+            (Method::POST, "/api/data/open"),
+            (Method::POST, "/api/data/encryption/lock"),
+            (Method::POST, "/api/ui/appearance"),
+            (Method::GET, "/api/updates/check"),
+        ] {
+            assert!(
+                !locked_api_request_allowed(&method, path),
+                "{method} {path} must remain unavailable while locked"
+            );
+        }
+    }
+
+    #[test]
+    fn locked_state_redacts_paths_providers_models_and_preferences() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut app = App::new(crate::config::Config::default(), config_path).unwrap();
+        app.create_provider(
+            "Private provider",
+            "https://private.example/v1",
+            "secret-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        app.enable_disk_encryption("test passphrase", "test passphrase")
+            .unwrap();
+        app.lock_disk_encryption();
+
+        let state = AppState::from_app(&app);
+        assert!(state.config_path.is_empty());
+        assert!(state.providers.is_empty());
+        assert!(state.network.remote_base.is_empty());
+        assert!(state.network.remote_name.is_empty());
+        assert!(state.network.remote_models.is_empty());
+        assert_eq!(state.network.remote_count, 0);
+        assert_eq!(state.network.inference_mode, "locked");
+        assert!(!state.thinking_supported);
+
+        let data = data_info_from_app(&app);
+        assert!(data.data_dir.is_empty());
+        assert!(data.config_path.is_empty());
+        assert!(data.chats_path.is_empty());
+        assert!(data.preferences_path.is_empty());
+        assert!(data.skills_dir.is_empty());
+        assert!(data.encryption_enabled);
+        assert!(!data.encryption_unlocked);
     }
 }

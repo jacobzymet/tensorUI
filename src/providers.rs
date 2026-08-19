@@ -1,10 +1,12 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::RandomState},
+    hash::BuildHasher,
     sync::Mutex,
     time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use crate::{anthropic, http};
 
@@ -473,23 +475,50 @@ fn merge_thinking_capabilities(
     }
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+struct CacheKey(u64, u64);
+
+#[derive(Debug, Default)]
+struct CacheKeyer {
+    first: RandomState,
+    second: RandomState,
+}
+
+impl CacheKeyer {
+    fn key(&self, style: ApiStyle, base: &str, token: &str) -> CacheKey {
+        let material = (style.as_str(), base, token);
+        CacheKey(
+            self.first.hash_one(material),
+            self.second.hash_one(material),
+        )
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct HealthCache {
-    last: Mutex<HashMap<String, (Instant, ProviderHealth)>>,
+    last: Mutex<HashMap<CacheKey, (Instant, ProviderHealth)>>,
+    keys: CacheKeyer,
 }
 
 #[derive(Debug, Default)]
 pub struct CatalogCache {
-    last: Mutex<HashMap<String, (Instant, Vec<RemoteModelOption>)>>,
-}
-
-fn cache_key(style: ApiStyle, base: &str, token: &str) -> String {
-    format!("{}|{base}|{token}", style.as_str())
+    last: Mutex<HashMap<CacheKey, (Instant, Vec<RemoteModelOption>)>>,
+    keys: CacheKeyer,
 }
 
 impl HealthCache {
+    pub fn clear(&self) {
+        if let Ok(mut guard) = self.last.lock() {
+            for (_, (_, mut health)) in guard.drain() {
+                health.model.zeroize();
+                health.status.zeroize();
+                health.error.zeroize();
+            }
+        }
+    }
+
     pub fn peek(&self, style: ApiStyle, base: &str, token: &str) -> Option<ProviderHealth> {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         let Ok(guard) = self.last.lock() else {
             return None;
         };
@@ -497,7 +526,7 @@ impl HealthCache {
     }
 
     pub fn is_fresh(&self, style: ApiStyle, base: &str, token: &str) -> bool {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         let Ok(guard) = self.last.lock() else {
             return false;
         };
@@ -505,7 +534,7 @@ impl HealthCache {
     }
 
     pub fn put(&self, style: ApiStyle, base: &str, token: &str, health: ProviderHealth) {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         if let Ok(mut guard) = self.last.lock() {
             guard.insert(key, (Instant::now(), health));
         }
@@ -524,8 +553,25 @@ impl HealthCache {
 }
 
 impl CatalogCache {
+    pub fn clear(&self) {
+        if let Ok(mut guard) = self.last.lock() {
+            for (_, (_, mut catalog)) in guard.drain() {
+                for model in &mut catalog {
+                    model.id.zeroize();
+                    model.model.zeroize();
+                    model.base.zeroize();
+                    model.label.zeroize();
+                    model.thinking_control.zeroize();
+                    model.thinking_efforts.zeroize();
+                    model.provider_id.zeroize();
+                    model.provider_name.zeroize();
+                }
+            }
+        }
+    }
+
     pub fn peek(&self, style: ApiStyle, base: &str, token: &str) -> Option<Vec<RemoteModelOption>> {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         let Ok(guard) = self.last.lock() else {
             return None;
         };
@@ -533,7 +579,7 @@ impl CatalogCache {
     }
 
     pub fn is_fresh(&self, style: ApiStyle, base: &str, token: &str) -> bool {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         let Ok(guard) = self.last.lock() else {
             return false;
         };
@@ -541,7 +587,7 @@ impl CatalogCache {
     }
 
     pub fn put(&self, style: ApiStyle, base: &str, token: &str, catalog: Vec<RemoteModelOption>) {
-        let key = cache_key(style, base, token);
+        let key = self.keys.key(style, base, token);
         if let Ok(mut guard) = self.last.lock() {
             // A transient probe failure often yields []. Don't wipe a good catalog —
             // just refresh the TTL so we retry later without flickering the selector.
@@ -2145,5 +2191,25 @@ mod tests {
             "context_length": 128000
         });
         assert_eq!(context_length_from_model_object(&entry), Some(128000));
+    }
+
+    #[test]
+    fn provider_cache_keys_do_not_retain_raw_credentials() {
+        let cache = HealthCache::default();
+        cache.put(
+            ApiStyle::Openai,
+            "https://private.example/v1",
+            "credential-must-not-be-retained",
+            ProviderHealth {
+                ok: true,
+                kind: ProviderHealthKind::Ready,
+                model: None,
+                status: Some("ready".into()),
+                error: None,
+            },
+        );
+        let debug = format!("{cache:?}");
+        assert!(!debug.contains("credential-must-not-be-retained"));
+        assert!(!debug.contains("private.example"));
     }
 }

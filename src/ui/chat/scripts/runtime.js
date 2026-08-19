@@ -537,6 +537,24 @@ function updateServerChip(data) {
   applyAppearance(data);
   syncModelSelector(data);
   const network = data.network || {};
+  if (network.inference_mode === 'locked' || diskEncryptionLocked()) {
+    serverReady = false;
+    serverChip.className = 'status-chip sidebar-server-status status-stopped';
+    serverChip.textContent = 'Locked';
+    serverChip.dataset.detailTitle = 'Unlock encrypted data to view server status';
+    serverChip.title = 'Server details unavailable while encrypted data is locked';
+    if (serverProviderName) {
+      serverProviderName.textContent = 'Encrypted';
+      serverProviderName.title = '';
+    }
+    modelHintEl.textContent = '';
+    modelHintEl.classList.add('is-hidden');
+    hideComposerHint();
+    syncComposerThinkVisibility(null);
+    syncAttachButton();
+    updateSendEnabled();
+    return;
+  }
   const remoteOk = !!network.remote_ok || !!(network.remote_models || []).length;
   const remoteChecking = !!network.remote_checking
     || (!!network.remote_saved && !remoteOk && !network.remote_kind && !(network.remote_models || []).length);
@@ -841,6 +859,7 @@ function paintLiveThinkOnly(rootEl, cleaned) {
     streamEl.dataset.thinkRaw = openThink.content;
     streamEl.innerHTML = renderThinkMarkdown(openThink.content);
   }
+  enhanceCodeBlocks(rootEl);
   streamEl.scrollTop = streamEl.scrollHeight;
   return true;
 }
@@ -907,7 +926,6 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
       if (answerEl.dataset.renderedHtml !== answerHtml) {
         answerEl.innerHTML = answerHtml;
         answerEl.dataset.renderedHtml = answerHtml;
-        if (!streaming) enhanceCodeBlocks(answerEl);
       }
     } else if (!streaming) {
       if (answerEl.innerHTML) answerEl.innerHTML = '';
@@ -925,6 +943,7 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
         answerEl.dataset.renderedHtml = nextHtml;
       }
     }
+    enhanceCodeBlocks(answerEl);
     delete answerEl.dataset.committedSig;
     stream.enteredSteps = 0;
   } else if (cleaned || hasTimeline || sealedAnswerHtml) {
@@ -952,8 +971,7 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
         answerEl.innerHTML = committedHtml + sealedAnswerHtml + (cleaned ? renderAssistantHtml(cleaned, { streaming }) : '');
         answerEl.dataset.committedSig = committedSig;
       }
-      answerEl.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
-      if (!streaming) enhanceCodeBlocks(answerEl);
+      enhanceCodeBlocks(answerEl);
       scrollThinkStreams(answerEl);
       const steps = answerEl.querySelectorAll(':scope > .agent-step');
       const seen = stream.enteredSteps || 0;

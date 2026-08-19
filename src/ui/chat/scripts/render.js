@@ -1851,6 +1851,23 @@ const MARKED_BASE_RENDERER = (window.marked && window.marked.Renderer)
   ? new window.marked.Renderer()
   : null;
 
+function renderHighlightedCode(text, language) {
+  const source = String(text || '');
+  if (!window.hljs) return { html: escapeHtml(source), highlighted: false };
+  try {
+    const result = language
+      ? (window.hljs.getLanguage(language)
+          ? window.hljs.highlight(source, { language, ignoreIllegals: true })
+          : null)
+      : window.hljs.highlightAuto(source);
+    if (!result) return { html: escapeHtml(source), highlighted: false };
+    return { html: result.value, highlighted: true };
+  } catch {
+    // An incomplete stream or unknown alias must never prevent the code from rendering.
+    return { html: escapeHtml(source), highlighted: false };
+  }
+}
+
 if (window.marked) {
   window.marked.use({
     gfm: true,
@@ -1859,10 +1876,14 @@ if (window.marked) {
       code({ text, lang }) {
         const language = ((lang || '').match(/^[\w+-]+/) || [''])[0].toLowerCase();
         const langClass = language ? (' language-' + language) : '';
+        const rendered = renderHighlightedCode(text, language);
+        const highlightedAttrs = rendered.highlighted
+          ? ' hljs" data-highlighted="yes'
+          : '';
         return (
-          '<pre><code class="md-code-source' + langClass + '"' +
+          '<pre><code class="md-code-source' + langClass + highlightedAttrs + '"' +
             (language ? (' data-lang="' + language + '"') : '') +
-          '>' + escapeHtml(text) + '</code></pre>\n'
+          '>' + rendered.html + '</code></pre>\n'
         );
       },
       table(...args) {
@@ -1941,7 +1962,7 @@ function enhanceCiteFavicons(root) {
   });
 }
 
-/** Wrap fenced blocks with copy UI and syntax-highlight (skip mid-stream flicker). */
+/** Wrap fenced blocks with their persistent header and copy affordance. */
 function enhanceCodeBlocks(root) {
   if (!root) return;
   enhanceCiteFavicons(root);

@@ -48,4 +48,47 @@ mod tests {
         assert!(code_header.contains("top: 0;"));
         assert!(code_header.contains("z-index: 2;"));
     }
+
+    #[test]
+    fn streaming_code_blocks_render_and_highlight_before_completion() {
+        assert!(CHAT_JS.contains("function renderHighlightedCode(text, language)"));
+        assert!(
+            CHAT_JS.contains("window.hljs.highlight(source, { language, ignoreIllegals: true })")
+        );
+        assert!(CHAT_JS.contains("window.hljs.highlightAuto(source)"));
+        assert!(CHAT_JS.contains("data-highlighted=\"yes"));
+        assert!(!CHAT_JS.contains("highlight: !streaming"));
+    }
+
+    #[test]
+    fn chat_and_server_sidebars_use_the_same_width() {
+        const SIDEBAR_WIDTH: &str = "--sidebar-w: 17.75rem;";
+        assert!(CHAT_CSS.contains(SIDEBAR_WIDTH));
+        assert!(SETTINGS_HTML.contains(SIDEBAR_WIDTH));
+    }
+
+    #[test]
+    fn composer_scrim_tracks_the_combined_background_tone() {
+        let dark_background = CHAT_CSS
+            .split(".chat-main[data-background-tone=\"dark\"] {")
+            .nth(1)
+            .and_then(|css| css.split('}').next())
+            .expect("dark background tone styles should be embedded");
+        let composer_scrim = CHAT_CSS
+            .split(".chat-composer-dock::before {")
+            .nth(1)
+            .and_then(|css| css.split('}').next())
+            .expect("composer scrim styles should be embedded");
+
+        assert!(dark_background.contains("--chat-composer-scrim: oklch(5% 0.006 260);"));
+        assert!(composer_scrim.contains("var(--chat-composer-scrim)"));
+        assert!(!composer_scrim.contains("var(--color-paper)"));
+    }
+
+    #[test]
+    fn locked_chat_ui_labels_provider_state_as_unavailable() {
+        assert!(CHAT_JS.contains("network.inference_mode === 'locked'"));
+        assert!(CHAT_JS.contains("serverProviderName.textContent = 'Encrypted'"));
+        assert!(CHAT_JS.contains("serverChip.textContent = 'Locked'"));
+    }
 }

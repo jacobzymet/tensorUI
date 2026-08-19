@@ -1205,7 +1205,7 @@ function refreshLocalDataPane() {
   if (filesEl) {
     if (dataInfo) {
       filesEl.textContent = dataInfo.encryption_enabled
-        ? 'Chats, preferences, provider tokens, and skill contents are encrypted. Non-secret app configuration remains in config.toml.'
+        ? 'Chats, preferences, provider configuration and credentials, and skill contents are encrypted. Only non-sensitive boot configuration remains in config.toml.'
         : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Providers & appearance stay in config.toml.';
     } else {
       filesEl.textContent = '—';
@@ -1275,7 +1275,7 @@ function refreshEncryptionPane() {
   if (disableForm) disableForm.classList.add('is-hidden');
 
   if (!enabled) {
-    statusEl.textContent = 'Off — chats, settings, provider tokens, and skills are stored unencrypted on disk.';
+    statusEl.textContent = 'Off — chats, settings, provider configuration and credentials, and skills are stored unencrypted on disk.';
     enableEl.classList.remove('is-hidden');
     return;
   }
@@ -1286,7 +1286,7 @@ function refreshEncryptionPane() {
     return;
   }
 
-  statusEl.textContent = 'Unlocked — chats, settings, provider tokens, and skill contents are encrypted on disk.';
+  statusEl.textContent = 'Unlocked — chats, settings, provider configuration and credentials, and skill contents are encrypted on disk.';
   activeEl.classList.remove('is-hidden');
 }
 

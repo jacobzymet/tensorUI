@@ -1,4 +1,5 @@
 use std::{net::SocketAddr, path::PathBuf};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     config::Config,
@@ -7,13 +8,13 @@ use crate::{
     local_llm::LocalLlmManager,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, ProviderUpsertOptions,
-        RemoteModelOption, mask_token, normalize_provider_base, probe_provider_catalog,
-        probe_provider_health, split_openai_base,
+        ProvidersConfig, RemoteModelOption, mask_token, normalize_provider_base,
+        probe_provider_catalog, probe_provider_health, split_openai_base,
     },
     store::{self, StorageMode, StoreError},
 };
 
-type WarmTarget = (ApiStyle, String, String, bool);
+type WarmTarget = (ApiStyle, String, Zeroizing<String>, bool);
 
 #[derive(Debug)]
 pub struct App {
@@ -78,13 +79,22 @@ impl App {
         self.config.keep_ui_private();
         if self.encryption_enabled() {
             if let Some(key) = self.disk_key.as_ref() {
-                let tokens = self.provider_tokens_value();
-                store::save_provider_tokens(&self.data_dir(), &tokens, key)
+                let payload = self.provider_payload_value();
+                store::save_provider_tokens(&self.data_dir(), &payload, key)
                     .map_err(Self::map_store_err)?;
             }
             let mut public_config = self.config.clone();
-            for provider in &mut public_config.providers.items {
-                provider.token.clear();
+            if self.disk_key.is_some() {
+                // Provider names, URLs, topology, TLS policy, and credentials are all
+                // protected together. The plaintext config retains no provider metadata.
+                public_config.providers = ProvidersConfig::default();
+            } else {
+                // Legacy encrypted installs stored metadata in config.toml and only tokens
+                // in the encrypted payload. Preserve that metadata until the first verified
+                // unlock can atomically migrate it into the protected payload.
+                for provider in &mut public_config.providers.items {
+                    provider.token.clear();
+                }
             }
             public_config
                 .save(&self.config_path)
@@ -105,25 +115,25 @@ impl App {
         )
     }
 
-    fn provider_tokens_value(&self) -> serde_json::Value {
-        serde_json::Value::Object(
-            self.config
-                .providers
-                .items
-                .iter()
-                .map(|provider| {
-                    (
-                        provider.id.clone(),
-                        serde_json::Value::String(provider.token.clone()),
-                    )
-                })
-                .collect(),
-        )
+    fn provider_payload_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "version": 2,
+            "provider_config": self.config.providers,
+        })
     }
 
-    fn restore_provider_tokens(&mut self, value: &serde_json::Value) {
+    fn restore_provider_payload(&mut self, value: &serde_json::Value) -> Result<(), String> {
+        if let Some(config) = value.get("provider_config") {
+            let mut providers: ProvidersConfig = serde_json::from_value(config.clone())
+                .map_err(|error| format!("Invalid encrypted provider configuration: {error}"))?;
+            providers.migrate();
+            self.config.providers = providers;
+            return Ok(());
+        }
+
+        // Legacy v1 payload: encrypted token map plus plaintext provider metadata.
         let Some(tokens) = value.as_object() else {
-            return;
+            return Err("Invalid encrypted provider payload.".into());
         };
         for provider in &mut self.config.providers.items {
             // A non-empty in-memory value may be a credential recovered from a
@@ -135,6 +145,7 @@ impl App {
                 provider.token = token.to_string();
             }
         }
+        Ok(())
     }
 
     pub fn list_user_skills(&self) -> Result<Vec<crate::skills::UserSkill>, String> {
@@ -181,6 +192,9 @@ impl App {
     }
 
     pub fn remote_health_cached(&self) -> Option<ProviderHealth> {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return None;
+        }
         let remote = self.config.providers.active()?;
         let base = remote.base.trim();
         if base.is_empty() {
@@ -196,6 +210,9 @@ impl App {
         base: &str,
         token: &str,
     ) -> Option<ProviderHealth> {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return None;
+        }
         self.remote_health.peek(style, base.trim(), token.trim())
     }
 
@@ -222,6 +239,9 @@ impl App {
     }
 
     pub fn remote_caches_need_warm(&self) -> bool {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return false;
+        }
         for remote in &self.config.providers.items {
             let base = remote.base.trim();
             if base.is_empty() {
@@ -250,6 +270,9 @@ impl App {
     }
 
     pub fn provider_warm_targets(&self) -> (Vec<WarmTarget>, Vec<WarmTarget>) {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return (Vec::new(), Vec::new());
+        }
         let health_targets = self
             .config
             .providers
@@ -266,7 +289,7 @@ impl App {
                 (
                     remote.api_style,
                     remote.base.trim().to_string(),
-                    remote.token.trim().to_string(),
+                    Zeroizing::new(remote.token.trim().to_string()),
                     remote.allow_insecure_tls,
                 )
             })
@@ -287,7 +310,7 @@ impl App {
                 (
                     remote.api_style,
                     remote.base.trim().to_string(),
-                    remote.token.trim().to_string(),
+                    Zeroizing::new(remote.token.trim().to_string()),
                     remote.allow_insecure_tls,
                 )
             })
@@ -302,6 +325,9 @@ impl App {
     /// Merged model catalogs from every saved provider, stamped with provider badges.
     /// `None` means no provider has been probed yet.
     pub fn remote_model_catalog_peek(&self) -> Option<Vec<RemoteModelOption>> {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return None;
+        }
         let mut merged = Vec::new();
         let mut any_known = false;
         for provider in &self.config.providers.items {
@@ -337,6 +363,9 @@ impl App {
     }
 
     pub fn public_providers(&self) -> Vec<ProviderPublic> {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return Vec::new();
+        }
         let active_id = self
             .config
             .providers
@@ -671,21 +700,21 @@ impl App {
         let _ = store::load_chats(&root, Some(&key)).map_err(Self::map_store_err)?;
         let _ = store::load_preferences(&root, Some(&key)).map_err(Self::map_store_err)?;
 
-        let tokens = if store::provider_tokens_path(&root).is_file() {
+        let provider_payload = if store::provider_tokens_path(&root).is_file() {
             store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?
         } else if legacy_without_verifier {
             // Upgrade installs that enabled chat encryption before credentials
-            // were included: capture the still-plaintext tokens before scrubbing.
-            let tokens = self.provider_tokens_value();
-            store::save_provider_tokens(&root, &tokens, &key).map_err(Self::map_store_err)?;
-            tokens
+            // were included: capture the still-plaintext provider config before scrubbing.
+            let payload = self.provider_payload_value();
+            store::save_provider_tokens(&root, &payload, &key).map_err(Self::map_store_err)?;
+            payload
         } else {
             return Err(
-                "Encrypted provider credentials are missing. Restore provider-tokens.json from backup."
+                "Encrypted provider configuration is missing. Restore provider-tokens.json from backup."
                     .into(),
             );
         };
-        self.restore_provider_tokens(&tokens);
+        self.restore_provider_payload(&provider_payload)?;
 
         // Migrate legacy encrypted skill files into the atomic snapshot. Never
         // reinterpret a failed encrypted read as plaintext while encryption is on.
@@ -726,6 +755,18 @@ impl App {
 
     pub fn lock_disk_encryption(&mut self) {
         self.disk_key = None; // DiskKey zeroizes on drop
+        if self.encryption_enabled() {
+            for provider in &mut self.config.providers.items {
+                provider.id.zeroize();
+                provider.name.zeroize();
+                provider.base.zeroize();
+                provider.token.zeroize();
+            }
+            self.config.providers.active_provider_id.zeroize();
+            self.config.providers = ProvidersConfig::default();
+            self.remote_health.clear();
+            self.remote_catalog.clear();
+        }
     }
 
     pub fn enable_disk_encryption(
@@ -762,7 +803,7 @@ impl App {
         let snapshot = Snapshot {
             chats,
             preferences: prefs,
-            provider_tokens: self.provider_tokens_value(),
+            provider_tokens: self.provider_payload_value(),
             skills,
         };
         let record = encryption_transition::begin(&root, Operation::Enable, meta, &key, &snapshot)
@@ -782,8 +823,9 @@ impl App {
 
         let chats = store::load_chats(&root, Some(&key)).map_err(Self::map_store_err)?;
         let prefs = store::load_preferences(&root, Some(&key)).map_err(Self::map_store_err)?;
-        let tokens = store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?;
-        self.restore_provider_tokens(&tokens);
+        let provider_payload =
+            store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?;
+        self.restore_provider_payload(&provider_payload)?;
         let skills = crate::skills::SkillStore::new(&self.config_path, Some(&key), true)
             .list()
             .map_err(|error| error.to_string())?;
@@ -791,7 +833,7 @@ impl App {
         let snapshot = Snapshot {
             chats,
             preferences: prefs,
-            provider_tokens: tokens,
+            provider_tokens: provider_payload,
             skills,
         };
         let record = encryption_transition::begin(&root, Operation::Disable, meta, &key, &snapshot)
@@ -837,11 +879,9 @@ impl App {
                 Operation::Enable => {
                     // The authenticated transition remains until every encrypted target and
                     // its metadata are durable. Repeating these writes after a crash is safe.
-                    self.restore_provider_tokens(&snapshot.provider_tokens);
+                    self.restore_provider_payload(&snapshot.provider_tokens)?;
                     let mut public_config = self.config.clone();
-                    for provider in &mut public_config.providers.items {
-                        provider.token.clear();
-                    }
+                    public_config.providers = ProvidersConfig::default();
                     public_config
                         .save(&self.config_path)
                         .map_err(|error| format!("could not secure config: {error:#}"))?;
@@ -869,7 +909,7 @@ impl App {
                     crate::skills::SkillStore::new(&self.config_path, None, false)
                         .rewrite(&snapshot.skills)
                         .map_err(|error| error.to_string())?;
-                    self.restore_provider_tokens(&snapshot.provider_tokens);
+                    self.restore_provider_payload(&snapshot.provider_tokens)?;
                     self.config
                         .save(&self.config_path)
                         .map_err(|error| format!("could not save decrypted config: {error:#}"))?;
@@ -967,9 +1007,90 @@ mod tests {
 
         let plaintext = std::fs::read_to_string(config_path).unwrap();
         assert!(!plaintext.contains("secret-provider-token"));
-        let tokens =
+        let payload =
             store::load_provider_tokens(temp.path(), app.disk_key().expect("unlocked")).unwrap();
-        assert_eq!(tokens[&provider_id], "secret-provider-token");
+        assert_eq!(
+            payload["provider_config"]["providers"][0]["token"],
+            "secret-provider-token"
+        );
+        assert_eq!(
+            payload["provider_config"]["providers"][0]["id"],
+            provider_id
+        );
+        assert!(!plaintext.contains("Renamed"));
+        assert!(!plaintext.contains("example.com"));
+
+        let encrypted_payload =
+            crate::secure_fs::read_to_string(&store::provider_tokens_path(temp.path())).unwrap();
+        assert!(!encrypted_payload.contains("secret-provider-token"));
+        assert!(!encrypted_payload.contains("Renamed"));
+        assert!(!encrypted_payload.contains("example.com"));
+
+        app.lock_disk_encryption();
+        assert!(app.config.providers.items.is_empty());
+        assert!(app.public_providers().is_empty());
+        assert!(!app.remote_caches_need_warm());
+        assert_eq!(app.provider_warm_targets(), (Vec::new(), Vec::new()));
+
+        app.unlock_disk_encryption(TEST_PASSPHRASE).unwrap();
+        let restored = &app.config.providers.items[0];
+        assert_eq!(restored.name, "Renamed");
+        assert_eq!(restored.base, "https://example.com/v1");
+        assert_eq!(restored.token, "secret-provider-token");
+    }
+
+    #[test]
+    fn legacy_encrypted_provider_metadata_migrates_only_after_verified_unlock() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let config_path = root.join("config.toml");
+        let mut app = App::new(Config::default(), config_path.clone()).unwrap();
+        app.create_provider(
+            "Legacy private provider",
+            "https://legacy.example/v1",
+            "legacy-secret-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        let provider_id = app.config.providers.items[0].id.clone();
+
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key(TEST_PASSPHRASE, &salt).unwrap();
+        let meta = crypto::meta_for_key(&key, salt).unwrap();
+        store::save_chats(root, serde_json::json!({}), Some(&key)).unwrap();
+        store::save_preferences(root, serde_json::json!({}), Some(&key)).unwrap();
+        store::save_provider_tokens(
+            root,
+            &serde_json::json!({ provider_id.clone(): "legacy-secret-token" }),
+            &key,
+        )
+        .unwrap();
+        crypto::save_meta(root, &meta).unwrap();
+        app.config.providers.items[0].token.clear();
+        app.config.save(&config_path).unwrap();
+        drop(app);
+
+        let config = Config::load(&config_path).unwrap();
+        let mut restarted = App::new(config, config_path.clone()).unwrap();
+        assert!(restarted.public_providers().is_empty());
+        assert!(!restarted.remote_caches_need_warm());
+
+        restarted.unlock_disk_encryption(TEST_PASSPHRASE).unwrap();
+        let provider = &restarted.config.providers.items[0];
+        assert_eq!(provider.name, "Legacy private provider");
+        assert_eq!(provider.base, "https://legacy.example/v1");
+        assert_eq!(provider.token, "legacy-secret-token");
+
+        let plaintext = crate::secure_fs::read_to_string(&config_path).unwrap();
+        assert!(!plaintext.contains("Legacy private provider"));
+        assert!(!plaintext.contains("legacy.example"));
+        let migrated = store::load_provider_tokens(root, restarted.disk_key().unwrap()).unwrap();
+        assert_eq!(
+            migrated["provider_config"]["providers"][0]["token"],
+            "legacy-secret-token"
+        );
     }
 
     #[test]
@@ -1001,7 +1122,7 @@ mod tests {
         let snapshot = Snapshot {
             chats: chats.clone(),
             preferences,
-            provider_tokens: app.provider_tokens_value(),
+            provider_tokens: app.provider_payload_value(),
             skills: vec![],
         };
         encryption_transition::begin(root, Operation::Enable, meta, &key, &snapshot).unwrap();

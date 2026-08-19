@@ -17,8 +17,8 @@
   pointer-events: none;
   background: linear-gradient(
     to top,
-    var(--color-paper) 12%,
-    color-mix(in oklch, var(--color-paper) 72%, transparent) 52%,
+    color-mix(in oklch, var(--chat-composer-scrim) 82%, transparent),
+    color-mix(in oklch, var(--chat-composer-scrim) 52%, transparent) 48%,
     transparent
   );
 }

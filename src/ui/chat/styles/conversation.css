@@ -1,4 +1,5 @@
 .chat-main {
+  --chat-composer-scrim: var(--color-paper);
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
@@ -41,10 +42,12 @@
 .chat-main[data-background-tone="dark"] {
   --chat-background-ink: oklch(98% 0.004 260);
   --chat-background-muted: oklch(82% 0.008 260);
+  --chat-composer-scrim: oklch(5% 0.006 260);
 }
 .chat-main[data-background-tone="light"] {
   --chat-background-ink: oklch(16% 0.01 260);
   --chat-background-muted: oklch(35% 0.012 260);
+  --chat-composer-scrim: oklch(96% 0.004 260);
 }
 .chat-main[data-background-tone] .empty-greeting,
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble,
