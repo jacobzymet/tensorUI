@@ -16,12 +16,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use zeroize::Zeroize;
 
 use crate::{
     agent::{self, AgentRequest},
     app::App,
     attachments::{self, ExtractRequest},
-    chat,
+    chat, encryption_transition,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
         apply_thinking_control, find_provider_for_base, normalize_openai_base,
@@ -1030,6 +1031,7 @@ struct DataInfo {
     browser_storage: bool,
     encryption_enabled: bool,
     encryption_unlocked: bool,
+    encryption_transition_pending: bool,
     data_dir: String,
     config_path: String,
     chats_path: String,
@@ -1072,6 +1074,7 @@ fn data_info_from_app(app: &App) -> DataInfo {
         browser_storage: app.storage_mode().is_browser(),
         encryption_enabled: app.encryption_enabled(),
         encryption_unlocked: app.encryption_unlocked(),
+        encryption_transition_pending: encryption_transition::exists(&root),
         data_dir: root.display().to_string(),
         config_path: app.config_path.display().to_string(),
         chats_path: store::chats_path(&root).display().to_string(),
@@ -1121,6 +1124,15 @@ struct PassphraseBody {
     passphrase: String,
     #[serde(default)]
     passphrase_confirm: Option<String>,
+}
+
+impl Drop for PassphraseBody {
+    fn drop(&mut self) {
+        self.passphrase.zeroize();
+        if let Some(confirm) = self.passphrase_confirm.as_mut() {
+            confirm.zeroize();
+        }
+    }
 }
 
 fn store_api_error(message: String) -> ApiError {

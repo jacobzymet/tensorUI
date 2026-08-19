@@ -8,12 +8,7 @@
 //! Not covered: pre-existing copies/backups, filenames and timestamps, OS memory
 //! dumps, malware in the same unlocked user session, or a forgotten passphrase.
 
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
@@ -26,10 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub const META_FILE: &str = "encryption.json";
-pub const MIN_PASSPHRASE_CHARS: usize = 16;
-pub const MAX_PASSPHRASE_CHARS: usize = 1024;
+use crate::secure_fs;
 
+pub const META_FILE: &str = "encryption.json";
 const SALT_LEN: usize = 32;
 const MIN_SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
@@ -39,6 +33,7 @@ const ENVELOPE_V1: u32 = 1;
 /// Envelope authenticated with a purpose string (AAD).
 const ENVELOPE_V2: u32 = 2;
 const META_VERSION: u32 = 2;
+const MAX_META_BYTES: u64 = 64 * 1024;
 
 /// Deliberately above the OWASP interactive Argon2id minimum.
 const KDF_MEMORY_KIB: u32 = 65_536;
@@ -52,6 +47,8 @@ pub const AAD_PREFERENCES: &[u8] = b"tensorui:v1:preferences";
 pub const AAD_PROVIDER_TOKENS: &[u8] = b"tensorui:v1:provider-tokens";
 pub const AAD_SKILL_INDEX: &[u8] = b"tensorui:v1:skill-index";
 pub const AAD_SKILL_CONTENT: &[u8] = b"tensorui:v1:skill-content";
+pub const AAD_SKILLS: &[u8] = b"tensorui:v1:skills";
+pub const AAD_ENCRYPTION_TRANSITION: &[u8] = b"tensorui:v1:encryption-transition";
 const AAD_VERIFIER: &[u8] = b"tensorui:v1:verifier";
 const VERIFIER_PLAINTEXT: &[u8] = b"tensorui-ok";
 
@@ -99,8 +96,8 @@ impl EncryptionMeta {
         let raw = B64
             .decode(self.salt.trim())
             .context("invalid encryption salt")?;
-        if raw.len() < MIN_SALT_LEN {
-            bail!("encryption salt is too short");
+        if !(MIN_SALT_LEN..=64).contains(&raw.len()) {
+            bail!("encryption salt has an invalid length");
         }
         Ok(raw)
     }
@@ -138,13 +135,15 @@ pub fn load_meta(root: &Path) -> Result<Option<EncryptionMeta>> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw =
-        fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))?;
+    let raw = secure_fs::read_limited_to_string(&path, MAX_META_BYTES)?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
     let meta: EncryptionMeta = serde_json::from_str(&raw)
         .with_context(|| format!("invalid encryption metadata at {}", path.display()))?;
+    if !matches!(meta.version, 1 | META_VERSION) {
+        bail!("unsupported encryption metadata version {}", meta.version);
+    }
     if meta.kdf != "argon2id" {
         bail!("unsupported key-derivation algorithm {:?}", meta.kdf);
     }
@@ -152,79 +151,18 @@ pub fn load_meta(root: &Path) -> Result<Option<EncryptionMeta>> {
 }
 
 pub fn save_meta(root: &Path, meta: &EncryptionMeta) -> Result<()> {
-    fs::create_dir_all(root).with_context(|| format!("could not create {}", root.display()))?;
+    secure_fs::ensure_private_dir(root)?;
     let path = meta_path(root);
     let value = serde_json::to_value(meta).context("could not serialize encryption metadata")?;
     atomic_write_json(&path, &value)
 }
 
 pub fn clear_meta(root: &Path) -> Result<()> {
-    let path = meta_path(root);
-    if path.exists() {
-        fs::remove_file(&path).with_context(|| format!("could not remove {}", path.display()))?;
-    }
-    Ok(())
+    secure_fs::remove_file(&meta_path(root))
 }
 
 fn atomic_write_json(path: &Path, value: &Value) -> Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
-    let file_name = path
-        .file_name()
-        .context("path has no file name")?
-        .to_string_lossy();
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
-
-    let result = (|| -> Result<()> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .with_context(|| format!("could not create {}", temporary.display()))?;
-        let raw = serde_json::to_vec_pretty(value).context("could not serialize JSON")?;
-        file.write_all(&raw)
-            .with_context(|| format!("could not write {}", temporary.display()))?;
-        file.write_all(b"\n").ok();
-        file.sync_all()
-            .with_context(|| format!("could not flush {}", temporary.display()))?;
-        drop(file);
-        replace_file(&temporary, path)
-    })();
-
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
-}
-
-fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        match fs::rename(temporary, destination) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                fs::remove_file(destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))?;
-                fs::rename(temporary, destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))
-            }
-            Err(error) => {
-                Err(error).with_context(|| format!("could not replace {}", destination.display()))
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        fs::rename(temporary, destination)
-            .with_context(|| format!("could not replace {}", destination.display()))
-    }
+    secure_fs::atomic_write_json(path, value)
 }
 
 pub fn random_salt() -> Result<[u8; SALT_LEN]> {
@@ -264,11 +202,17 @@ fn derive_key_with_params(
     if salt.len() < MIN_SALT_LEN {
         bail!("encryption salt is too short");
     }
-    // Reject obviously broken / DoS-y parameters from a tampered meta file.
-    if !(8_192..=1_048_576).contains(&memory_kib)
-        || !(1..=10).contains(&iterations)
-        || !(1..=4).contains(&parallelism)
-    {
+    // Only accept profiles emitted by this application. Broad attacker-controlled
+    // ranges let a tampered metadata file turn unlock into a CPU/RAM denial of service.
+    let current =
+        (memory_kib, iterations, parallelism) == (KDF_MEMORY_KIB, KDF_ITERATIONS, KDF_PARALLELISM);
+    let legacy = (memory_kib, iterations, parallelism)
+        == (
+            LEGACY_KDF_MEMORY_KIB,
+            LEGACY_KDF_ITERATIONS,
+            KDF_PARALLELISM,
+        );
+    if !current && !legacy {
         bail!("encryption metadata has unsupported Argon2 parameters");
     }
     let params = Params::new(memory_kib, iterations, parallelism, Some(KEY_LEN))
@@ -282,12 +226,8 @@ fn derive_key_with_params(
 }
 
 pub fn validate_passphrase(passphrase: &str) -> Result<()> {
-    let chars = passphrase.chars().count();
-    if chars < MIN_PASSPHRASE_CHARS {
-        bail!("Passphrase must be at least {MIN_PASSPHRASE_CHARS} characters.");
-    }
-    if chars > MAX_PASSPHRASE_CHARS {
-        bail!("Passphrase must be at most {MAX_PASSPHRASE_CHARS} characters.");
+    if passphrase.is_empty() {
+        bail!("Passphrase must not be empty.");
     }
     if passphrase.contains('\0') {
         bail!("Passphrase must not contain null characters.");
@@ -472,8 +412,17 @@ mod tests {
 
     #[test]
     fn passphrase_validation() {
-        assert!(validate_passphrase("short").is_err());
+        assert!(validate_passphrase("").is_err());
+        assert!(validate_passphrase("short").is_ok());
         assert!(validate_passphrase("a long enough passphrase").is_ok());
-        assert!(validate_passphrase(&"x".repeat(MAX_PASSPHRASE_CHARS + 1)).is_err());
+        assert!(validate_passphrase(&"x".repeat(2048)).is_ok());
+        assert!(validate_passphrase("contains\0null").is_err());
+    }
+
+    #[test]
+    fn rejects_attacker_controlled_kdf_costs() {
+        let salt = random_salt().unwrap();
+        assert!(derive_key_with_params("passphrase", &salt, 1_048_576, 10, 4).is_err());
+        assert!(derive_key_with_params("passphrase", &salt, KDF_MEMORY_KIB, 10, 1).is_err());
     }
 }

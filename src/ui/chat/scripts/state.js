@@ -111,6 +111,10 @@ const selectionReplyBar = document.getElementById('selectionReplyBar');
 const btnSelectionReply = document.getElementById('btnSelectionReply');
 const mentionMenu = document.getElementById('mentionMenu');
 const settingsModal = document.getElementById('settingsModal');
+const encryptionIndicator = document.getElementById('encryptionIndicator');
+const encryptionIndicatorLabel = document.getElementById('encryptionIndicatorLabel');
+const encryptionIndicatorDetail = document.getElementById('encryptionIndicatorDetail');
+const sidebarEncryptionBadge = document.getElementById('sidebarEncryptionBadge');
 const projectModal = document.getElementById('projectModal');
 const projectsView = document.getElementById('projectsView');
 const projectsGrid = document.getElementById('projectsGrid');
@@ -1229,6 +1233,52 @@ function refreshLocalDataPane() {
       : 'Off: chats and settings are saved under the data folder above.';
   }
   refreshEncryptionPane();
+  refreshEncryptionIndicator();
+}
+
+function refreshEncryptionIndicator() {
+  if (!encryptionIndicator || !encryptionIndicatorLabel || !encryptionIndicatorDetail) return;
+  const enabled = !!dataInfo?.encryption_enabled;
+  encryptionIndicator.classList.toggle('is-hidden', !enabled);
+  sidebarEncryptionBadge?.classList.toggle('is-hidden', !enabled);
+  encryptionIndicator.classList.remove('is-locked', 'is-recovery', 'is-browser');
+  sidebarEncryptionBadge?.classList.remove('is-locked', 'is-recovery', 'is-browser');
+  const expandSidebar = document.getElementById('btnExpandSidebar');
+  if (!enabled) {
+    if (expandSidebar) delete expandSidebar.dataset.encryptionDetail;
+    if (typeof syncSidebarToggleUi === 'function') syncSidebarToggleUi();
+    return;
+  }
+
+  let label = 'Encrypted';
+  let shortDetail = 'At rest';
+  let detail = 'Encrypted at rest · unlocked for this session';
+  if (dataInfo.encryption_transition_pending) {
+    label = 'Recovery';
+    shortDetail = 'Action needed';
+    detail = 'Encryption recovery needed · enter your passphrase to finish safely';
+    encryptionIndicator.classList.add('is-recovery');
+    sidebarEncryptionBadge?.classList.add('is-recovery');
+  } else if (browserStorage) {
+    label = 'Disk encrypted';
+    shortDetail = 'Disk only';
+    detail = 'Disk encryption is on · browser localStorage is not covered';
+    encryptionIndicator.classList.add('is-browser');
+    sidebarEncryptionBadge?.classList.add('is-browser');
+  } else if (!dataInfo.encryption_unlocked) {
+    label = 'Locked';
+    shortDetail = 'Session locked';
+    detail = 'Encrypted at rest · locked for this session';
+    encryptionIndicator.classList.add('is-locked');
+    sidebarEncryptionBadge?.classList.add('is-locked');
+  }
+  encryptionIndicatorLabel.textContent = label;
+  encryptionIndicatorDetail.textContent = shortDetail;
+  encryptionIndicator.setAttribute('aria-label', detail + '. Open encryption settings');
+  encryptionIndicator.title = detail + ' — open encryption settings';
+  if (sidebarEncryptionBadge) sidebarEncryptionBadge.title = detail;
+  if (expandSidebar) expandSidebar.dataset.encryptionDetail = detail;
+  if (typeof syncSidebarToggleUi === 'function') syncSidebarToggleUi();
 }
 
 function refreshEncryptionPane() {
@@ -1386,6 +1436,15 @@ function setUnlockModalError(message) {
   el.classList.toggle('is-hidden', !message);
 }
 
+function focusUnlockPassphrase() {
+  const modal = document.getElementById('unlockModal');
+  const input = document.getElementById('unlockModalPassphrase');
+  if (!modal || !input || modal.classList.contains('is-hidden')) return;
+  requestAnimationFrame(() => {
+    if (!modal.classList.contains('is-hidden')) input.focus({ preventScroll: true });
+  });
+}
+
 function promptUnlockSession() {
   const modal = document.getElementById('unlockModal');
   if (!modal) return;
@@ -1394,7 +1453,7 @@ function promptUnlockSession() {
   const input = document.getElementById('unlockModalPassphrase');
   if (input) input.value = '';
   openBackdrop(modal);
-  queueMicrotask(() => input?.focus());
+  focusUnlockPassphrase();
 }
 
 function hideUnlockSession() {

@@ -553,7 +553,7 @@ function updateServerChip(data) {
   const connected = !!(remoteSelected?.ready || remoteOk);
   serverReady = connected;
 
-  serverChip.className = 'status-chip status-' + (
+  serverChip.className = 'status-chip sidebar-server-status status-' + (
     connected ? 'ready' : (remoteChecking ? 'checking' : (!network.remote_saved ? 'stopped' : 'failed'))
   );
   serverChip.textContent = connected
@@ -1857,8 +1857,10 @@ function syncSidebarToggleUi() {
   }
   if (btnExpandSidebar) {
     btnExpandSidebar.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btnExpandSidebar.setAttribute('aria-label', 'Show sidebar');
-    btnExpandSidebar.title = 'Show sidebar';
+    const encryptionDetail = btnExpandSidebar.dataset.encryptionDetail;
+    const label = 'Show sidebar' + (encryptionDetail ? ' · ' + encryptionDetail : '');
+    btnExpandSidebar.setAttribute('aria-label', label);
+    btnExpandSidebar.title = label;
   }
 }
 
@@ -2104,6 +2106,11 @@ searchModal?.addEventListener('click', (event) => {
   if (event.target === searchModal) closeSearchModal();
 });
 document.getElementById('btnSettings').addEventListener('click', openSettings);
+encryptionIndicator?.addEventListener('click', () => {
+  openSettings();
+  showSettingsPane('data');
+  document.getElementById('settingsEncryptionSection')?.scrollIntoView({ block: 'start' });
+});
 document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
 document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
 document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
@@ -2322,6 +2329,33 @@ document.getElementById('settingBrowserStorage')?.addEventListener('change', asy
     toggle.disabled = false;
   }
 });
+
+function syncEncryptionPassphraseWarning() {
+  const passphraseInput = document.getElementById('encryptionPassphrase');
+  const confirmInput = document.getElementById('encryptionPassphraseConfirm');
+  const warning = document.getElementById('encryptionPassphraseWarning');
+  if (!passphraseInput || !confirmInput || !warning) return;
+
+  const passphrase = passphraseInput.value;
+  const confirm = confirmInput.value;
+  const length = Array.from(passphrase).length;
+  const messages = [];
+  if (length > 0 && length < 16) {
+    messages.push('This passphrase is short (' + length + ' characters). 16 or more is recommended, but you can continue.');
+  } else if (length > 1024) {
+    messages.push('This passphrase is unusually long (' + length + ' characters). It is allowed, but may be difficult to enter reliably.');
+  }
+  if (confirm && passphrase !== confirm) {
+    messages.push('The confirmation does not match.');
+  }
+
+  warning.textContent = messages.join(' ');
+  warning.classList.toggle('is-hidden', messages.length === 0);
+}
+
+['encryptionPassphrase', 'encryptionPassphraseConfirm'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('input', syncEncryptionPassphraseWarning);
+});
 document.getElementById('btnEnableEncryption')?.addEventListener('click', async () => {
   const passphrase = document.getElementById('encryptionPassphrase')?.value || '';
   const confirm = document.getElementById('encryptionPassphraseConfirm')?.value || '';
@@ -2334,6 +2368,7 @@ document.getElementById('btnEnableEncryption')?.addEventListener('click', async 
     });
     document.getElementById('encryptionPassphrase').value = '';
     document.getElementById('encryptionPassphraseConfirm').value = '';
+    syncEncryptionPassphraseWarning();
   } catch (error) {
     alert(error.message || 'Could not enable encryption');
   } finally {
@@ -2355,14 +2390,27 @@ document.getElementById('encryptionUnlockPassphrase')?.addEventListener('keydown
     document.getElementById('btnUnlockEncryption')?.click();
   }
 });
+function setUnlockModalLoading(loading) {
+  const btn = document.getElementById('btnUnlockModalSubmit');
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.classList.toggle('is-loading', loading);
+  btn.querySelector('.unlock-button-label')?.classList.toggle('is-hidden', loading);
+  btn.querySelector('.button-loading-spinner')?.classList.toggle('is-hidden', !loading);
+  btn.toggleAttribute('aria-busy', loading);
+  btn.setAttribute('aria-label', loading ? 'Unlocking encrypted data' : 'Unlock');
+}
 document.getElementById('btnUnlockModalSubmit')?.addEventListener('click', async () => {
   const passphrase = document.getElementById('unlockModalPassphrase')?.value || '';
   const btn = document.getElementById('btnUnlockModalSubmit');
+  setUnlockModalLoading(true);
   try {
     await unlockDiskEncryption(passphrase, btn);
   } catch (error) {
     setUnlockModalError(error.message || 'Could not unlock');
     document.getElementById('unlockModalPassphrase')?.focus();
+  } finally {
+    setUnlockModalLoading(false);
   }
 });
 document.getElementById('unlockModalPassphrase')?.addEventListener('keydown', (event) => {
@@ -2791,6 +2839,9 @@ btnUpdateDismiss?.addEventListener('click', () => {
   syncResearchControls();
   renderSidebar();
   applyLocationRoute();
+  // Route rendering focuses the composer. When encrypted data is locked, put
+  // focus back in the blocking unlock field after that startup work completes.
+  if (diskEncryptionLocked()) focusUnlockPassphrase();
   window.addEventListener('popstate', () => {
     applyLocationRoute();
   });

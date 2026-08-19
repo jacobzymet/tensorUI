@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -7,12 +6,13 @@ use std::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::crypto;
+use crate::{crypto, secure_fs};
 
 const MAX_SKILLS: usize = 32;
 const MAX_NAME_LEN: usize = 64;
 const MAX_DESCRIPTION_LEN: usize = 280;
 const MAX_CONTENT_BYTES: usize = 64 * 1024;
+const SNAPSHOT_FILE: &str = "skills.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UserSkill {
@@ -86,10 +86,27 @@ impl SkillStore {
     }
 
     pub fn list(&self) -> Result<Vec<UserSkill>> {
+        let snapshot = self.snapshot_path();
+        if std::fs::symlink_metadata(&snapshot).is_ok() {
+            let raw = secure_fs::read_to_string(&snapshot)?;
+            let value: serde_json::Value = serde_json::from_str(&raw)
+                .with_context(|| format!("invalid skill store {}", snapshot.display()))?;
+            let value = self.decode(value, crypto::AAD_SKILLS)?;
+            return serde_json::from_value(value)
+                .with_context(|| format!("invalid skill store {}", snapshot.display()));
+        }
+
+        self.list_legacy()
+    }
+
+    fn list_legacy(&self) -> Result<Vec<UserSkill>> {
         let index = self.load_index()?;
         let mut out = Vec::with_capacity(index.skills.len());
         for meta in index.skills {
-            let content = self.read_content(&meta.id).unwrap_or_default();
+            if !is_safe_skill_id(&meta.id) {
+                bail!("Invalid skill id in local store.");
+            }
+            let content = self.read_content(&meta.id)?;
             out.push(UserSkill {
                 id: meta.id,
                 name: meta.name,
@@ -109,8 +126,8 @@ impl SkillStore {
     }
 
     pub fn create(&self, upsert: SkillUpsert) -> Result<UserSkill> {
-        let mut index = self.load_index()?;
-        if index.skills.len() >= MAX_SKILLS {
+        let mut skills = self.list()?;
+        if skills.len() >= MAX_SKILLS {
             bail!("At most {MAX_SKILLS} skills are allowed.");
         }
         let now = unix_now();
@@ -128,69 +145,46 @@ impl SkillStore {
             created_at: now,
             updated_at: now,
         };
-        self.write_content(&id, &content)?;
-        index.skills.push(SkillMeta {
-            id,
-            name,
-            description,
-            enabled: skill.enabled,
-            source_filename: skill.source_filename.clone(),
-            created_at: now,
-            updated_at: now,
-        });
-        self.save_index(&index)?;
+        skills.push(skill.clone());
+        self.save_all(&skills)?;
         Ok(skill)
     }
 
     pub fn update(&self, id: &str, upsert: SkillUpsert) -> Result<UserSkill> {
-        let mut index = self.load_index()?;
-        let meta = index
-            .skills
+        let mut skills = self.list()?;
+        let skill = skills
             .iter_mut()
-            .find(|s| s.id == id)
+            .find(|skill| skill.id == id)
             .with_context(|| format!("Unknown skill id: {id}"))?;
         if let Some(name) = upsert.name.as_deref() {
-            meta.name = sanitize_name(name)?;
+            skill.name = sanitize_name(name)?;
         }
         if let Some(description) = upsert.description.as_deref() {
-            meta.description = sanitize_description(description)?;
+            skill.description = sanitize_description(description)?;
         }
         if let Some(enabled) = upsert.enabled {
-            meta.enabled = enabled;
+            skill.enabled = enabled;
         }
         if upsert.source_filename.is_some() {
-            meta.source_filename = sanitize_filename(upsert.source_filename);
+            skill.source_filename = sanitize_filename(upsert.source_filename);
         }
-        let mut content = self.read_content(id).unwrap_or_default();
         if let Some(raw) = upsert.content.as_deref() {
-            content = sanitize_content(raw)?;
-            self.write_content(id, &content)?;
+            skill.content = sanitize_content(raw)?;
         }
-        meta.updated_at = unix_now();
-        let skill = UserSkill {
-            id: meta.id.clone(),
-            name: meta.name.clone(),
-            description: meta.description.clone(),
-            enabled: meta.enabled,
-            content,
-            source_filename: meta.source_filename.clone(),
-            created_at: meta.created_at,
-            updated_at: meta.updated_at,
-        };
-        self.save_index(&index)?;
-        Ok(skill)
+        skill.updated_at = unix_now();
+        let updated = skill.clone();
+        self.save_all(&skills)?;
+        Ok(updated)
     }
 
     pub fn delete(&self, id: &str) -> Result<()> {
-        let mut index = self.load_index()?;
-        let before = index.skills.len();
-        index.skills.retain(|s| s.id != id);
-        if index.skills.len() == before {
+        let mut skills = self.list()?;
+        let before = skills.len();
+        skills.retain(|skill| skill.id != id);
+        if skills.len() == before {
             bail!("Unknown skill id: {id}");
         }
-        self.save_index(&index)?;
-        let _ = fs::remove_file(self.content_path(id));
-        Ok(())
+        self.save_all(&skills)
     }
 
     pub fn import_markdown(&self, filename: Option<&str>, raw: &str) -> Result<UserSkill> {
@@ -217,23 +211,12 @@ impl SkillStore {
         if !path.is_file() {
             return Ok(SkillIndex::default());
         }
-        let raw = fs::read_to_string(&path)
-            .with_context(|| format!("could not read {}", path.display()))?;
+        let raw = secure_fs::read_to_string(&path)?;
         let value: serde_json::Value = serde_json::from_str(&raw)
             .with_context(|| format!("invalid skill index {}", path.display()))?;
         let value = self.decode(value, crypto::AAD_SKILL_INDEX)?;
         serde_json::from_value(value)
             .with_context(|| format!("invalid skill index {}", path.display()))
-    }
-
-    fn save_index(&self, index: &SkillIndex) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("could not create {}", self.root.display()))?;
-        let path = self.index_path();
-        let value = serde_json::to_value(index).context("serialize skill index")?;
-        let value = self.encode(&value, crypto::AAD_SKILL_INDEX)?;
-        let raw = serde_json::to_string_pretty(&value).context("serialize skill index")?;
-        fs::write(&path, raw).with_context(|| format!("could not write {}", path.display()))
     }
 
     fn index_path(&self) -> PathBuf {
@@ -244,10 +227,13 @@ impl SkillStore {
         self.root.join(format!("{id}.md"))
     }
 
+    fn snapshot_path(&self) -> PathBuf {
+        self.root.join(SNAPSHOT_FILE)
+    }
+
     fn read_content(&self, id: &str) -> Result<String> {
         let path = self.content_path(id);
-        let raw = fs::read_to_string(&path)
-            .with_context(|| format!("could not read {}", path.display()))?;
+        let raw = secure_fs::read_to_string(&path)?;
         if !self.encrypted {
             return Ok(raw);
         }
@@ -258,20 +244,6 @@ impl SkillStore {
             .as_str()
             .map(str::to_string)
             .context("decrypted skill content is not a string")
-    }
-
-    fn write_content(&self, id: &str, content: &str) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("could not create {}", self.root.display()))?;
-        let path = self.content_path(id);
-        let raw = if self.encrypted {
-            let aad = skill_content_aad(id);
-            let value = self.encode(&serde_json::Value::String(content.into()), &aad)?;
-            serde_json::to_string_pretty(&value).context("serialize encrypted skill")?
-        } else {
-            content.to_string()
-        };
-        fs::write(&path, raw).with_context(|| format!("could not write {}", path.display()))
     }
 
     fn encode(&self, value: &serde_json::Value, aad: &[u8]) -> Result<serde_json::Value> {
@@ -297,23 +269,35 @@ impl SkillStore {
     }
 
     pub fn rewrite(&self, skills: &[UserSkill]) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("could not create {}", self.root.display()))?;
-        let mut index = SkillIndex::default();
-        for skill in skills {
-            self.write_content(&skill.id, &skill.content)?;
-            index.skills.push(SkillMeta {
-                id: skill.id.clone(),
-                name: skill.name.clone(),
-                description: skill.description.clone(),
-                enabled: skill.enabled,
-                source_filename: skill.source_filename.clone(),
-                created_at: skill.created_at,
-                updated_at: skill.updated_at,
-            });
-        }
-        self.save_index(&index)
+        self.save_all(skills)
     }
+
+    fn save_all(&self, skills: &[UserSkill]) -> Result<()> {
+        if skills.len() > MAX_SKILLS {
+            bail!("At most {MAX_SKILLS} skills are allowed.");
+        }
+        secure_fs::ensure_private_dir(&self.root)?;
+        let value = serde_json::to_value(skills).context("serialize skill store")?;
+        let value = self.encode(&value, crypto::AAD_SKILLS)?;
+        secure_fs::atomic_write_json(&self.snapshot_path(), &value)?;
+        self.remove_legacy_files(skills)
+    }
+
+    fn remove_legacy_files(&self, skills: &[UserSkill]) -> Result<()> {
+        secure_fs::remove_file(&self.index_path())?;
+        for skill in skills {
+            if is_safe_skill_id(&skill.id) {
+                secure_fs::remove_file(&self.content_path(&skill.id))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_safe_skill_id(id: &str) -> bool {
+    id.strip_prefix("sk-").is_some_and(|suffix| {
+        suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 fn skill_content_aad(id: &str) -> Vec<u8> {
@@ -560,11 +544,10 @@ mod tests {
             })
             .unwrap();
 
-        let index = fs::read_to_string(store.index_path()).unwrap();
-        let content = fs::read_to_string(store.content_path(&created.id)).unwrap();
-        assert!(!index.contains("Private skill"));
-        assert!(!index.contains("Sensitive description"));
-        assert!(!content.contains("secret instructions"));
+        let snapshot = std::fs::read_to_string(store.snapshot_path()).unwrap();
+        assert!(!snapshot.contains("Private skill"));
+        assert!(!snapshot.contains("Sensitive description"));
+        assert!(!snapshot.contains("secret instructions"));
         assert_eq!(store.list().unwrap()[0], created);
     }
 }

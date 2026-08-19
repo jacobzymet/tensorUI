@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use crate::{
     config::Config,
     crypto,
+    encryption_transition::{self, Operation, Snapshot},
     local_llm::LocalLlmManager,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, ProviderUpsertOptions,
@@ -23,16 +24,25 @@ pub struct App {
     pub remote_catalog: CatalogCache,
     /// Session key for disk encryption at rest. Cleared on lock / process exit.
     disk_key: Option<crypto::DiskKey>,
+    /// Prevent concurrent processes from interleaving protected-data writes.
+    _data_lock: crate::secure_fs::DataLock,
     pub local_llm: LocalLlmManager,
 }
 
 impl App {
-    pub fn new(mut config: Config, config_path: PathBuf) -> Self {
+    pub fn new(mut config: Config, config_path: PathBuf) -> Result<Self, String> {
         let before = config.clone();
         config.providers.migrate();
         config.ui.normalize_fonts();
         config.keep_ui_private();
         let changed = config != before;
+        let data_root = config_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(store::data_dir);
+        let data_lock = crate::secure_fs::DataLock::acquire(&data_root)
+            .map_err(|error| format!("Could not lock local data: {error:#}"))?;
         let mut app = Self {
             config,
             config_path,
@@ -40,13 +50,14 @@ impl App {
             remote_health: HealthCache::default(),
             remote_catalog: CatalogCache::default(),
             disk_key: None,
+            _data_lock: data_lock,
             local_llm: LocalLlmManager::default(),
         };
         // Also sanitizes plaintext credentials left by older provider save paths.
         if changed || app.encryption_enabled() {
-            app.persist_config();
+            app.try_persist_config()?;
         }
-        app
+        Ok(app)
     }
 
     pub fn set_listen_addr(&mut self, addr: SocketAddr) {
@@ -615,8 +626,8 @@ impl App {
             // Reject if both files are plaintext — that used to accept any passphrase.
             let chats_path = store::chats_path(root);
             let prefs_path = store::preferences_path(root);
-            let chats_raw = std::fs::read_to_string(&chats_path).ok();
-            let prefs_raw = std::fs::read_to_string(&prefs_path).ok();
+            let chats_raw = crate::secure_fs::read_to_string(&chats_path).ok();
+            let prefs_raw = crate::secure_fs::read_to_string(&prefs_path).ok();
             let chats_env = chats_raw
                 .as_deref()
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
@@ -647,47 +658,69 @@ impl App {
 
     pub fn unlock_disk_encryption(&mut self, passphrase: &str) -> Result<(), String> {
         let root = self.data_dir();
+        if self.resume_pending_encryption_transition(passphrase, None)? {
+            return Ok(());
+        }
         let mut meta = crypto::load_meta(&root)
             .map_err(|error| format!("{error:#}"))?
             .ok_or_else(|| "Disk encryption is not enabled.".to_string())?;
+        let legacy_without_verifier = meta.verifier.is_none();
         let key = Self::derive_and_verify_key(passphrase, &meta, &root)?;
 
         // Confirm payloads decrypt (also rejects plaintext leftovers).
         let _ = store::load_chats(&root, Some(&key)).map_err(Self::map_store_err)?;
         let _ = store::load_preferences(&root, Some(&key)).map_err(Self::map_store_err)?;
 
-        // Migrate legacy meta to include a key verifier (and bump version).
-        if meta.verifier.is_none()
-            && let Ok(verifier) = crypto::make_verifier(&key)
-        {
-            meta.version = 2;
-            meta.verifier = Some(verifier);
-            let _ = crypto::save_meta(&root, &meta);
-        }
-
         let tokens = if store::provider_tokens_path(&root).is_file() {
             store::load_provider_tokens(&root, &key).map_err(Self::map_store_err)?
-        } else {
+        } else if legacy_without_verifier {
             // Upgrade installs that enabled chat encryption before credentials
             // were included: capture the still-plaintext tokens before scrubbing.
             let tokens = self.provider_tokens_value();
             store::save_provider_tokens(&root, &tokens, &key).map_err(Self::map_store_err)?;
             tokens
+        } else {
+            return Err(
+                "Encrypted provider credentials are missing. Restore provider-tokens.json from backup."
+                    .into(),
+            );
         };
         self.restore_provider_tokens(&tokens);
 
-        // Upgrade installs whose encryption predates encrypted skill storage.
+        // Migrate legacy encrypted skill files into the atomic snapshot. Never
+        // reinterpret a failed encrypted read as plaintext while encryption is on.
         let encrypted_skills = crate::skills::SkillStore::new(&self.config_path, Some(&key), true);
-        if encrypted_skills.list().is_err() {
-            let plaintext_skills = crate::skills::SkillStore::new(&self.config_path, None, false)
-                .list()
-                .map_err(|error| error.to_string())?;
-            encrypted_skills
-                .rewrite(&plaintext_skills)
-                .map_err(|error| error.to_string())?;
+        let skills = match encrypted_skills.list() {
+            Ok(skills) => skills,
+            Err(_) if legacy_without_verifier => {
+                crate::skills::SkillStore::new(&self.config_path, None, false)
+                    .list()
+                    .map_err(|error| format!("Could not migrate legacy skills: {error:#}"))?
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Could not authenticate encrypted skills: {error:#}"
+                ));
+            }
+        };
+        encrypted_skills
+            .rewrite(&skills)
+            .map_err(|error| error.to_string())?;
+        // Commit the legacy metadata upgrade last. If an earlier migration is
+        // interrupted, the old marker remains and the entire migration can retry.
+        if meta.verifier.is_none() {
+            let verifier = crypto::make_verifier(&key)
+                .map_err(|error| format!("Could not create key verifier: {error:#}"))?;
+            meta.version = 2;
+            meta.verifier = Some(verifier);
+            crypto::save_meta(&root, &meta)
+                .map_err(|error| format!("Could not upgrade encryption metadata: {error:#}"))?;
         }
         self.disk_key = Some(key);
-        self.persist_config();
+        if let Err(error) = self.try_persist_config() {
+            self.disk_key = None;
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -711,6 +744,9 @@ impl App {
         }
         crypto::validate_passphrase(passphrase).map_err(|error| format!("{error:#}"))?;
         let root = self.data_dir();
+        if self.resume_pending_encryption_transition(passphrase, Some(Operation::Enable))? {
+            return Ok(());
+        }
         if store::encryption_enabled(&root) {
             return Err("Disk encryption is already enabled.".into());
         }
@@ -723,24 +759,22 @@ impl App {
         let salt = crypto::random_salt().map_err(|error| format!("{error:#}"))?;
         let key = crypto::derive_key(passphrase, &salt).map_err(|error| format!("{error:#}"))?;
         let meta = crypto::meta_for_key(&key, salt).map_err(|error| format!("{error:#}"))?;
-
-        // Encrypt payloads first, then write meta last. A crash mid-way must not
-        // leave encryption.json claiming "on" while files are still plaintext.
-        store::save_chats(&root, chats, Some(&key)).map_err(Self::map_store_err)?;
-        store::save_preferences(&root, prefs, Some(&key)).map_err(Self::map_store_err)?;
-        store::save_provider_tokens(&root, &self.provider_tokens_value(), &key)
-            .map_err(Self::map_store_err)?;
-        crate::skills::SkillStore::new(&self.config_path, Some(&key), true)
-            .rewrite(&skills)
-            .map_err(|error| error.to_string())?;
-        crypto::save_meta(&root, &meta).map_err(|error| format!("{error:#}"))?;
-        self.disk_key = Some(key);
-        self.persist_config();
-        Ok(())
+        let snapshot = Snapshot {
+            chats,
+            preferences: prefs,
+            provider_tokens: self.provider_tokens_value(),
+            skills,
+        };
+        let record = encryption_transition::begin(&root, Operation::Enable, meta, &key, &snapshot)
+            .map_err(|error| format!("Could not stage encryption safely: {error:#}"))?;
+        self.resume_encryption_transition(&record, snapshot, key)
     }
 
     pub fn disable_disk_encryption(&mut self, passphrase: &str) -> Result<(), String> {
         let root = self.data_dir();
+        if self.resume_pending_encryption_transition(passphrase, Some(Operation::Disable))? {
+            return Ok(());
+        }
         let meta = crypto::load_meta(&root)
             .map_err(|error| format!("{error:#}"))?
             .ok_or_else(|| "Disk encryption is not enabled.".to_string())?;
@@ -754,18 +788,106 @@ impl App {
             .list()
             .map_err(|error| error.to_string())?;
 
-        // Write plaintext first while meta still exists (dedicated helpers), then
-        // remove meta. Avoids a window of encrypted files with no meta.
-        store::save_chats_plaintext_for_disable(&root, chats).map_err(Self::map_store_err)?;
-        store::save_preferences_plaintext_for_disable(&root, prefs).map_err(Self::map_store_err)?;
-        crate::skills::SkillStore::new(&self.config_path, None, false)
-            .rewrite(&skills)
-            .map_err(|error| error.to_string())?;
-        store::clear_provider_tokens(&root).map_err(|error| format!("{error:#}"))?;
-        crypto::clear_meta(&root).map_err(|error| format!("{error:#}"))?;
-        self.disk_key = None;
-        self.try_persist_config()?;
-        Ok(())
+        let snapshot = Snapshot {
+            chats,
+            preferences: prefs,
+            provider_tokens: tokens,
+            skills,
+        };
+        let record = encryption_transition::begin(&root, Operation::Disable, meta, &key, &snapshot)
+            .map_err(|error| format!("Could not stage decryption safely: {error:#}"))?;
+        self.resume_encryption_transition(&record, snapshot, key)
+    }
+
+    fn resume_pending_encryption_transition(
+        &mut self,
+        passphrase: &str,
+        expected: Option<Operation>,
+    ) -> Result<bool, String> {
+        let root = self.data_dir();
+        let Some(record) = encryption_transition::load(&root)
+            .map_err(|error| format!("Could not recover encryption transition: {error:#}"))?
+        else {
+            return Ok(false);
+        };
+        if expected.is_some_and(|operation| operation != record.operation) {
+            return Err(format!(
+                "A pending {:?} encryption transition must be recovered before this operation.",
+                record.operation
+            ));
+        }
+        let key = crypto::derive_key_from_meta(passphrase, &record.meta)
+            .map_err(|error| format!("{error:#}"))?;
+        let snapshot = encryption_transition::open(&record, &key).map_err(|error| {
+            format!("Incorrect passphrase or damaged encryption transition: {error:#}")
+        })?;
+        self.resume_encryption_transition(&record, snapshot, key)?;
+        Ok(true)
+    }
+
+    fn resume_encryption_transition(
+        &mut self,
+        record: &encryption_transition::Record,
+        snapshot: Snapshot,
+        key: crypto::DiskKey,
+    ) -> Result<(), String> {
+        let root = self.data_dir();
+        let result = (|| -> Result<(), String> {
+            match record.operation {
+                Operation::Enable => {
+                    // The authenticated transition remains until every encrypted target and
+                    // its metadata are durable. Repeating these writes after a crash is safe.
+                    self.restore_provider_tokens(&snapshot.provider_tokens);
+                    let mut public_config = self.config.clone();
+                    for provider in &mut public_config.providers.items {
+                        provider.token.clear();
+                    }
+                    public_config
+                        .save(&self.config_path)
+                        .map_err(|error| format!("could not secure config: {error:#}"))?;
+                    store::save_chats(&root, snapshot.chats, Some(&key))
+                        .map_err(Self::map_store_err)?;
+                    store::save_preferences(&root, snapshot.preferences, Some(&key))
+                        .map_err(Self::map_store_err)?;
+                    store::save_provider_tokens(&root, &snapshot.provider_tokens, &key)
+                        .map_err(Self::map_store_err)?;
+                    crate::skills::SkillStore::new(&self.config_path, Some(&key), true)
+                        .rewrite(&snapshot.skills)
+                        .map_err(|error| error.to_string())?;
+                    crypto::save_meta(&root, &record.meta).map_err(|error| format!("{error:#}"))?;
+                    encryption_transition::clear(&root)
+                        .map_err(|error| format!("could not finalize encryption: {error:#}"))?;
+                    self.disk_key = Some(key);
+                }
+                Operation::Disable => {
+                    // The transition payload stays encrypted and authenticated until all
+                    // plaintext targets are durable, so a crash can resume with the passphrase.
+                    store::save_chats_plaintext_for_disable(&root, snapshot.chats)
+                        .map_err(Self::map_store_err)?;
+                    store::save_preferences_plaintext_for_disable(&root, snapshot.preferences)
+                        .map_err(Self::map_store_err)?;
+                    crate::skills::SkillStore::new(&self.config_path, None, false)
+                        .rewrite(&snapshot.skills)
+                        .map_err(|error| error.to_string())?;
+                    self.restore_provider_tokens(&snapshot.provider_tokens);
+                    self.config
+                        .save(&self.config_path)
+                        .map_err(|error| format!("could not save decrypted config: {error:#}"))?;
+                    store::clear_provider_tokens(&root).map_err(|error| format!("{error:#}"))?;
+                    crypto::clear_meta(&root).map_err(|error| format!("{error:#}"))?;
+                    encryption_transition::clear(&root)
+                        .map_err(|error| format!("could not finalize decryption: {error:#}"))?;
+                    self.disk_key = None;
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            // A partially applied transition must lock immediately so ordinary
+            // writes cannot race ahead of the authenticated recovery snapshot.
+            self.disk_key = None;
+        }
+        result
     }
 
     pub fn thinking_supported(&self) -> bool {
@@ -813,11 +935,17 @@ impl App {
 mod tests {
     use super::*;
 
+    const TEST_PASSPHRASE: &str = "correct horse battery staple";
+
+    fn test_app(root: &std::path::Path) -> App {
+        App::new(Config::default(), root.join("config.toml")).unwrap()
+    }
+
     #[test]
     fn provider_mutations_never_restore_plaintext_tokens_when_encrypted() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("config.toml");
-        let mut app = App::new(Config::default(), config_path.clone());
+        let mut app = App::new(Config::default(), config_path.clone()).unwrap();
         app.create_provider(
             "Test",
             "https://example.com/v1",
@@ -842,5 +970,149 @@ mod tests {
         let tokens =
             store::load_provider_tokens(temp.path(), app.disk_key().expect("unlocked")).unwrap();
         assert_eq!(tokens[&provider_id], "secret-provider-token");
+    }
+
+    #[test]
+    fn interrupted_enable_fails_closed_and_resumes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let mut app = test_app(root);
+        app.create_provider(
+            "Private provider",
+            "https://example.com/v1",
+            "secret-provider-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        let chats = serde_json::json!({
+            "version": 2,
+            "projects": [],
+            "conversations": [{"id": "c1", "title": "Secret chat", "messages": []}]
+        });
+        let preferences = serde_json::json!({"theme": "dark"});
+        app.save_chat_store(chats.clone()).unwrap();
+        app.save_chat_preferences(preferences.clone()).unwrap();
+
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key(TEST_PASSPHRASE, &salt).unwrap();
+        let meta = crypto::meta_for_key(&key, salt).unwrap();
+        let snapshot = Snapshot {
+            chats: chats.clone(),
+            preferences,
+            provider_tokens: app.provider_tokens_value(),
+            skills: vec![],
+        };
+        encryption_transition::begin(root, Operation::Enable, meta, &key, &snapshot).unwrap();
+        // Simulate a crash after only the first protected file was replaced.
+        store::save_chats(root, chats, Some(&key)).unwrap();
+        drop(key);
+        drop(app);
+
+        let config = Config::load(&root.join("config.toml")).unwrap();
+        let mut restarted = App::new(config, root.join("config.toml")).unwrap();
+        assert!(restarted.encryption_enabled());
+        assert!(!restarted.encryption_unlocked());
+        assert!(matches!(
+            store::load_chats(root, None),
+            Err(StoreError::Locked)
+        ));
+        assert!(
+            restarted
+                .unlock_disk_encryption("wrong passphrase")
+                .is_err()
+        );
+        assert!(encryption_transition::exists(root));
+
+        restarted.unlock_disk_encryption(TEST_PASSPHRASE).unwrap();
+        assert!(restarted.encryption_enabled());
+        assert!(restarted.encryption_unlocked());
+        assert!(!encryption_transition::exists(root));
+        assert_eq!(
+            restarted.load_chat_store().unwrap()["conversations"][0]["title"],
+            "Secret chat"
+        );
+        let raw_config = crate::secure_fs::read_to_string(&root.join("config.toml")).unwrap();
+        assert!(!raw_config.contains("secret-provider-token"));
+    }
+
+    #[test]
+    fn interrupted_disable_requires_passphrase_and_resumes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let mut app = test_app(root);
+        app.create_provider(
+            "Private provider",
+            "https://example.com/v1",
+            "secret-provider-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        let chats = serde_json::json!({
+            "version": 2,
+            "projects": [],
+            "conversations": [{"id": "c1", "title": "Secret chat", "messages": []}]
+        });
+        app.save_chat_store(chats.clone()).unwrap();
+        app.enable_disk_encryption(TEST_PASSPHRASE, TEST_PASSPHRASE)
+            .unwrap();
+
+        let meta = crypto::load_meta(root).unwrap().unwrap();
+        let key = app.disk_key().unwrap().clone();
+        let snapshot = Snapshot {
+            chats: app.load_chat_store().unwrap(),
+            preferences: app.load_chat_preferences().unwrap(),
+            provider_tokens: store::load_provider_tokens(root, &key).unwrap(),
+            skills: app.list_user_skills().unwrap(),
+        };
+        encryption_transition::begin(root, Operation::Disable, meta, &key, &snapshot).unwrap();
+        // Simulate a crash with a mixed encrypted/plaintext payload set.
+        store::save_chats_plaintext_for_disable(root, chats).unwrap();
+        drop(key);
+        drop(app);
+
+        let config = Config::load(&root.join("config.toml")).unwrap();
+        let mut restarted = App::new(config, root.join("config.toml")).unwrap();
+        assert!(restarted.encryption_enabled());
+        assert!(restarted.load_chat_store().is_err());
+        assert!(
+            restarted
+                .unlock_disk_encryption("wrong passphrase")
+                .is_err()
+        );
+        assert!(encryption_transition::exists(root));
+
+        restarted.unlock_disk_encryption(TEST_PASSPHRASE).unwrap();
+        assert!(!restarted.encryption_enabled());
+        assert!(!restarted.encryption_unlocked());
+        assert!(!encryption_transition::exists(root));
+        assert_eq!(
+            restarted.load_chat_store().unwrap()["conversations"][0]["title"],
+            "Secret chat"
+        );
+        let raw_config = crate::secure_fs::read_to_string(&root.join("config.toml")).unwrap();
+        assert!(raw_config.contains("secret-provider-token"));
+    }
+
+    #[test]
+    fn malformed_security_marker_never_falls_back_to_plaintext() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        crate::secure_fs::atomic_write(
+            &encryption_transition::path(root),
+            b"not valid transition json",
+        )
+        .unwrap();
+        assert!(store::encryption_enabled(root));
+        assert!(matches!(
+            store::save_chats(root, serde_json::json!({}), None),
+            Err(StoreError::Locked)
+        ));
+        let mut app = test_app(root);
+        assert!(app.unlock_disk_encryption(TEST_PASSPHRASE).is_err());
+        assert!(encryption_transition::exists(root));
     }
 }

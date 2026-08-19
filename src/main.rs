@@ -56,7 +56,7 @@ fn main() -> Result<()> {
         Err(error) => return Err(error).with_context(|| format!("could not bind {bind}")),
     };
 
-    let mut app = App::new(config, config_path);
+    let mut app = App::new(config, config_path).map_err(anyhow::Error::msg)?;
     app.set_listen_addr(bind);
 
     let shared = Arc::new(Mutex::new(app));

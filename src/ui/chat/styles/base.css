@@ -533,11 +533,39 @@ button { font-family: inherit; }
   background: var(--color-paper-2);
   border-color: var(--color-rule);
   box-shadow: var(--shadow-2);
+  overflow: visible;
 }
 .sidebar-expand-fab svg {
   width: 1.05rem;
   height: 1.05rem;
 }
+.sidebar-encryption-badge {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--color-paper-2);
+  border-radius: 50%;
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+  box-shadow: 0 1px 5px oklch(0% 0 0 / 0.22);
+  pointer-events: none;
+}
+.sidebar-encryption-badge svg {
+  width: 0.64rem;
+  height: 0.64rem;
+}
+.sidebar-encryption-badge.is-locked,
+.sidebar-encryption-badge.is-recovery,
+.sidebar-encryption-badge.is-browser {
+  color: var(--color-paper);
+  background: var(--color-warn);
+}
+.sidebar-encryption-badge.is-recovery { animation: encryption-status-pulse 1.8s ease-out infinite; }
 .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: inline-flex; }
 .chat-shell:not(.has-active-thread) .sidebar-expand-fab { top: 0.65rem; }
 /* Clear the fixed expand control so the session title isn't underneath it. */
@@ -1016,41 +1044,123 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
 .sidebar-footer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2xs);
+  gap: 0.7rem;
   margin: 0 var(--space-3xs);
-  padding: var(--space-xs) 0 0;
+  padding: 0.7rem 0 0;
   border-top: 1px solid var(--color-rule);
   font-size: var(--text-sm);
 }
-.sidebar-footer-row {
-  display: flex;
+.sidebar-utility-panel {
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-graphite) 68%, transparent);
+}
+.sidebar-utility-row {
+  display: grid;
+  grid-template-columns: 1.1rem minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0 0.35rem 0 0.75rem;
-  font-size: var(--text-xs);
+  gap: 0.62rem;
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.48rem 0.65rem;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-ink-2);
+  text-align: left;
+}
+.sidebar-utility-row + .sidebar-utility-row {
+  border-top: 1px solid color-mix(in oklch, var(--color-rule) 82%, transparent);
+}
+button.sidebar-utility-row:hover:not(:disabled) {
+  color: var(--color-ink);
+  background: var(--surface-hover);
+  box-shadow: none;
+  transform: none;
+}
+.sidebar-utility-icon {
+  width: 1rem;
+  height: 1rem;
   color: var(--color-muted);
 }
-.sidebar-server-copy {
+.sidebar-utility-copy {
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
+  justify-content: center;
+  gap: 0.12rem;
   min-width: 0;
-  line-height: 1.2;
+  line-height: 1.1;
 }
-.sidebar-server-label { color: var(--color-ink-2); font-weight: 600; }
-.sidebar-server-provider {
-  max-width: 8.5rem;
+.sidebar-utility-label {
   overflow: hidden;
-  color: var(--color-muted);
-  font-size: 0.64rem;
+  color: inherit;
+  font-size: var(--text-xs);
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-footer-prefs {
-  justify-content: flex-start;
-  padding-left: 0.7rem;
+.sidebar-utility-detail {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 0.63rem;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-server-provider {
+  max-width: 7.5rem;
+}
+.sidebar-server-status {
+  gap: 0.3rem;
+  max-width: 7.1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 0.63rem;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-align: right;
+}
+.sidebar-encryption-indicator {
+  color: var(--color-accent);
+}
+.sidebar-encryption-indicator .sidebar-utility-icon {
+  color: var(--color-accent);
+}
+.sidebar-utility-row .sidebar-utility-chevron {
+  width: 0.86rem;
+  height: 0.86rem;
+  color: var(--color-muted);
+  opacity: 0.65;
+  transition:
+    color var(--dur-short) var(--ease-settle),
+    opacity var(--dur-short) var(--ease-settle),
+    transform var(--dur-short) var(--ease-release);
+}
+button.sidebar-utility-row:hover .sidebar-utility-chevron {
   color: var(--color-ink-2);
+  opacity: 1;
+  transform: translateX(2px);
+}
+.sidebar-encryption-indicator.is-locked,
+.sidebar-encryption-indicator.is-recovery,
+.sidebar-encryption-indicator.is-browser {
+  color: var(--color-warn);
+}
+.sidebar-encryption-indicator.is-locked .sidebar-utility-icon,
+.sidebar-encryption-indicator.is-recovery .sidebar-utility-icon,
+.sidebar-encryption-indicator.is-browser .sidebar-utility-icon {
+  color: var(--color-warn);
+}
+.sidebar-encryption-indicator.is-recovery {
+  background: color-mix(in oklch, var(--color-warn) 8%, transparent);
+}
+@keyframes encryption-status-pulse {
+  70%, 100% { box-shadow: 0 0 0 0.35rem transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-encryption-badge.is-recovery { animation: none; }
 }
 
 /* Privacy mode is a screen-sharing aid for identity-bearing UI surfaces. The mosaic is
@@ -1080,8 +1190,8 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
 .model-hint-provider {
   display: inline-block;
   max-width: 100%;
-  overflow: hidden;
-  vertical-align: -0.18em;
+  clip-path: inset(0);
+  vertical-align: baseline;
   white-space: nowrap;
 }
 .privacy-mode .convo-item:not(.is-active) .convo-title,

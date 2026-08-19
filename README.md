@@ -63,11 +63,13 @@ On-disk paths still use the legacy folder name **`tensorUI`** (so renaming the p
 
 | File / folder | Contents |
 | --- | --- |
-| `config.toml` | Providers, API tokens, UI theme/fonts, storage mode |
+| `config.toml` | Provider definitions, UI theme/fonts, storage mode; API tokens are removed when encryption is on |
 | `chats.json` | Conversations and projects (encrypted when encryption is on) |
 | `preferences.json` | Chat preferences (encrypted when encryption is on) |
+| `provider-tokens.json` | Authenticated encrypted provider credentials (present only while encryption is on) |
 | `encryption.json` | Salt / meta for disk encryption (no passphrase stored) |
-| `chat-skills/` | Imported skill markdown |
+| `encryption-transition.json` | Temporary authenticated recovery snapshot used only during encryption-mode changes |
+| `chat-skills/skills.json` | Atomic skill snapshot (encrypted when encryption is on) |
 
 Pass `--config PATH` to use a different `config.toml` (chats/preferences still sit beside it).
 
@@ -77,15 +79,18 @@ LLM system/tool prompts are markdown under [`prompts/`](prompts/) in this repo (
 
 In **Chat → Settings → Local Data**, enable encryption with a passphrase. TensorMI Harness then:
 
-- Derives a 256-bit key with **Argon2id** (OWASP interactive defaults: 19 MiB memory, 2 iterations)
-- Encrypts `chats.json` and `preferences.json` with **AES-256-GCM** (random 96-bit nonces, purpose-bound AAD so files cannot be swapped)
+- Derives a 256-bit key with **Argon2id** (64 MiB memory, 3 iterations, one lane)
+- Encrypts chats, preferences, provider credentials, and skill contents/metadata with **AES-256-GCM** (random 96-bit nonces and purpose-bound AAD)
 - Stores only salt + KDF params + a key **verifier** in `encryption.json` (never the passphrase or raw key)
+- Uses an authenticated, encrypted transition snapshot so interrupted enable/disable operations fail closed and can resume after the passphrase is entered
+- Uses owner-private, flush-and-atomic-replace file writes; skill metadata and content commit as one snapshot
+- Holds an operating-system-released exclusive data lock so concurrent app processes cannot interleave writes
 - Keeps the session key in process memory only until you **Lock session** or quit (memory is zeroized on lock)
 - Prompts you to unlock on launch (and after lock)
 
-**Threat model:** offline confidentiality of chat/preference files (stolen disk, backups, casual filesystem access).
+**Threat model:** offline confidentiality and integrity of chats, preferences, provider credentials, and skill data (stolen disk, backups, casual filesystem access).
 
-**Not covered:** provider API tokens in `config.toml`, skill files under `chat-skills/`, malware or another process in your logged-in session, cold-boot / memory forensics while unlocked, or network exposure of the loopback UI.
+**Not covered:** plaintext copies created before encryption, filesystem snapshots/backups, malware or another process in your logged-in session, rollback to an older complete encrypted data set by an attacker with write access, cold-boot/core-dump memory forensics while unlocked, forgotten passphrases, physical hardware failure, or network exposure of the loopback UI. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems.
 
 Encryption applies to **disk** storage only. Browser `localStorage` mode does not use it. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
 

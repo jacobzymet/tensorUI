@@ -1,16 +1,13 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::{providers::ProvidersConfig, store::StorageMode};
+use crate::{providers::ProvidersConfig, secure_fs, store::StorageMode};
 
 pub const DEFAULT_UI_HOST: &str = "127.0.0.1";
 pub const DEFAULT_UI_PORT: u16 = 3930;
@@ -171,47 +168,13 @@ impl Config {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("could not read {}", path.display()))?;
+        let raw = secure_fs::read_to_string(path)?;
         toml::from_str(&raw).with_context(|| format!("invalid config at {}", path.display()))
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        let parent = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent)
-            .with_context(|| format!("could not create {}", parent.display()))?;
         let raw = toml::to_string_pretty(self).context("could not serialize configuration")?;
-        let file_name = path
-            .file_name()
-            .context("configuration path has no file name")?
-            .to_string_lossy();
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let temporary = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
-
-        let result = (|| -> Result<()> {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temporary)
-                .with_context(|| format!("could not create {}", temporary.display()))?;
-            file.write_all(raw.as_bytes())
-                .with_context(|| format!("could not write {}", temporary.display()))?;
-            file.sync_all()
-                .with_context(|| format!("could not flush {}", temporary.display()))?;
-            drop(file);
-            replace_file(&temporary, path)
-        })();
-
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
+        secure_fs::atomic_write(path, raw.as_bytes())
     }
 
     pub fn default_path() -> PathBuf {
@@ -268,29 +231,6 @@ pub fn require_loopback_bind(addr: SocketAddr) -> Result<SocketAddr> {
     eprintln!("WARNING: Use 127.0.0.1 or ::1 (config ui.host, --bind, or TENSORUI_BIND).");
     eprintln!();
     bail!("refusing to bind {addr}: not a loopback address")
-}
-
-fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        match fs::rename(temporary, destination) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                fs::remove_file(destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))?;
-                fs::rename(temporary, destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))
-            }
-            Err(error) => {
-                Err(error).with_context(|| format!("could not replace {}", destination.display()))
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        fs::rename(temporary, destination)
-            .with_context(|| format!("could not replace {}", destination.display()))
-    }
 }
 
 fn parse_ui_addr(host: &str, port: u16) -> Result<SocketAddr> {

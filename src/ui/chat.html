@@ -15,6 +15,9 @@
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <button type="button" class="btn btn-ghost btn-icon sidebar-expand-fab" id="btnExpandSidebar" aria-label="Show sidebar" title="Show sidebar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+      <span class="sidebar-encryption-badge is-hidden" id="sidebarEncryptionBadge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="9" x="6" y="11" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      </span>
     </button>
     <aside class="chat-sidebar">
       <div class="sidebar-head">
@@ -64,17 +67,32 @@
         <nav class="convo-list" id="convoList" aria-label="Conversations"></nav>
       </div>
       <div class="sidebar-footer">
-        <div class="sidebar-footer-row">
-          <span class="sidebar-server-copy">
-            <span class="sidebar-server-label">Server</span>
-            <span class="sidebar-server-provider" id="serverProviderName">No provider</span>
-          </span>
-          <span id="serverChip" class="status-chip status-stopped">Not configured</span>
+        <div class="sidebar-utility-panel">
+          <div class="sidebar-utility-row sidebar-server-row">
+            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="7" x="3" y="3" rx="2"/><rect width="18" height="7" x="3" y="14" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+            <span class="sidebar-utility-copy">
+              <span class="sidebar-utility-label">Server</span>
+              <span class="sidebar-utility-detail sidebar-server-provider" id="serverProviderName">No provider</span>
+            </span>
+            <span id="serverChip" class="status-chip sidebar-server-status status-stopped">Not configured</span>
+          </div>
+          <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-encryption-indicator is-hidden" id="encryptionIndicator" aria-label="Open encryption settings" aria-live="polite" title="Open encryption settings">
+            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><rect width="8" height="6" x="8" y="10" rx="1"/><path d="M10 10V8a2 2 0 0 1 4 0v2"/></svg>
+            <span class="sidebar-utility-copy">
+              <span class="sidebar-utility-label" id="encryptionIndicatorLabel">Encrypted</span>
+              <span class="sidebar-utility-detail" id="encryptionIndicatorDetail">At rest</span>
+            </span>
+            <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-footer-prefs" id="btnSettings">
+            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
+            <span class="sidebar-utility-copy">
+              <span class="sidebar-utility-label">Settings</span>
+              <span class="sidebar-utility-detail">Preferences</span>
+            </span>
+            <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
         </div>
-        <button type="button" class="btn btn-ghost sidebar-footer-prefs" id="btnSettings">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
-          <span>Settings</span>
-        </button>
         <div class="mode-switch" role="navigation" aria-label="Mode">
           <a href="/" class="is-active" aria-current="page">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -730,14 +748,15 @@
               <div id="settingsEncryptionEnable" class="settings-encryption-form">
                 <label class="field">
                   <span class="field-label">Passphrase</span>
-                  <input class="field-input" id="encryptionPassphrase" type="password" minlength="16" autocomplete="new-password" spellcheck="false">
+                  <input class="field-input" id="encryptionPassphrase" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="encryptionPassphraseGuidance encryptionPassphraseWarning">
                 </label>
                 <label class="field">
                   <span class="field-label">Confirm passphrase</span>
-                  <input class="field-input" id="encryptionPassphraseConfirm" type="password" minlength="16" autocomplete="new-password" spellcheck="false">
+                  <input class="field-input" id="encryptionPassphraseConfirm" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="encryptionPassphraseWarning">
                 </label>
+                <p class="field-hint encryption-passphrase-warning is-hidden" id="encryptionPassphraseWarning" role="status" aria-live="polite"></p>
                 <button type="button" class="btn" id="btnEnableEncryption">Enable encryption</button>
-                <p class="field-hint" style="margin:0.45rem 0 0">Encrypts chats, settings, provider tokens, and skill contents with Argon2id + AES-256-GCM. Use at least 16 characters. You must unlock after each restart; forgotten passphrases cannot be recovered.</p>
+                <p class="field-hint" id="encryptionPassphraseGuidance" style="margin:0.45rem 0 0">Encrypts chats, settings, provider tokens, and skill contents with Argon2id + AES-256-GCM. A passphrase of at least 16 characters is recommended, but not required. You must unlock after each restart; forgotten passphrases cannot be recovered.</p>
               </div>
               <div id="settingsEncryptionUnlock" class="settings-encryption-form is-hidden">
                 <label class="field">
@@ -810,12 +829,15 @@
       <p class="settings-pane-lede">Chats and settings are encrypted. Enter your passphrase to continue.</p>
       <label class="field">
         <span class="field-label" for="unlockModalPassphrase">Passphrase</span>
-        <input class="field-input" id="unlockModalPassphrase" type="password" autocomplete="current-password" spellcheck="false">
+        <input class="field-input" id="unlockModalPassphrase" type="password" autocomplete="current-password" spellcheck="false" autofocus>
       </label>
       <p id="unlockModalError" class="unlock-dialog-error is-hidden" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" id="btnUnlockModalDismiss">Not now</button>
-        <button type="button" class="btn btn-primary" id="btnUnlockModalSubmit">Unlock</button>
+        <button type="button" class="btn btn-primary" id="btnUnlockModalSubmit">
+          <span class="unlock-button-label">Unlock</span>
+          <span class="button-loading-spinner is-hidden" aria-hidden="true"></span>
+        </button>
       </div>
     </div>
   </div>

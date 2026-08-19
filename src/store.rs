@@ -1,16 +1,11 @@
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::crypto;
+use crate::{crypto, secure_fs};
 
 pub const CHATS_FILE: &str = "chats.json";
 pub const PREFERENCES_FILE: &str = "preferences.json";
@@ -91,6 +86,9 @@ pub fn load_provider_tokens(root: &Path, key: &crypto::DiskKey) -> Result<Value,
     match read_json_file(&provider_tokens_path(root))? {
         Some(value) => crypto::decrypt_value(key, &value, crypto::AAD_PROVIDER_TOKENS)
             .map_err(StoreError::from),
+        None if encryption_enabled(root) => Err(StoreError::Other(anyhow::anyhow!(
+            "Encrypted provider credentials are missing. Restore the encrypted file from backup."
+        ))),
         None => Ok(serde_json::json!({})),
     }
 }
@@ -107,84 +105,22 @@ pub fn save_provider_tokens(
 }
 
 pub fn clear_provider_tokens(root: &Path) -> Result<()> {
-    let path = provider_tokens_path(root);
-    if path.exists() {
-        fs::remove_file(&path).with_context(|| format!("could not remove {}", path.display()))?;
-    }
-    Ok(())
+    secure_fs::remove_file(&provider_tokens_path(root))
 }
 
 pub fn ensure_data_dir(root: &Path) -> Result<()> {
-    fs::create_dir_all(root).with_context(|| format!("could not create {}", root.display()))
+    secure_fs::ensure_private_dir(root)
 }
 
 fn atomic_write_json(path: &Path, value: &Value) -> Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
-    let file_name = path
-        .file_name()
-        .context("path has no file name")?
-        .to_string_lossy();
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
-
-    let result = (|| -> Result<()> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .with_context(|| format!("could not create {}", temporary.display()))?;
-        let raw = serde_json::to_vec_pretty(value).context("could not serialize JSON")?;
-        file.write_all(&raw)
-            .with_context(|| format!("could not write {}", temporary.display()))?;
-        file.write_all(b"\n").ok();
-        file.sync_all()
-            .with_context(|| format!("could not flush {}", temporary.display()))?;
-        drop(file);
-        replace_file(&temporary, path)
-    })();
-
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
-}
-
-fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        match fs::rename(temporary, destination) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                fs::remove_file(destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))?;
-                fs::rename(temporary, destination)
-                    .with_context(|| format!("could not replace {}", destination.display()))
-            }
-            Err(error) => {
-                Err(error).with_context(|| format!("could not replace {}", destination.display()))
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        fs::rename(temporary, destination)
-            .with_context(|| format!("could not replace {}", destination.display()))
-    }
+    secure_fs::atomic_write_json(path, value)
 }
 
 fn read_json_file(path: &Path) -> Result<Option<Value>> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
+    let raw = secure_fs::read_to_string(path)?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
@@ -255,7 +191,10 @@ fn encode_for_disk(value: &Value, key: Option<&crypto::DiskKey>, aad: &[u8]) -> 
 }
 
 pub fn encryption_enabled(root: &Path) -> bool {
-    crypto::load_meta(root).ok().flatten().is_some()
+    // Presence is authoritative even when parsing fails: malformed security state
+    // must lock the app and surface an error, never silently fall back to plaintext.
+    std::fs::symlink_metadata(crypto::meta_path(root)).is_ok()
+        || crate::encryption_transition::exists(root)
 }
 
 pub fn load_chats(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, StoreError> {
@@ -272,7 +211,9 @@ pub fn load_chats(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, S
             crypto::AAD_CHATS,
             encryption_on,
         )?)),
-        // Empty is allowed while encrypted (fresh enable before first save).
+        None if encryption_on => Err(StoreError::Other(anyhow::anyhow!(
+            "Encrypted chat data is missing. Restore the encrypted file from backup."
+        ))),
         None => Ok(empty_store()),
     }
 }
@@ -316,6 +257,9 @@ pub fn load_preferences(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Va
             Value::Object(map) => Ok(Value::Object(map)),
             _ => Ok(serde_json::json!({})),
         },
+        None if encryption_on => Err(StoreError::Other(anyhow::anyhow!(
+            "Encrypted preferences are missing. Restore the encrypted file from backup."
+        ))),
         None => Ok(serde_json::json!({})),
     }
 }
@@ -435,6 +379,18 @@ mod tests {
         )
         .unwrap();
         assert!(load_chats(root, Some(&key)).is_err());
+    }
+
+    #[test]
+    fn encryption_rejects_missing_protected_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("test-passphrase", &salt).unwrap();
+        crypto::save_meta(root, &crypto::meta_for_key(&key, salt).unwrap()).unwrap();
+        assert!(load_chats(root, Some(&key)).is_err());
+        assert!(load_preferences(root, Some(&key)).is_err());
+        assert!(load_provider_tokens(root, &key).is_err());
     }
 
     #[test]
