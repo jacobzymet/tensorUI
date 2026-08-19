@@ -2,6 +2,11 @@
 
 A local, lightweight, open source LLM harness for humanity.
 
+<p align="center">
+  <img width="49%" src="https://github.com/user-attachments/assets/f7b7e455-f61e-4978-a5ff-bc587c3200c4" />
+  <img width="49%" src="https://github.com/user-attachments/assets/e5ef9c8a-5401-46c0-81c5-a3c0531e5386" />
+</p>
+
 A more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui): connect to LLM APIs on your machine (Ollama, llama-server) or in the cloud (OpenAI, Gemini, Anthropic, and other OpenAI-compatible or **Anthropic Messages**–compatible endpoints).
 
 **Encryption at rest** is a first-class feature: lock chats and preferences on disk with a passphrase (Argon2id + AES-256-GCM). After each restart you unlock once for the session; **Lock session** clears the key from memory without turning encryption off.
