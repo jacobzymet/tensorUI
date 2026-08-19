@@ -1125,7 +1125,7 @@ function syncProjectChrome() {
       modelHintEl.textContent = 'Temporary session — stays in memory only until you close the tab.'
         + (project ? ' · Project: ' + project.name : '');
     } else if (current.startsWith('Chatting with ')) {
-      const model = current.replace(/^Chatting with /, '').split(' · ')[0];
+      const model = current.replace(/^Chatting with /, '').split(/ · | via /)[0];
       modelHintEl.textContent = project && !activeId
         ? 'Shared instructions & memory apply · ' + model
         : 'Chatting with ' + model + suffix;

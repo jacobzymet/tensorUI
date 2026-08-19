@@ -563,7 +563,7 @@ function updateServerChip(data) {
   }
 
   const project = inProjectChat() ? getProject(activeProjectId) : null;
-  const viaSuffix = ' · via ' + providerLabel;
+  const viaSuffix = ' via ' + providerLabel;
   if (remoteChecking) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');

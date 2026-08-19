@@ -884,6 +884,7 @@ function stopTitleTyping(el) {
     titleTypeTimers.delete(el);
   }
   el.classList.remove('is-typing-title');
+  el.querySelector('.title-typing-caret')?.remove();
 }
 
 function typeTitleInto(el, fullText) {
@@ -900,10 +901,15 @@ function typeTitleInto(el, fullText) {
   }
   el.classList.add('is-typing-title');
   el.textContent = '';
+  const textNode = document.createTextNode('');
+  const caret = document.createElement('span');
+  caret.className = 'title-typing-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  el.append(textNode, caret);
   let i = 0;
   const tick = () => {
     i += 1;
-    el.textContent = text.slice(0, i);
+    textNode.data = text.slice(0, i);
     if (i < text.length) {
       const delay = i === 1 ? 40 : 22 + Math.floor(Math.random() * 28);
       const id = window.setTimeout(tick, delay);
@@ -911,6 +917,7 @@ function typeTitleInto(el, fullText) {
     } else {
       titleTypeTimers.delete(el);
       el.classList.remove('is-typing-title');
+      caret.remove();
     }
   };
   tick();
