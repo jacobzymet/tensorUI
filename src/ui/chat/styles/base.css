@@ -539,6 +539,7 @@ button { font-family: inherit; }
   height: 1.05rem;
 }
 .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: inline-flex; }
+.chat-shell:not(.has-active-thread) .sidebar-expand-fab { top: 0.65rem; }
 /* Clear the fixed expand control so the session title isn't underneath it. */
 .chat-shell.sidebar-collapsed .chat-topbar {
   padding-inline: 3.35rem;

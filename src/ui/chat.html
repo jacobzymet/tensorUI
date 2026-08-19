@@ -89,6 +89,10 @@
     </aside>
 
     <main class="chat-main">
+      <div class="chat-background" id="chatBackground" aria-hidden="true">
+        <img id="chatBackgroundImage" alt="" referrerpolicy="no-referrer">
+        <div class="chat-background-overlay" id="chatBackgroundOverlay"></div>
+      </div>
       <div class="chat-starfield" aria-hidden="true">
         <canvas id="starfieldCanvas"></canvas>
       </div>
@@ -379,6 +383,52 @@
                   <button type="button" data-font-scale="compact" role="tab" aria-selected="false">Compact</button>
                   <button type="button" data-font-scale="default" class="is-active" role="tab" aria-selected="true">Default</button>
                   <button type="button" data-font-scale="large" role="tab" aria-selected="false">Large</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Chat background</h3>
+              <div class="settings-row">
+                <label class="field-label" for="settingChatBackgroundUrl">Image</label>
+                <div class="background-image-controls">
+                  <input class="field-input" id="settingChatBackgroundUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/background.jpg">
+                  <div class="background-image-actions">
+                    <input id="settingChatBackgroundFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+                    <button type="button" class="btn btn-outline" id="btnChatBackgroundFile">Choose local image</button>
+                    <button type="button" class="btn btn-ghost" id="btnChatBackgroundClear">Remove</button>
+                  </div>
+                  <p class="field-hint" id="chatBackgroundFileHint">Enter a remote URL or choose a PNG, JPEG, WebP, GIF, or AVIF file up to 1 MB.</p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <span class="field-label" id="chatBackgroundPositionLabel">Position</span>
+                <div>
+                  <input id="settingChatBackgroundPosition" type="hidden" value="center">
+                  <div class="background-position-preview" id="chatBackgroundPositionPreview">
+                    <img id="chatBackgroundPositionImage" alt="" referrerpolicy="no-referrer">
+                    <div class="background-position-shade" aria-hidden="true"></div>
+                    <div class="background-position-grid" role="radiogroup" aria-labelledby="chatBackgroundPositionLabel">
+                      <button type="button" role="radio" aria-checked="false" aria-label="Top left" title="Top left" data-background-position="top left"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Top" title="Top" data-background-position="top"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Top right" title="Top right" data-background-position="top right"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Left" title="Left" data-background-position="left"><span></span></button>
+                      <button type="button" role="radio" aria-checked="true" aria-label="Center" title="Center" data-background-position="center"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Right" title="Right" data-background-position="right"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Bottom left" title="Bottom left" data-background-position="bottom left"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Bottom" title="Bottom" data-background-position="bottom"><span></span></button>
+                      <button type="button" role="radio" aria-checked="false" aria-label="Bottom right" title="Bottom right" data-background-position="bottom right"><span></span></button>
+                    </div>
+                    <span class="background-position-empty">Choose an image to preview</span>
+                  </div>
+                  <p class="field-hint">Choose the part of the image that stays anchored when the chat resizes.</p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <label class="field-label" for="settingChatBackgroundOverlay">Overlay opacity</label>
+                <div class="background-opacity-control">
+                  <input id="settingChatBackgroundOverlay" type="range" min="0" max="100" step="1" value="72">
+                  <output id="settingChatBackgroundOverlayValue" for="settingChatBackgroundOverlay">72%</output>
+                  <p class="field-hint">A dark overlay is applied for readability; chat text automatically switches between black and white.</p>
                 </div>
               </div>
             </div>

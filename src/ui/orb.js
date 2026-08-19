@@ -240,7 +240,8 @@ function drawGlobe(ctx, size, t, o, ink) {
  * Drive an orb on `canvas`. Returns { play, pause, stop }.
  *
  * options.mode: 'orbits' (default) | 'globe'
- * options.ink: 'auto' (theme) | 'bright' (white on accent buttons) | 'dark'
+ * options.ink: 'auto' (theme) | 'bright' (white on accent buttons) | 'dark',
+ *              or a function returning one of those values for live contrast.
  * With `autoplay: false` the orb paints one static frame and waits — used
  * for the header mark, which only spins while hovered so the control panel
  * chrome stays calm. Pauses on hidden tabs; reduced-motion users always get
@@ -260,13 +261,14 @@ function mountOrb(canvas, size, options) {
   canvas.style.width = size + 'px';
   canvas.style.height = size + 'px';
   const ctx = canvas.getContext('2d');
-  const noop = { play() {}, pause() {}, stop() {} };
+  const noop = { play() {}, pause() {}, paint() {}, stop() {} };
   if (!ctx) return noop;
 
   const frame = (tSec) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, size);
-    draw(ctx, size, tSec, preset.opts, ink);
+    const resolvedInk = typeof ink === 'function' ? ink() : ink;
+    draw(ctx, size, tSec, preset.opts, resolvedInk);
   };
   const liveFrame = () => frame((performance.now() / 1000) * preset.speed);
 
@@ -276,7 +278,7 @@ function mountOrb(canvas, size, options) {
 
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     frame(0.6);
-    return noop;
+    return { ...noop, paint: () => frame(0.6) };
   }
 
   let raf = 0;
@@ -315,6 +317,7 @@ function mountOrb(canvas, size, options) {
   return {
     play,
     pause,
+    paint: liveFrame,
     stop() {
       stopped = true;
       pause();

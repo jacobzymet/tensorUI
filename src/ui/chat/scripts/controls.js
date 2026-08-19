@@ -703,6 +703,57 @@ function clearAllChatsAndProjects() {
   refreshSettingsDataSummary();
 }
 
+let pendingChatBackgroundImage = '';
+let pendingChatBackgroundImageName = '';
+
+function syncChatBackgroundForm() {
+  const source = normalizeChatBackgroundImage(pendingChatBackgroundImage);
+  const isLocal = source.startsWith('data:image/');
+  const urlInput = document.getElementById('settingChatBackgroundUrl');
+  const hint = document.getElementById('chatBackgroundFileHint');
+  const clearButton = document.getElementById('btnChatBackgroundClear');
+  const hasInvalidUrl = !!pendingChatBackgroundImage && !source;
+  if (urlInput && document.activeElement !== urlInput) {
+    urlInput.value = isLocal ? '' : source;
+  }
+  if (urlInput) {
+    urlInput.setCustomValidity(hasInvalidUrl ? 'Enter a valid http:// or https:// image URL.' : '');
+    urlInput.setAttribute('aria-invalid', hasInvalidUrl ? 'true' : 'false');
+  }
+  if (hint) {
+    hint.textContent = hasInvalidUrl
+      ? 'Enter a valid URL beginning with http:// or https://.'
+      : (isLocal
+        ? 'Local image: ' + (pendingChatBackgroundImageName || 'Selected image')
+        : 'Enter a remote URL or choose a PNG, JPEG, WebP, GIF, or AVIF file up to 1 MB.');
+  }
+  if (clearButton) clearButton.disabled = !source && !pendingChatBackgroundImage;
+  const positionInput = document.getElementById('settingChatBackgroundPosition');
+  const position = CHAT_BACKGROUND_POSITIONS.includes(positionInput?.value)
+    ? positionInput.value
+    : DEFAULT_SETTINGS.chatBackgroundPosition;
+  document.querySelectorAll('[data-background-position]').forEach((button) => {
+    const selected = button.dataset.backgroundPosition === position;
+    button.setAttribute('aria-checked', selected ? 'true' : 'false');
+    button.tabIndex = selected ? 0 : -1;
+  });
+  const preview = document.getElementById('chatBackgroundPositionPreview');
+  const previewImage = document.getElementById('chatBackgroundPositionImage');
+  if (preview && previewImage) {
+    preview.classList.toggle('has-image', !!source);
+    previewImage.style.objectPosition = position;
+    if (source) previewImage.src = source;
+    else previewImage.removeAttribute('src');
+  }
+  const range = document.getElementById('settingChatBackgroundOverlay');
+  const output = document.getElementById('settingChatBackgroundOverlayValue');
+  if (range && output) {
+    output.value = range.value + '%';
+    const previewShade = document.querySelector('.background-position-shade');
+    if (previewShade) previewShade.style.opacity = String(Number(range.value) / 100);
+  }
+}
+
 function fillSettingsFormFromState() {
   document.getElementById('settingName').value = settings.name;
   document.getElementById('settingAbout').value = settings.about;
@@ -728,6 +779,11 @@ function fillSettingsFormFromState() {
   document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
   document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
   document.getElementById('settingAttachmentMaxChars').value = String(settings.attachmentMaxChars || 48000);
+  pendingChatBackgroundImage = settings.chatBackgroundImage || '';
+  pendingChatBackgroundImageName = settings.chatBackgroundImageName || '';
+  document.getElementById('settingChatBackgroundPosition').value = settings.chatBackgroundPosition || 'center';
+  document.getElementById('settingChatBackgroundOverlay').value = String(settings.chatBackgroundOverlay ?? 72);
+  syncChatBackgroundForm();
   syncWebSearchControls();
   syncFetchUrlControls();
   syncAttachmentFallbackControls();
@@ -764,11 +820,18 @@ function readSettingsForm() {
     attachmentTextFallback: document.getElementById('settingAttachmentTextFallback').checked,
     attachmentOcr: document.getElementById('settingAttachmentOcr').checked,
     attachmentMaxChars: maxCharsRaw,
+    chatBackgroundImage: pendingChatBackgroundImage,
+    chatBackgroundImageName: pendingChatBackgroundImageName,
+    chatBackgroundPosition: document.getElementById('settingChatBackgroundPosition').value,
+    chatBackgroundOverlay: Number(document.getElementById('settingChatBackgroundOverlay').value),
   });
 }
 
 function settingsFormIsDirty() {
-  return JSON.stringify(readSettingsForm()) !== JSON.stringify(normalizeSettings(settings));
+  const invalidBackgroundUrl = !!pendingChatBackgroundImage
+    && !normalizeChatBackgroundImage(pendingChatBackgroundImage);
+  return invalidBackgroundUrl
+    || JSON.stringify(readSettingsForm()) !== JSON.stringify(normalizeSettings(settings));
 }
 
 const SETTINGS_SAVE_CHECK =
@@ -1430,6 +1493,12 @@ function setThinkingEffort(effort, persist = true) {
 
 function commitSettings() {
   if (!requireUnlockedData()) return;
+  const backgroundUrl = document.getElementById('settingChatBackgroundUrl');
+  if (pendingChatBackgroundImage && !normalizeChatBackgroundImage(pendingChatBackgroundImage)) {
+    backgroundUrl?.reportValidity();
+    backgroundUrl?.focus();
+    return;
+  }
   if (!settingsFormIsDirty()) {
     syncSettingsSaveButton({ saved: true });
     return;
@@ -1446,4 +1515,3 @@ function commitSettings() {
   const convo = conversations.find((item) => item.id === activeId);
   if (convo) renderThread(convo);
 }
-

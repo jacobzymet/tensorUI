@@ -51,6 +51,11 @@ const ATTACHMENTS_MODES = ['auto', 'on', 'off'];
 const ATTACHMENT_MIN_CONTEXT = 16384;
 const ATTACHMENT_MAX_FILES = 6;
 const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+const CHAT_BACKGROUND_MAX_BYTES = 1024 * 1024;
+const CHAT_BACKGROUND_POSITIONS = [
+  'center', 'top', 'bottom', 'left', 'right',
+  'top left', 'top right', 'bottom left', 'bottom right',
+];
 const PROJECT_MEMORY_MODES = ['default', 'project_only'];
 const SIBLING_CHAT_MAX = 8;
 const SIBLING_CHAT_BUDGET = 10000;
@@ -81,9 +86,14 @@ const DEFAULT_SETTINGS = {
   attachmentTextFallback: false,
   attachmentOcr: false,
   attachmentMaxChars: 48000,
+  chatBackgroundImage: '',
+  chatBackgroundImageName: '',
+  chatBackgroundPosition: 'center',
+  chatBackgroundOverlay: 72,
 };
 
 const chatShell = document.getElementById('chatShell');
+const chatMain = document.querySelector('.chat-main');
 const chatTopbar = document.getElementById('chatTopbar');
 const emptyState = document.getElementById('emptyState');
 const emptyStateInner = document.getElementById('emptyStateInner');
@@ -154,6 +164,134 @@ let currentFonts = {
   font_scale: 'default',
 };
 let repaintStarfield = null;
+let repaintEmptyOrb = null;
+let chatBackgroundApplyToken = 0;
+
+function normalizeChatBackgroundImage(value) {
+  const source = typeof value === 'string' ? value.trim() : '';
+  if (!source) return '';
+  if (/^data:image\/(?:png|jpe?g|webp|gif|avif);base64,/i.test(source)) return source;
+  if (source.length > 4096) return '';
+  try {
+    const url = new URL(source);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function chatBackgroundRelativeLuminance(red, green, blue) {
+  const linear = (channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+}
+
+function setChatBackgroundTone(luminance, token) {
+  if (token !== chatBackgroundApplyToken) return;
+  // WCAG contrast curves cross at ~0.179: above it black is more legible,
+  // below it white is more legible.
+  chatMain.dataset.backgroundTone = luminance > 0.179 ? 'light' : 'dark';
+  if (typeof repaintEmptyOrb === 'function') repaintEmptyOrb();
+}
+
+function fallbackChatBackgroundTone(overlayOpacity, token) {
+  // Cross-origin images without CORS cannot be sampled. A mid-bright image is
+  // a better neutral estimate than blindly following the UI theme.
+  const visibleChannel = 255 * 0.62 * (1 - overlayOpacity);
+  setChatBackgroundTone(
+    chatBackgroundRelativeLuminance(visibleChannel, visibleChannel, visibleChannel),
+    token
+  );
+}
+
+function sampleChatBackgroundTone(sampleImage, overlayOpacity, token) {
+  if (token !== chatBackgroundApplyToken) return;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas unavailable');
+    context.drawImage(sampleImage, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const baseChannel = document.documentElement.dataset.theme === 'light' ? 245 : 30;
+    const overlayFactor = 1 - overlayOpacity;
+    let luminance = 0;
+    let samples = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const imageAlpha = pixels[index + 3] / 255;
+      const red = (pixels[index] * imageAlpha + baseChannel * (1 - imageAlpha)) * overlayFactor;
+      const green = (pixels[index + 1] * imageAlpha + baseChannel * (1 - imageAlpha)) * overlayFactor;
+      const blue = (pixels[index + 2] * imageAlpha + baseChannel * (1 - imageAlpha)) * overlayFactor;
+      luminance += chatBackgroundRelativeLuminance(red, green, blue);
+      samples += 1;
+    }
+    setChatBackgroundTone(luminance / Math.max(1, samples), token);
+  } catch {
+    fallbackChatBackgroundTone(overlayOpacity, token);
+  }
+}
+
+function resolveChatBackgroundTone(image, source, overlayOpacity, token) {
+  let isSameOrigin = source.startsWith('data:');
+  try {
+    isSameOrigin = isSameOrigin || new URL(source, window.location.href).origin === window.location.origin;
+  } catch {
+    // normalizeChatBackgroundImage already rejects malformed sources.
+  }
+  if (isSameOrigin) {
+    sampleChatBackgroundTone(image, overlayOpacity, token);
+    return;
+  }
+  // Use a separate CORS request for analysis so servers without CORS still
+  // display normally through the primary image element.
+  const sampler = new Image();
+  sampler.crossOrigin = 'anonymous';
+  sampler.addEventListener('load', () => sampleChatBackgroundTone(sampler, overlayOpacity, token));
+  sampler.addEventListener('error', () => fallbackChatBackgroundTone(overlayOpacity, token));
+  sampler.src = source;
+}
+
+function applyChatBackground(appearance) {
+  const host = document.getElementById('chatBackground');
+  const image = document.getElementById('chatBackgroundImage');
+  const overlay = document.getElementById('chatBackgroundOverlay');
+  if (!host || !image || !overlay) return;
+  const source = normalizeChatBackgroundImage(appearance?.chatBackgroundImage);
+  const position = CHAT_BACKGROUND_POSITIONS.includes(appearance?.chatBackgroundPosition)
+    ? appearance.chatBackgroundPosition
+    : DEFAULT_SETTINGS.chatBackgroundPosition;
+  const opacity = Number(appearance?.chatBackgroundOverlay);
+  const normalizedOpacity = Number.isFinite(opacity)
+    ? Math.min(100, Math.max(0, Math.round(opacity)))
+    : DEFAULT_SETTINGS.chatBackgroundOverlay;
+  const overlayOpacity = normalizedOpacity / 100;
+  const token = ++chatBackgroundApplyToken;
+  image.style.objectPosition = position;
+  overlay.style.opacity = String(overlayOpacity);
+  if (!source) {
+    image.removeAttribute('src');
+    host.classList.remove('has-image');
+    delete chatMain.dataset.backgroundTone;
+    if (typeof repaintEmptyOrb === 'function') repaintEmptyOrb();
+    return;
+  }
+  image.onload = () => {
+    if (token !== chatBackgroundApplyToken) return;
+    host.classList.add('has-image');
+    resolveChatBackgroundTone(image, source, overlayOpacity, token);
+  };
+  image.onerror = () => {
+    if (token !== chatBackgroundApplyToken) return;
+    host.classList.remove('has-image');
+    delete chatMain.dataset.backgroundTone;
+    if (typeof repaintEmptyOrb === 'function') repaintEmptyOrb();
+  };
+  image.src = source;
+  if (image.complete && image.naturalWidth > 0) image.onload();
+}
 
 const FONT_BODY_STACKS = {
   inter: '"Inter", system-ui, sans-serif',
@@ -250,6 +388,12 @@ function applyTheme(theme) {
     });
     if (prevResolved !== resolved && typeof repaintStarfield === 'function') {
       repaintStarfield();
+    }
+    if (prevResolved !== resolved && typeof repaintEmptyOrb === 'function') {
+      repaintEmptyOrb();
+    }
+    if (prevResolved !== resolved && settings?.chatBackgroundImage) {
+      applyChatBackground(settings);
     }
   };
   if (
@@ -872,6 +1016,7 @@ function normalizeSettings(parsed) {
   const webSearchPageMaxChars = Number(parsed.webSearchPageMaxChars);
   const searchResults = Number(parsed.webSearchResults);
   const searchRegion = String(parsed.webSearchRegion || '').trim().toLowerCase();
+  const chatBackgroundOverlay = Number(parsed.chatBackgroundOverlay);
   return {
     name: typeof parsed.name === 'string' ? parsed.name : '',
     about: typeof parsed.about === 'string' ? parsed.about : '',
@@ -925,6 +1070,16 @@ function normalizeSettings(parsed) {
     attachmentMaxChars: Number.isFinite(maxChars)
       ? Math.min(500000, Math.max(2000, Math.round(maxChars)))
       : DEFAULT_SETTINGS.attachmentMaxChars,
+    chatBackgroundImage: normalizeChatBackgroundImage(parsed.chatBackgroundImage),
+    chatBackgroundImageName: typeof parsed.chatBackgroundImageName === 'string'
+      ? parsed.chatBackgroundImageName.slice(0, 255)
+      : '',
+    chatBackgroundPosition: CHAT_BACKGROUND_POSITIONS.includes(parsed.chatBackgroundPosition)
+      ? parsed.chatBackgroundPosition
+      : DEFAULT_SETTINGS.chatBackgroundPosition,
+    chatBackgroundOverlay: Number.isFinite(chatBackgroundOverlay)
+      ? Math.min(100, Math.max(0, Math.round(chatBackgroundOverlay)))
+      : DEFAULT_SETTINGS.chatBackgroundOverlay,
   };
 }
 
@@ -948,6 +1103,7 @@ function saveSettingsToLocal() {
 
 function saveSettings(next) {
   settings = next;
+  applyChatBackground(settings);
   updateGreeting();
   updateComposerHint();
   syncAgentButton();
@@ -1000,7 +1156,11 @@ function settingsLookEmpty(value) {
     && value.attachmentsMode === DEFAULT_SETTINGS.attachmentsMode
     && value.attachmentTextFallback === DEFAULT_SETTINGS.attachmentTextFallback
     && value.attachmentOcr === DEFAULT_SETTINGS.attachmentOcr
-    && value.attachmentMaxChars === DEFAULT_SETTINGS.attachmentMaxChars;
+    && value.attachmentMaxChars === DEFAULT_SETTINGS.attachmentMaxChars
+    && value.chatBackgroundImage === DEFAULT_SETTINGS.chatBackgroundImage
+    && value.chatBackgroundImageName === DEFAULT_SETTINGS.chatBackgroundImageName
+    && value.chatBackgroundPosition === DEFAULT_SETTINGS.chatBackgroundPosition
+    && value.chatBackgroundOverlay === DEFAULT_SETTINGS.chatBackgroundOverlay;
 }
 
 function refreshLocalDataPane() {
@@ -1227,6 +1387,7 @@ function hideUnlockSession() {
 }
 
 function refreshUiFromMemoryStore() {
+  applyChatBackground(settings);
   updateGreeting();
   updateComposerHint();
   syncAgentButton();

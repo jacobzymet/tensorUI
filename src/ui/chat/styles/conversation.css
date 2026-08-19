@@ -11,6 +11,52 @@
     var(--color-paper);
   overflow: hidden;
 }
+.chat-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-enter) var(--ease-out);
+}
+.chat-background.has-image { opacity: 1; }
+.chat-shell.is-projects .chat-background { opacity: 0; }
+.chat-background img,
+.chat-background-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.chat-background img {
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+.chat-background-overlay {
+  background: #000;
+  opacity: 0.72;
+}
+.chat-main[data-background-tone="dark"] {
+  --chat-background-ink: oklch(98% 0.004 260);
+  --chat-background-muted: oklch(82% 0.008 260);
+}
+.chat-main[data-background-tone="light"] {
+  --chat-background-ink: oklch(16% 0.01 260);
+  --chat-background-muted: oklch(35% 0.012 260);
+}
+.chat-main[data-background-tone] .empty-greeting,
+.chat-main[data-background-tone] .msg-role-assistant .msg-bubble,
+.chat-main[data-background-tone] .msg-role-assistant .msg-bubble :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--chat-background-ink);
+}
+.chat-main[data-background-tone] .empty-sub,
+.chat-main[data-background-tone] .msg-role-assistant .msg-bubble blockquote,
+.chat-main[data-background-tone] .msg-role-assistant .msg-meta,
+.chat-main[data-background-tone] .msg-role-assistant .msg-meta-model {
+  color: var(--chat-background-muted);
+}
 .chat-workspace {
   flex: 1 1 auto;
   min-height: 0;
@@ -479,7 +525,7 @@
   width: 100%;
   height: 100%;
 }
-.chat-main > *:not(.chat-starfield) {
+.chat-main > *:not(.chat-starfield):not(.chat-background) {
   position: relative;
   z-index: 1;
 }
@@ -500,8 +546,12 @@
   transition: border-color var(--dur-short) var(--ease-out);
   overflow: visible;
 }
+.chat-topbar:not(.has-thread) { display: none; }
 .chat-topbar.has-thread {
   border-bottom-color: color-mix(in oklch, var(--color-rule) 88%, transparent);
+}
+.chat-shell:not(.has-active-thread) .trace-expand-fab {
+  top: 0.65rem;
 }
 .chat-topbar-leading {
   display: flex;

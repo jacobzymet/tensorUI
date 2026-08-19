@@ -2083,6 +2083,67 @@ document.getElementById('btnSettings').addEventListener('click', openSettings);
 document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
 document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
 document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
+document.getElementById('settingChatBackgroundUrl')?.addEventListener('input', (event) => {
+  pendingChatBackgroundImage = event.target.value.trim();
+  pendingChatBackgroundImageName = '';
+  syncChatBackgroundForm();
+});
+document.getElementById('settingChatBackgroundOverlay')?.addEventListener('input', syncChatBackgroundForm);
+document.getElementById('btnChatBackgroundFile')?.addEventListener('click', () => {
+  document.getElementById('settingChatBackgroundFile')?.click();
+});
+document.getElementById('settingChatBackgroundFile')?.addEventListener('change', (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'];
+  if (!allowed.includes(file.type)) {
+    alert('Choose a PNG, JPEG, WebP, GIF, or AVIF image.');
+    return;
+  }
+  if (file.size > CHAT_BACKGROUND_MAX_BYTES) {
+    alert('Background images must be 1 MB or smaller.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.addEventListener('load', () => {
+    pendingChatBackgroundImage = typeof reader.result === 'string' ? reader.result : '';
+    pendingChatBackgroundImageName = file.name;
+    syncChatBackgroundForm();
+    syncSettingsSaveButton();
+  });
+  reader.addEventListener('error', () => alert('Could not read that image.'));
+  reader.readAsDataURL(file);
+});
+document.getElementById('btnChatBackgroundClear')?.addEventListener('click', () => {
+  pendingChatBackgroundImage = '';
+  pendingChatBackgroundImageName = '';
+  const urlInput = document.getElementById('settingChatBackgroundUrl');
+  if (urlInput) urlInput.value = '';
+  syncChatBackgroundForm();
+  syncSettingsSaveButton();
+});
+document.querySelectorAll('[data-background-position]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const positionInput = document.getElementById('settingChatBackgroundPosition');
+    if (!positionInput) return;
+    positionInput.value = button.dataset.backgroundPosition;
+    syncChatBackgroundForm();
+    syncSettingsSaveButton();
+  });
+  button.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = [...document.querySelectorAll('[data-background-position]')];
+    const index = buttons.indexOf(button);
+    const delta = event.key === 'ArrowLeft' ? -1
+      : event.key === 'ArrowRight' ? 1
+        : event.key === 'ArrowUp' ? -3 : 3;
+    const next = buttons[Math.min(buttons.length - 1, Math.max(0, index + delta))];
+    next?.click();
+    next?.focus();
+  });
+});
 settingsModal.querySelector('.settings-dialog')?.addEventListener('input', (event) => {
   if (!event.target.closest('input, textarea, select')) return;
   syncWebSearchControls();
@@ -2607,7 +2668,15 @@ function mountStarfield(canvas) {
   }
 }
 
-mountOrb(document.getElementById('orbMark'), 64);
+const emptyStateOrb = mountOrb(document.getElementById('orbMark'), 64, {
+  ink: () => {
+    const tone = chatMain.dataset.backgroundTone;
+    if (tone === 'dark') return 'bright';
+    if (tone === 'light') return 'dark';
+    return 'auto';
+  },
+});
+repaintEmptyOrb = () => emptyStateOrb.paint();
 mountStarfield(document.getElementById('starfieldCanvas'));
 
 const updateToast = document.getElementById('updateToast');
@@ -2692,6 +2761,7 @@ btnUpdateDismiss?.addEventListener('click', () => {
 
 (async () => {
   await initLocalData();
+  applyChatBackground(settings);
   updateGreeting();
   syncAgentButton();
   syncResearchControls();

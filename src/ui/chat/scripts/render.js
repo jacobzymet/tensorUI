@@ -2090,6 +2090,7 @@ function showEmptyState() {
   emptyState.classList.remove('is-hidden');
   threadWrap.classList.add('is-hidden');
   chatTopbar.classList.remove('has-thread');
+  chatShell.classList.remove('has-active-thread');
   convoTitleEl.removeAttribute('role');
   convoTitleEl.removeAttribute('tabindex');
   convoTitleEl.removeAttribute('title');
@@ -2104,6 +2105,7 @@ function showThread(convo) {
   emptyState.classList.add('is-hidden');
   threadWrap.classList.remove('is-hidden');
   chatTopbar.classList.add('has-thread');
+  chatShell.classList.add('has-active-thread');
   convoTitleEl.textContent = convo?.incognito ? '' : (convo.title || 'New chat');
   if (convo?.incognito) {
     convoTitleEl.removeAttribute('role');
