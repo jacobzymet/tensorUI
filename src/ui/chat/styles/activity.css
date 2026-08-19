@@ -39,7 +39,8 @@
   background: color-mix(in oklch, var(--color-rule) 80%, transparent);
   z-index: 0;
 }
-.agent-live:empty { display: none; }
+.agent-live:empty,
+.agent-sealed:empty { display: none; }
 .agent-step-dot {
   width: 0.85rem;
   height: 0.85rem;

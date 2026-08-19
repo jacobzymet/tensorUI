@@ -912,9 +912,12 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
   const thinkingOpen = streaming && isThinkingOpen(cleaned);
   const hasTimeline = stream.timeline.length > 0;
   const desktop = isDesktopTraceLayout();
-  const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline, {
-    notesCollapsed: !streaming,
-  });
+  const notesCollapsed = readProcessNotesCollapsed(
+    answerEl,
+    stream.processNotesCollapsed !== false
+  );
+  stream.processNotesCollapsed = notesCollapsed;
+  const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline, { notesCollapsed });
   const liveAnswerHtml = renderStreamingAnswerHtml(cleaned);
   const answerHtml = desktop ? (sealedAnswerHtml + liveAnswerHtml) : '';
   const hasVisibleAnswer = desktop
@@ -922,33 +925,39 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
     : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
 
   if (desktop) {
-    if (answerHtml) {
-      if (answerEl.dataset.renderedHtml !== answerHtml) {
-        answerEl.innerHTML = answerHtml;
-        answerEl.dataset.renderedHtml = answerHtml;
-      }
-    } else if (!streaming) {
+    const fallbackLiveHtml = (!hasTimeline && !thinkingOpen && cleaned)
+      ? renderAssistantHtml(cleaned, { streaming: true })
+      : '';
+    const nextLiveHtml = liveAnswerHtml || fallbackLiveHtml;
+    const hasContent = !!(sealedAnswerHtml || nextLiveHtml);
+    if (!hasContent && !streaming) {
       if (answerEl.innerHTML) answerEl.innerHTML = '';
       delete answerEl.dataset.renderedHtml;
-    } else if (!hasTimeline && !thinkingOpen) {
-      const nextHtml = cleaned ? renderAssistantHtml(cleaned, { streaming: true }) : '';
-      if (answerEl.dataset.renderedHtml !== nextHtml) {
-        answerEl.innerHTML = nextHtml;
-        answerEl.dataset.renderedHtml = nextHtml;
+    } else if (hasContent || streaming) {
+      let sealedRoot = answerEl.querySelector(':scope > .agent-sealed');
+      let liveRoot = answerEl.querySelector(':scope > .agent-live');
+      if (!sealedRoot || !liveRoot) {
+        answerEl.innerHTML = '<div class="agent-sealed"></div><div class="agent-live"></div>';
+        sealedRoot = answerEl.querySelector(':scope > .agent-sealed');
+        liveRoot = answerEl.querySelector(':scope > .agent-live');
       }
-    } else {
-      const nextHtml = sealedAnswerHtml || '';
-      if (answerEl.dataset.renderedHtml !== nextHtml) {
-        answerEl.innerHTML = nextHtml;
-        answerEl.dataset.renderedHtml = nextHtml;
+      const sealedSig = sealedContentSignature(stream.timeline);
+      if (sealedRoot.dataset.sealedSig !== sealedSig) {
+        sealedRoot.innerHTML = sealedAnswerHtml;
+        sealedRoot.dataset.sealedSig = sealedSig;
+      }
+      if (liveRoot.dataset.renderedHtml !== nextLiveHtml) {
+        liveRoot.innerHTML = nextLiveHtml;
+        liveRoot.dataset.renderedHtml = nextLiveHtml;
       }
     }
     enhanceCodeBlocks(answerEl);
     delete answerEl.dataset.committedSig;
+    delete answerEl.dataset.renderedHtml;
     stream.enteredSteps = 0;
   } else if (cleaned || hasTimeline || sealedAnswerHtml) {
     const committedHtml = renderCommittedParts(stream.timeline);
-    const committedSig = timelineSignature(stream.timeline) + '\0' + sealedAnswerHtml;
+    const committedSig = timelineSignature(stream.timeline) + '\0' + sealedContentSignature(stream.timeline);
     const liveOnly =
       streaming &&
       thinkingOpen &&
@@ -1097,6 +1106,7 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     partial: '',
     timeline: [],
     errorMessage: null,
+    processNotesCollapsed: true,
     dom: null,
     steerId: null,
     pendingSteers: [],
@@ -1590,6 +1600,11 @@ chatThread.addEventListener('click', (event) => {
     if (!fold) return;
     const collapsed = fold.classList.toggle('is-collapsed');
     foldToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (fold.classList.contains('agent-process-notes')) {
+      const row = fold.closest('.msg-role-assistant');
+      const live = row && activeId ? activeStreams.get(activeId) : null;
+      if (live && live.dom?.row === row) live.processNotesCollapsed = collapsed;
+    }
     return;
   }
   const btn = event.target.closest('.md-code-copy');

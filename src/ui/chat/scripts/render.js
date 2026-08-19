@@ -175,7 +175,18 @@ function renderProcessNotesFold(notes, { collapsed = true } = {}) {
   );
 }
 
-function renderSealedAnswerHtml(parts, { notesCollapsed = false } = {}) {
+function readProcessNotesCollapsed(root, fallback = true) {
+  const fold = root && root.querySelector('.agent-process-notes');
+  if (!fold) return fallback;
+  return fold.classList.contains('is-collapsed');
+}
+
+function sealedContentSignature(parts) {
+  const { processNotes, answerChunks } = splitSealedTextParts(parts);
+  return processNotes.join('\0') + '\n' + answerChunks.join('\0');
+}
+
+function renderSealedAnswerHtml(parts, { notesCollapsed = true } = {}) {
   const { processNotes, answerChunks } = splitSealedTextParts(parts);
   const notesHtml = renderProcessNotesFold(processNotes, { collapsed: notesCollapsed });
   let text = '';
@@ -263,7 +274,7 @@ function isDeferredMemoryNotice(part) {
   return false;
 }
 
-function collectTimelineAndAnswer(message) {
+function collectTimelineAndAnswer(message, { notesCollapsed = true } = {}) {
   const timelineParts = [];
   const deferredNotices = [];
   let answerText = '';
@@ -301,7 +312,7 @@ function collectTimelineAndAnswer(message) {
   return {
     timelineParts,
     processNotes,
-    processNotesHtml: renderProcessNotesFold(processNotes, { collapsed: true }),
+    processNotesHtml: renderProcessNotesFold(processNotes, { collapsed: notesCollapsed }),
     answerText,
     answerHtml: answerText ? renderMarkdown(answerText) : '',
     stepCount: timelinePartCount(timelineParts),
@@ -344,11 +355,11 @@ function renderMemoryNoticesHtml(message) {
   );
 }
 
-function renderAssistantMessage(message, { streaming = false, collapseTimeline = null } = {}) {
+function renderAssistantMessage(message, { streaming = false, collapseTimeline = null, notesCollapsed = true } = {}) {
   const memoryHtml = renderMemoryNoticesHtml(message);
   if (streaming) {
     const partsHtml = renderCommittedParts(message.parts);
-    const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed: false });
+    const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed });
     const bodyHtml = message.content
       ? renderAssistantHtml(message.content, { streaming: true })
       : '';
@@ -356,7 +367,7 @@ function renderAssistantMessage(message, { streaming = false, collapseTimeline =
   }
 
   const { timelineParts, answerHtml, stepCount, processNotesHtml } =
-    collectTimelineAndAnswer(message);
+    collectTimelineAndAnswer(message, { notesCollapsed });
   const timelineHtml = renderCommittedParts(timelineParts);
   const answerBlock = answerHtml
     ? '<div class="agent-final-answer">' + answerHtml + '</div>'
@@ -387,9 +398,11 @@ function settleAssistantRow(row, message, { animateCollapse = false } = {}) {
   const bubble = row.querySelector('.msg-bubble');
   if (!bubble) return;
   const collapseTimeline = animateCollapse ? false : null;
+  const notesCollapsed = readProcessNotesCollapsed(row, true);
   bubble.innerHTML = renderAssistantMessage(message, {
     streaming: false,
     collapseTimeline,
+    notesCollapsed,
   });
   enhanceCodeBlocks(bubble);
   bubble.querySelectorAll('.think-body, .agent-timeline-fold-inner').forEach((el) => {
