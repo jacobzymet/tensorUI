@@ -362,6 +362,27 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_preferences_hide_model_picker_state() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let salt = crypto::random_salt().unwrap();
+        let key = crypto::derive_key("test-passphrase", &salt).unwrap();
+        let preferences = serde_json::json!({
+            "selectedChatModel": "provider|secret-model",
+            "pinnedModelIds": ["provider|secret-model"],
+            "recentModelIds": ["provider|secret-model"]
+        });
+        save_preferences(root, preferences.clone(), Some(&key)).unwrap();
+        crypto::save_meta(root, &crypto::meta_for_key(&key, salt).unwrap()).unwrap();
+
+        let raw = read_json_file(&preferences_path(root)).unwrap().unwrap();
+        let serialized = serde_json::to_string(&raw).unwrap();
+        assert!(crypto::is_envelope(&raw));
+        assert!(!serialized.contains("secret-model"));
+        assert_eq!(load_preferences(root, Some(&key)).unwrap(), preferences);
+    }
+
+    #[test]
     fn encryption_rejects_plaintext_file() {
         let dir = tempdir().unwrap();
         let root = dir.path();

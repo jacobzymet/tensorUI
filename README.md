@@ -92,9 +92,9 @@ In **Chat → Settings → Local Data**, enable encryption with a passphrase. Te
 
 **Not covered:** plaintext copies created before encryption, filesystem snapshots/backups, malware or another process in your logged-in session, rollback to an older complete encrypted data set by an attacker with write access, cold-boot/core-dump memory forensics while unlocked, forgotten passphrases, physical hardware failure, or network exposure of the loopback UI. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems.
 
-Encryption applies to **disk** storage only. Browser `localStorage` mode does not use it. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
+Encryption covers chats, preferences (including model pins and recent-model state), provider tokens, and skill contents stored on disk. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
 
-In **Settings → Local Data** you can also open the data folder, or optionally switch chats/settings to browser `localStorage` only.
+In **Settings → Local Data** you can also open the data folder. Older browser-storage data and UI preferences are migrated to disk once and then removed from `localStorage`.
 
 ```toml
 [ui]

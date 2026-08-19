@@ -90,6 +90,13 @@ const DEFAULT_SETTINGS = {
   chatBackgroundImageName: '',
   chatBackgroundPosition: 'center',
   chatBackgroundOverlay: 72,
+  selectedChatModel: '',
+  recentModelIds: [],
+  pinnedModelIds: [],
+  sidebarCollapsed: false,
+  privacyMode: false,
+  updateDismissed: '',
+  browserMigrationVersion: 1,
 };
 
 const chatShell = document.getElementById('chatShell');
@@ -549,10 +556,10 @@ const PINNED_MODELS_MAX = 48;
 /** Below this many models the filter field is more noise than help. */
 const MODEL_SEARCH_MIN_OPTIONS = 6;
 const MODEL_PIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1z"/></svg>';
-let selectedRemoteModelId = localStorage.getItem(REMOTE_MODEL_KEY) || '';
-let selectedChatModel = localStorage.getItem(CHAT_MODEL_KEY) || '';
-let recentModelIds = loadRecentModelIds();
-let pinnedModelIds = loadPinnedModelIds();
+let selectedRemoteModelId = '';
+let selectedChatModel = '';
+let recentModelIds = [];
+let pinnedModelIds = [];
 let modelMenuOptions = [];
 /** Options passing the current filter — what the arrow keys actually walk. */
 let modelMenuMatches = [];
@@ -561,28 +568,24 @@ let modelMenuActiveIndex = -1;
 let modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'all');
 let latestState = null;
 
-function loadRecentModelIds() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RECENT_MODELS_KEY) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((id) => typeof id === 'string' && id.trim())
-      .map((id) => id.trim())
-      .slice(0, RECENT_MODELS_MAX);
-  } catch {
-    return [];
-  }
+function normalizeModelIds(ids, limit) {
+  return [...new Set((Array.isArray(ids) ? ids : [])
+    .filter((id) => typeof id === 'string' && id.trim())
+    .map((id) => id.trim()))].slice(0, limit);
+}
+
+function persistModelPickerState() {
+  saveSettings({
+    ...settings,
+    selectedChatModel,
+    recentModelIds: recentModelIds.slice(),
+    pinnedModelIds: pinnedModelIds.slice(),
+  }, { immediate: true });
 }
 
 function saveRecentModelIds(ids) {
-  recentModelIds = (Array.isArray(ids) ? ids : [])
-    .filter((id) => typeof id === 'string' && id)
-    .slice(0, RECENT_MODELS_MAX);
-  try {
-    localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(recentModelIds));
-  } catch {
-    // ignore quota / private-mode failures
-  }
+  recentModelIds = normalizeModelIds(ids, RECENT_MODELS_MAX);
+  persistModelPickerState();
 }
 
 function rememberRecentModel(value) {
@@ -590,37 +593,9 @@ function rememberRecentModel(value) {
   saveRecentModelIds([value, ...recentModelIds.filter((id) => id !== value)]);
 }
 
-function pruneRecentModels(availableValues) {
-  const allowed = new Set(availableValues || []);
-  const next = recentModelIds.filter((id) => allowed.has(id));
-  if (next.length !== recentModelIds.length) saveRecentModelIds(next);
-  if (modelMenuTab === 'recents' && !recentModelIds.length) {
-    modelMenuTab = pinnedModelIds.length ? 'pins' : 'all';
-  }
-}
-
-function loadPinnedModelIds() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PINNED_MODELS_KEY) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((id) => typeof id === 'string' && id.trim())
-      .map((id) => id.trim())
-      .slice(0, PINNED_MODELS_MAX);
-  } catch {
-    return [];
-  }
-}
-
 function savePinnedModelIds(ids) {
-  pinnedModelIds = (Array.isArray(ids) ? ids : [])
-    .filter((id) => typeof id === 'string' && id)
-    .slice(0, PINNED_MODELS_MAX);
-  try {
-    localStorage.setItem(PINNED_MODELS_KEY, JSON.stringify(pinnedModelIds));
-  } catch {
-    // ignore quota / private-mode failures
-  }
+  pinnedModelIds = normalizeModelIds(ids, PINNED_MODELS_MAX);
+  persistModelPickerState();
 }
 
 function isModelPinned(value) {
@@ -643,13 +618,14 @@ function togglePinnedModel(value) {
   }
 }
 
-function prunePinnedModels(availableValues) {
-  const allowed = new Set(availableValues || []);
-  const next = pinnedModelIds.filter((id) => allowed.has(id));
-  if (next.length !== pinnedModelIds.length) savePinnedModelIds(next);
-  if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
-    modelMenuTab = recentModelIds.length ? 'recents' : 'all';
-  }
+function hydrateModelPickerState() {
+  selectedChatModel = typeof settings.selectedChatModel === 'string'
+    ? settings.selectedChatModel
+    : '';
+  selectedRemoteModelId = selectedChatModel;
+  recentModelIds = normalizeModelIds(settings.recentModelIds, RECENT_MODELS_MAX);
+  pinnedModelIds = normalizeModelIds(settings.pinnedModelIds, PINNED_MODELS_MAX);
+  modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'all');
 }
 
 function newId(prefix) {
@@ -763,12 +739,61 @@ function loadStoreFromLocal() {
   }
 }
 
-function saveStoreToLocal() {
+function readLegacyLocalValue(key) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(storePayload()));
+    return localStorage.getItem(key);
   } catch {
-    // private browsing / quota
+    return null;
   }
+}
+
+function readLegacyLocalJson(key, fallback) {
+  try {
+    const raw = readLegacyLocalValue(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const LEGACY_LOCAL_STORAGE_KEYS = [
+  STORAGE_KEY,
+  SETTINGS_KEY,
+  SIDEBAR_COLLAPSED_KEY,
+  PRIVACY_MODE_KEY,
+  UPDATE_DISMISS_KEY,
+  REMOTE_MODEL_KEY,
+  CHAT_MODEL_KEY,
+  RECENT_MODELS_KEY,
+  PINNED_MODELS_KEY,
+  'tensorui.settings.sidebarCollapsed',
+];
+
+function clearLegacyLocalStorage() {
+  try {
+    LEGACY_LOCAL_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // A locked-down browser may deny storage access; nothing was written by us.
+  }
+}
+
+function mergeLegacyStore(primary, legacy, preferLegacy = false) {
+  if (storeIsEmpty(legacy)) return primary;
+  if (storeIsEmpty(primary)) return legacy;
+  const first = preferLegacy ? legacy : primary;
+  const second = preferLegacy ? primary : legacy;
+  const projectsById = new Map(first.projects.map((item) => [item.id, item]));
+  const conversationsById = new Map(first.conversations.map((item) => [item.id, item]));
+  second.projects.forEach((item) => {
+    if (!projectsById.has(item.id)) projectsById.set(item.id, item);
+  });
+  second.conversations.forEach((item) => {
+    if (!conversationsById.has(item.id)) conversationsById.set(item.id, item);
+  });
+  return {
+    projects: [...projectsById.values()],
+    conversations: [...conversationsById.values()],
+  };
 }
 
 let projects = [];
@@ -778,6 +803,7 @@ let browserStorage = false;
 let storageReady = false;
 let saveStoreTimer = null;
 let saveSettingsTimer = null;
+let settingsWriteChain = Promise.resolve();
 
 function storePayload() {
   return {
@@ -804,10 +830,6 @@ function requireUnlockedData() {
 
 function saveStore() {
   if (!storageReady || diskEncryptionLocked()) return;
-  if (browserStorage) {
-    saveStoreToLocal();
-    return;
-  }
   clearTimeout(saveStoreTimer);
   saveStoreTimer = setTimeout(() => {
     if (diskEncryptionLocked()) return;
@@ -1104,28 +1126,38 @@ function normalizeSettings(parsed) {
     chatBackgroundOverlay: Number.isFinite(chatBackgroundOverlay)
       ? Math.min(100, Math.max(0, Math.round(chatBackgroundOverlay)))
       : DEFAULT_SETTINGS.chatBackgroundOverlay,
+    selectedChatModel: typeof parsed.selectedChatModel === 'string'
+      ? parsed.selectedChatModel.trim()
+      : '',
+    recentModelIds: normalizeModelIds(parsed.recentModelIds, RECENT_MODELS_MAX),
+    pinnedModelIds: normalizeModelIds(parsed.pinnedModelIds, PINNED_MODELS_MAX),
+    sidebarCollapsed: parsed.sidebarCollapsed === true,
+    privacyMode: parsed.privacyMode === true,
+    updateDismissed: typeof parsed.updateDismissed === 'string'
+      ? parsed.updateDismissed.trim()
+      : '',
+    browserMigrationVersion: Number.isInteger(parsed.browserMigrationVersion)
+      ? parsed.browserMigrationVersion
+      : 0,
   };
 }
 
-function loadSettingsFromLocal() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_SETTINGS };
-    return normalizeSettings(JSON.parse(raw));
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+function enqueueSettingsWrite(snapshot) {
+  settingsWriteChain = settingsWriteChain
+    .catch(() => {})
+    .then(async () => {
+      const response = await fetch('/api/data/preferences', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(snapshot),
+        keepalive: true,
+      });
+      if (!response.ok) throw new Error('Could not save preferences');
+    });
+  return settingsWriteChain;
 }
 
-function saveSettingsToLocal() {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    // ignore
-  }
-}
-
-function saveSettings(next) {
+function saveSettings(next, { immediate = false } = {}) {
   settings = next;
   applyChatBackground(settings);
   updateGreeting();
@@ -1134,18 +1166,14 @@ function saveSettings(next) {
   syncResearchControls();
   syncAttachButton();
   if (!storageReady || diskEncryptionLocked()) return;
-  if (browserStorage) {
-    saveSettingsToLocal();
+  clearTimeout(saveSettingsTimer);
+  if (immediate) {
+    enqueueSettingsWrite({ ...settings });
     return;
   }
-  clearTimeout(saveSettingsTimer);
   saveSettingsTimer = setTimeout(() => {
     if (diskEncryptionLocked()) return;
-    fetch('/api/data/preferences', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(settings),
-    }).catch(() => {});
+    enqueueSettingsWrite({ ...settings });
   }, 120);
 }
 
@@ -1156,66 +1184,26 @@ function storeIsEmpty(store) {
     && !(store.conversations && store.conversations.length);
 }
 
-function settingsLookEmpty(value) {
-  return !value.name
-    && !value.about
-    && !value.instructions
-    && !value.memory
-    && value.thinking === DEFAULT_SETTINGS.thinking
-    && value.thinkingEffort === DEFAULT_SETTINGS.thinkingEffort
-    && value.enterSends === DEFAULT_SETTINGS.enterSends
-    && value.skillWebSearch === DEFAULT_SETTINGS.skillWebSearch
-    && value.webSearchDepth === DEFAULT_SETTINGS.webSearchDepth
-    && value.webSearchBackend === DEFAULT_SETTINGS.webSearchBackend
-    && value.webSearchResults === DEFAULT_SETTINGS.webSearchResults
-    && value.webSearchRegion === DEFAULT_SETTINGS.webSearchRegion
-    && value.webSearchSafeSearch === DEFAULT_SETTINGS.webSearchSafeSearch
-    && value.webSearchRecency === DEFAULT_SETTINGS.webSearchRecency
-    && value.skillFetchUrl === DEFAULT_SETTINGS.skillFetchUrl
-    && value.fetchUrlMaxChars === DEFAULT_SETTINGS.fetchUrlMaxChars
-    && value.webSearchPageMaxChars === DEFAULT_SETTINGS.webSearchPageMaxChars
-    && value.skillDeepResearch === DEFAULT_SETTINGS.skillDeepResearch
-    && value.agentMode === DEFAULT_SETTINGS.agentMode
-    && value.deepResearch === DEFAULT_SETTINGS.deepResearch
-    && value.attachmentsMode === DEFAULT_SETTINGS.attachmentsMode
-    && value.attachmentTextFallback === DEFAULT_SETTINGS.attachmentTextFallback
-    && value.attachmentOcr === DEFAULT_SETTINGS.attachmentOcr
-    && value.attachmentMaxChars === DEFAULT_SETTINGS.attachmentMaxChars
-    && value.chatBackgroundImage === DEFAULT_SETTINGS.chatBackgroundImage
-    && value.chatBackgroundImageName === DEFAULT_SETTINGS.chatBackgroundImageName
-    && value.chatBackgroundPosition === DEFAULT_SETTINGS.chatBackgroundPosition
-    && value.chatBackgroundOverlay === DEFAULT_SETTINGS.chatBackgroundOverlay;
-}
-
 function refreshLocalDataPane() {
   const lede = document.getElementById('settingsDataLede');
   const pathEl = document.getElementById('settingsDataPath');
   const filesEl = document.getElementById('settingsDataFiles');
   const openBtn = document.getElementById('btnOpenDataDir');
-  const toggle = document.getElementById('settingBrowserStorage');
-  const hint = document.getElementById('settingsStorageHint');
   const personalizationLede = document.querySelector(
     '.settings-pane[data-settings-pane="personalization"] .settings-pane-lede'
   );
 
-  if (toggle) toggle.checked = !!browserStorage;
   if (lede) {
-    lede.textContent = browserStorage
-      ? 'Chats, projects, and settings are stored in this browser profile only.'
-      : 'Chats, projects, and settings are stored on disk in your OS data folder.';
+    lede.textContent = 'Chats, projects, and settings are stored on disk in your OS data folder.';
   }
   if (personalizationLede) {
-    personalizationLede.textContent = browserStorage
-      ? 'Saved in this browser. Sent as a system prompt with each message.'
-      : 'Saved on disk with your local data. Sent as a system prompt with each message.';
+    personalizationLede.textContent = 'Saved on disk with your local data. Sent as a system prompt with each message.';
   }
   if (pathEl) {
-    pathEl.textContent = dataInfo?.data_dir || (browserStorage ? 'Browser localStorage' : '—');
+    pathEl.textContent = dataInfo?.data_dir || '—';
   }
   if (filesEl) {
-    if (browserStorage) {
-      filesEl.textContent = 'Browser mode ignores the data folder for chats and settings. Providers, appearance, and skills still use disk.';
-    } else if (dataInfo) {
+    if (dataInfo) {
       filesEl.textContent = dataInfo.encryption_enabled
         ? 'Chats, preferences, provider tokens, and skill contents are encrypted. Non-secret app configuration remains in config.toml.'
         : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Providers & appearance stay in config.toml.';
@@ -1225,12 +1213,7 @@ function refreshLocalDataPane() {
   }
   if (openBtn) {
     openBtn.textContent = dataInfo?.open_label || 'Open folder';
-    openBtn.disabled = !!browserStorage || !dataInfo?.data_dir;
-  }
-  if (hint) {
-    hint.textContent = browserStorage
-      ? 'On: chats and settings stay in this browser only. Providers/skills remain on disk.'
-      : 'Off: chats and settings are saved under the data folder above.';
+    openBtn.disabled = !dataInfo?.data_dir;
   }
   refreshEncryptionPane();
   refreshEncryptionIndicator();
@@ -1259,12 +1242,6 @@ function refreshEncryptionIndicator() {
     detail = 'Encryption recovery needed · enter your passphrase to finish safely';
     encryptionIndicator.classList.add('is-recovery');
     sidebarEncryptionBadge?.classList.add('is-recovery');
-  } else if (browserStorage) {
-    label = 'Disk encrypted';
-    shortDetail = 'Disk only';
-    detail = 'Disk encryption is on · browser localStorage is not covered';
-    encryptionIndicator.classList.add('is-browser');
-    sidebarEncryptionBadge?.classList.add('is-browser');
   } else if (!dataInfo.encryption_unlocked) {
     label = 'Locked';
     shortDetail = 'Session locked';
@@ -1282,7 +1259,6 @@ function refreshEncryptionIndicator() {
 }
 
 function refreshEncryptionPane() {
-  const browserHint = document.getElementById('settingsEncryptionBrowserHint');
   const statusEl = document.getElementById('settingsEncryptionStatus');
   const enableEl = document.getElementById('settingsEncryptionEnable');
   const unlockEl = document.getElementById('settingsEncryptionUnlock');
@@ -1292,21 +1268,11 @@ function refreshEncryptionPane() {
 
   const enabled = !!(dataInfo && dataInfo.encryption_enabled);
   const unlocked = !!(dataInfo && dataInfo.encryption_unlocked);
-  const browser = !!browserStorage;
-
-  if (browserHint) browserHint.classList.toggle('is-hidden', !browser);
 
   enableEl.classList.add('is-hidden');
   unlockEl.classList.add('is-hidden');
   activeEl.classList.add('is-hidden');
   if (disableForm) disableForm.classList.add('is-hidden');
-
-  if (browser) {
-    statusEl.textContent = enabled
-      ? 'On for disk files, but browser mode is active — chats in this session use localStorage.'
-      : 'Unavailable in browser localStorage mode.';
-    return;
-  }
 
   if (!enabled) {
     statusEl.textContent = 'Off — chats, settings, provider tokens, and skills are stored unencrypted on disk.';
@@ -1341,6 +1307,63 @@ async function postEncryption(path, body) {
   return dataInfo;
 }
 
+async function migrateLegacyBrowserState(store, rawPreferences, { preferLegacyStore = false } = {}) {
+  const rawPrefs = rawPreferences && typeof rawPreferences === 'object' ? rawPreferences : {};
+  const hasLegacy = LEGACY_LOCAL_STORAGE_KEYS.some((key) => readLegacyLocalValue(key) != null);
+  if (!hasLegacy && rawPrefs.browserMigrationVersion >= 1) {
+    return { store, preferences: normalizeSettings(rawPrefs) };
+  }
+
+  const legacyStore = loadStoreFromLocal();
+  const mergedStore = mergeLegacyStore(store, legacyStore, preferLegacyStore);
+  const legacySettings = readLegacyLocalJson(SETTINGS_KEY, {});
+  const legacySelected = readLegacyLocalValue(CHAT_MODEL_KEY)
+    || readLegacyLocalValue(REMOTE_MODEL_KEY)
+    || '';
+  const mergedRaw = { ...legacySettings, ...rawPrefs };
+  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'selectedChatModel')) {
+    mergedRaw.selectedChatModel = legacySelected;
+  }
+  mergedRaw.recentModelIds = normalizeModelIds([
+    ...(Array.isArray(rawPrefs.recentModelIds) ? rawPrefs.recentModelIds : []),
+    ...readLegacyLocalJson(RECENT_MODELS_KEY, []),
+  ], RECENT_MODELS_MAX);
+  mergedRaw.pinnedModelIds = normalizeModelIds([
+    ...(Array.isArray(rawPrefs.pinnedModelIds) ? rawPrefs.pinnedModelIds : []),
+    ...readLegacyLocalJson(PINNED_MODELS_KEY, []),
+  ], PINNED_MODELS_MAX);
+  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'sidebarCollapsed')) {
+    mergedRaw.sidebarCollapsed = readLegacyLocalValue(SIDEBAR_COLLAPSED_KEY) === '1';
+  }
+  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'privacyMode')) {
+    mergedRaw.privacyMode = readLegacyLocalValue(PRIVACY_MODE_KEY) === '1';
+  }
+  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'updateDismissed')) {
+    mergedRaw.updateDismissed = readLegacyLocalValue(UPDATE_DISMISS_KEY) || '';
+  }
+  mergedRaw.browserMigrationVersion = 1;
+  const preferences = normalizeSettings(mergedRaw);
+
+  const storeResponse = await fetch('/api/data/store', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      version: 2,
+      projects: mergedStore.projects,
+      conversations: mergedStore.conversations,
+    }),
+  });
+  if (!storeResponse.ok) throw new Error('Could not migrate browser chat data to disk');
+  const preferencesResponse = await fetch('/api/data/preferences', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(preferences),
+  });
+  if (!preferencesResponse.ok) throw new Error('Could not migrate browser preferences to disk');
+  clearLegacyLocalStorage();
+  return { store: mergedStore, preferences };
+}
+
 async function initLocalData() {
   try {
     const response = await fetch('/api/data');
@@ -1348,14 +1371,28 @@ async function initLocalData() {
   } catch {
     dataInfo = null;
   }
-  browserStorage = !!(dataInfo && dataInfo.browser_storage);
+  browserStorage = !!dataInfo?.browser_storage;
+  const migratingBrowserMode = browserStorage;
+  if (browserStorage && dataInfo) {
+    try {
+      const response = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ browser_storage: false }),
+      });
+      if (!response.ok) throw new Error('Could not switch legacy browser storage to disk');
+      dataInfo = await response.json();
+      browserStorage = false;
+    } catch {
+      dataInfo = null;
+      browserStorage = false;
+    }
+  }
 
-  if (browserStorage || !dataInfo) {
-    browserStorage = true;
-    const store = loadStoreFromLocal();
-    projects = store.projects;
-    conversations = store.conversations;
-    settings = loadSettingsFromLocal();
+  if (!dataInfo) {
+    projects = [];
+    conversations = [];
+    settings = { ...DEFAULT_SETTINGS };
   } else if (dataInfo.encryption_enabled && !dataInfo.encryption_unlocked) {
     projects = [];
     conversations = [];
@@ -1375,49 +1412,24 @@ async function initLocalData() {
           throw new Error(problem.error || 'Could not load chats');
         }
       } else {
-        let store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [] };
-        if (storeIsEmpty(store)) {
-          const local = loadStoreFromLocal();
-          if (!storeIsEmpty(local)) {
-            store = local;
-            await fetch('/api/data/store', {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                version: 2,
-                projects: store.projects,
-                conversations: store.conversations,
-              }),
-            });
-          }
-        }
-        projects = store.projects;
-        conversations = store.conversations;
-
+        const store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [] };
         const prefRes = await fetch('/api/data/preferences');
-        let prefs = prefRes.ok ? normalizeSettings(await prefRes.json()) : { ...DEFAULT_SETTINGS };
-        if (settingsLookEmpty(prefs)) {
-          const localPrefs = loadSettingsFromLocal();
-          if (!settingsLookEmpty(localPrefs)) {
-            prefs = localPrefs;
-            await fetch('/api/data/preferences', {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(prefs),
-            });
-          }
-        }
-        settings = prefs;
+        const rawPrefs = prefRes.ok ? await prefRes.json() : {};
+        const migrated = await migrateLegacyBrowserState(store, rawPrefs, {
+          preferLegacyStore: migratingBrowserMode,
+        });
+        projects = migrated.store.projects;
+        conversations = migrated.store.conversations;
+        settings = migrated.preferences;
       }
     } catch {
-      browserStorage = true;
-      const store = loadStoreFromLocal();
-      projects = store.projects;
-      conversations = store.conversations;
-      settings = loadSettingsFromLocal();
+      projects = [];
+      conversations = [];
+      settings = { ...DEFAULT_SETTINGS };
     }
   }
 
+  hydrateModelPickerState();
   storageReady = true;
   if (conversations._sortOrderMigrated) {
     delete conversations._sortOrderMigrated;
@@ -1501,10 +1513,13 @@ async function loadDiskDataAfterUnlock() {
     throw new Error(problem.error || 'Could not load chats');
   }
   const store = parseStorePayload(await storeRes.json());
-  projects = store.projects;
-  conversations = store.conversations;
   const prefRes = await fetch('/api/data/preferences');
-  settings = prefRes.ok ? normalizeSettings(await prefRes.json()) : { ...DEFAULT_SETTINGS };
+  const rawPrefs = prefRes.ok ? await prefRes.json() : {};
+  const migrated = await migrateLegacyBrowserState(store, rawPrefs);
+  projects = migrated.store.projects;
+  conversations = migrated.store.conversations;
+  settings = migrated.preferences;
+  hydrateModelPickerState();
   hideUnlockSession();
   refreshUiFromMemoryStore();
 }
@@ -1522,38 +1537,6 @@ async function unlockDiskEncryption(passphrase, buttonEl) {
   } finally {
     if (buttonEl) buttonEl.disabled = false;
   }
-}
-
-async function setBrowserStorageMode(enabled) {
-  // Flush current in-memory data into the destination before switching.
-  if (enabled) {
-    saveStoreToLocal();
-    saveSettingsToLocal();
-  } else {
-    await fetch('/api/data/store', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(storePayload()),
-    });
-    await fetch('/api/data/preferences', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-  }
-  const response = await fetch('/api/data', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ browser_storage: !!enabled }),
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || 'Could not update storage mode');
-  }
-  dataInfo = await response.json();
-  browserStorage = !!dataInfo.browser_storage;
-  refreshLocalDataPane();
-  refreshSettingsDataSummary();
 }
 
 function syncAgentButton() {

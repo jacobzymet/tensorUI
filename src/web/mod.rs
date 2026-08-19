@@ -1094,13 +1094,13 @@ async fn set_storage_mode(
     State(app): State<SharedApp>,
     Json(body): Json<SetStorageBody>,
 ) -> Result<Json<DataInfo>, ApiError> {
+    if body.browser_storage {
+        return Err(ApiError::bad_request(
+            "Browser localStorage mode has been removed; local data is stored on disk.",
+        ));
+    }
     let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    let mode = if body.browser_storage {
-        StorageMode::Browser
-    } else {
-        StorageMode::Disk
-    };
-    app.set_storage_mode(mode);
+    app.set_storage_mode(StorageMode::Disk);
     Ok(Json(data_info_from_app(&app)))
 }
 

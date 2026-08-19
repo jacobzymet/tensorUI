@@ -20,7 +20,7 @@ function refreshSettingsDataSummary() {
   const projectCount = projects.length;
   const chatLabel = chatCount === 1 ? '1 chat' : chatCount + ' chats';
   const projectLabel = projectCount === 1 ? '1 project' : projectCount + ' projects';
-  const where = browserStorage ? 'in this browser' : 'on disk';
+  const where = 'on disk';
   el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + projectLabel + '.';
   const clearChats = document.getElementById('btnClearChats');
   const clearProjects = document.getElementById('btnClearProjects');
@@ -796,6 +796,7 @@ function readSettingsForm() {
   const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
   const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
   return normalizeSettings({
+    ...settings,
     name: document.getElementById('settingName').value.trim(),
     about: document.getElementById('settingAbout').value,
     instructions: document.getElementById('settingInstructions').value,

@@ -422,8 +422,7 @@ function chooseModelOption(value) {
   if (value !== selectedChatModel) {
     selectedChatModel = value;
     selectedRemoteModelId = selectedChatModel;
-    localStorage.setItem(CHAT_MODEL_KEY, selectedChatModel);
-    localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
+    persistModelPickerState();
     const selected = modelMenuOptions.find((o) => o.value === selectedChatModel);
     chatModelSelect.textContent = selected ? selected.label : 'Model';
     chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
@@ -481,14 +480,12 @@ function syncModelSelector(data) {
     thinking: !!m.thinking_supported,
   }));
   modelMenuOptions = remoteOptions;
-  pruneRecentModels(remoteOptions.map((o) => o.value));
-  prunePinnedModels(remoteOptions.map((o) => o.value));
   if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
     rememberRecentModel(selectedChatModel);
   }
   const allValues = remoteOptions.map((o) => o.value);
   if (!allValues.includes(selectedChatModel)) {
-    // Migrate older localStorage ids (remote|base|model) by matching model+base suffix.
+    // Migrate older model ids (remote|base|model) by matching model+base suffix.
     const legacy = selectedRemoteModelId || selectedChatModel;
     const migrated = remoteOptions.find((o) => {
       if (!legacy) return false;
@@ -501,7 +498,7 @@ function syncModelSelector(data) {
     } else if (!menuOpen) {
       selectedChatModel = remoteOptions[0].value;
     }
-    localStorage.setItem(CHAT_MODEL_KEY, selectedChatModel);
+    persistModelPickerState();
   }
 
   const signature = [
@@ -523,7 +520,6 @@ function syncModelSelector(data) {
     chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
   }
   selectedRemoteModelId = selectedChatModel;
-  localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
   syncModelOriginPill(true, selected && selected.provider);
   if (menuOpen) positionModelMenu();
 }
@@ -1869,9 +1865,9 @@ function setSidebarOpen(open) {
     chatShell.classList.toggle('sidebar-open', open);
   } else {
     chatShell.classList.toggle('sidebar-collapsed', !open);
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, open ? '0' : '1');
-    } catch { /* ignore */ }
+    if (storageReady && settings.sidebarCollapsed === open) {
+      saveSettings({ ...settings, sidebarCollapsed: !open });
+    }
   }
   syncSidebarToggleUi();
 }
@@ -1908,17 +1904,13 @@ function syncPrivacyModeUi(enabled) {
 function setPrivacyMode(enabled, { persist = true } = {}) {
   syncPrivacyModeUi(!!enabled);
   if (!persist) return;
-  try {
-    localStorage.setItem(PRIVACY_MODE_KEY, enabled ? '1' : '0');
-  } catch { /* ignore */ }
+  if (storageReady && settings.privacyMode !== !!enabled) {
+    saveSettings({ ...settings, privacyMode: !!enabled });
+  }
 }
 
 function applyStoredPrivacyMode() {
-  let enabled = false;
-  try {
-    enabled = localStorage.getItem(PRIVACY_MODE_KEY) === '1';
-  } catch { /* ignore */ }
-  setPrivacyMode(enabled, { persist: false });
+  setPrivacyMode(settings.privacyMode === true, { persist: false });
 }
 
 function closeMobileSidebar() {
@@ -1931,7 +1923,7 @@ function applyStoredSidebarCollapsed() {
     syncSidebarToggleUi();
     return;
   }
-  const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  const collapsed = settings.sidebarCollapsed === true;
   chatShell.classList.toggle('sidebar-collapsed', collapsed);
   syncSidebarToggleUi();
 }
@@ -1953,9 +1945,6 @@ sidebarMobileMq.addEventListener?.('change', () => {
     syncSidebarToggleUi();
   }
 });
-applyStoredSidebarCollapsed();
-applyStoredPrivacyMode();
-
 // —— Search chats / projects ——
 const searchModal = document.getElementById('searchModal');
 const searchModalInput = document.getElementById('searchModalInput');
@@ -2316,20 +2305,6 @@ document.getElementById('btnOpenDataDir')?.addEventListener('click', async () =>
     refreshLocalDataPane();
   }
 });
-document.getElementById('settingBrowserStorage')?.addEventListener('change', async (event) => {
-  const toggle = event.target;
-  const next = !!toggle.checked;
-  toggle.disabled = true;
-  try {
-    await setBrowserStorageMode(next);
-  } catch (error) {
-    toggle.checked = !next;
-    alert(error.message || 'Could not update storage mode');
-  } finally {
-    toggle.disabled = false;
-  }
-});
-
 function syncEncryptionPassphraseWarning() {
   const passphraseInput = document.getElementById('encryptionPassphrase');
   const confirmInput = document.getElementById('encryptionPassphraseConfirm');
@@ -2759,21 +2734,13 @@ const btnUpdateLater = document.getElementById('btnUpdateLater');
 const btnUpdateDismiss = document.getElementById('btnUpdateDismiss');
 
 function dismissedUpdateVersion() {
-  try {
-    return localStorage.getItem(UPDATE_DISMISS_KEY) || '';
-  } catch {
-    return '';
-  }
+  return String(settings.updateDismissed || '');
 }
 
 function dismissUpdateNotice(version) {
   const tag = String(version || '').trim();
-  if (tag) {
-    try {
-      localStorage.setItem(UPDATE_DISMISS_KEY, tag);
-    } catch {
-      // ignore
-    }
+  if (tag && settings.updateDismissed !== tag) {
+    saveSettings({ ...settings, updateDismissed: tag });
   }
   hideUpdateToast();
 }
@@ -2833,6 +2800,8 @@ btnUpdateDismiss?.addEventListener('click', () => {
 
 (async () => {
   await initLocalData();
+  applyStoredSidebarCollapsed();
+  applyStoredPrivacyMode();
   applyChatBackground(settings);
   updateGreeting();
   syncAgentButton();

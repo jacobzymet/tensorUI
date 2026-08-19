@@ -2174,7 +2174,6 @@
         });
       });
 
-      const SIDEBAR_COLLAPSED_KEY = 'tensorui.settings.sidebarCollapsed';
       const btnToggleSidebar = document.getElementById('btnToggleSidebar');
       const btnExpandSidebar = document.getElementById('btnExpandSidebar');
       const sidebarMobileMq = window.matchMedia('(max-width: 820px)');
@@ -2199,9 +2198,6 @@
           shell.classList.toggle('sidebar-open', open);
         } else {
           shell.classList.toggle('sidebar-collapsed', !open);
-          try {
-            localStorage.setItem(SIDEBAR_COLLAPSED_KEY, open ? '0' : '1');
-          } catch { /* ignore */ }
         }
         syncSidebarToggleUi();
       }
@@ -2216,8 +2212,7 @@
           syncSidebarToggleUi();
           return;
         }
-        const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
-        shell.classList.toggle('sidebar-collapsed', collapsed);
+        shell.classList.remove('sidebar-collapsed');
         syncSidebarToggleUi();
       }
 

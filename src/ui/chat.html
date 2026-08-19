@@ -145,7 +145,7 @@
             </div>
             <div class="chat-topbar-title" id="convoTitle"></div>
             <div class="chat-topbar-trailing">
-              <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk or browser storage">
+              <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
                 Temporary Session
               </span>
@@ -734,14 +734,6 @@
                 <p class="settings-data-meta" id="settingsDataFiles">—</p>
               </div>
             </div>
-            <div class="settings-section">
-              <h3 class="settings-section-title">Storage mode</h3>
-              <label class="field-check">
-                <input type="checkbox" id="settingBrowserStorage">
-                <span>Use browser localStorage only <span style="color:var(--color-muted)">(optional; data stays in this browser profile)</span></span>
-              </label>
-              <p class="field-hint" id="settingsStorageHint" style="margin:0.35rem 0 0">When off, chats and settings are saved under the data folder above.</p>
-            </div>
             <div class="settings-section" id="settingsEncryptionSection">
               <h3 class="settings-section-title">Encryption at rest</h3>
               <p class="field-hint" id="settingsEncryptionStatus" style="margin:0 0 0.65rem">Off — chats and settings are stored as plain JSON on disk.</p>
@@ -778,7 +770,6 @@
                   <button type="button" class="btn btn-danger-ghost" id="btnConfirmDisableEncryption">Confirm turn off</button>
                 </div>
               </div>
-              <p class="field-hint is-hidden" id="settingsEncryptionBrowserHint" style="margin:0.45rem 0 0">Encryption applies to on-disk storage. Turn off browser localStorage to use it.</p>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Clear</h3>

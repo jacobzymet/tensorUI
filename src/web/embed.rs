@@ -11,3 +11,22 @@ pub const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/browser-favicon.png");
 pub const UI_MARK_DARK_PNG: &[u8] = include_bytes!("../../assets/icon-darkmode.png");
 pub const UI_MARK_LIGHT_PNG: &[u8] = include_bytes!("../../assets/icon-lightmode.png");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_ui_does_not_write_application_state_to_local_storage() {
+        assert!(!CHAT_JS.contains("localStorage.setItem"));
+        assert!(!SETTINGS_HTML.contains("localStorage.setItem"));
+        assert!(!CHAT_HTML.contains("settingBrowserStorage"));
+    }
+
+    #[test]
+    fn transient_model_catalogs_do_not_prune_saved_picker_state() {
+        assert!(!CHAT_JS.contains("prunePinnedModels("));
+        assert!(!CHAT_JS.contains("pruneRecentModels("));
+        assert!(CHAT_JS.contains("pinnedModelIds: pinnedModelIds.slice()"));
+    }
+}
