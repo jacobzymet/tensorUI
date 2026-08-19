@@ -511,6 +511,19 @@ let mentionInput = composerInput;
 const convoTitleEl = document.getElementById('convoTitle');
 const greetingEl = document.getElementById('greeting');
 const modelHintEl = document.getElementById('modelHint');
+
+function setModelHintWithProvider(prefix, providerLabel) {
+  if (!modelHintEl) return;
+  modelHintEl.replaceChildren(document.createTextNode(String(prefix || '')));
+  const provider = String(providerLabel || '').trim();
+  if (!provider) return;
+  modelHintEl.appendChild(document.createTextNode(' via '));
+  const protectedProvider = document.createElement('span');
+  protectedProvider.className = 'model-hint-provider';
+  protectedProvider.textContent = provider;
+  applyPrivacyMosaic(protectedProvider, 'model-hint-provider:' + provider);
+  modelHintEl.appendChild(protectedProvider);
+}
 const serverChip = document.getElementById('serverChip');
 const serverProviderName = document.getElementById('serverProviderName');
 applyPrivacyMosaic(serverProviderName, 'server-provider');

@@ -137,7 +137,16 @@ function syncModelOriginPill(visible, providerName) {
   chatModelOriginPill.classList.remove('is-hidden');
   chatModelOriginPill.setAttribute('aria-hidden', 'false');
   chatModelOriginPill.textContent = name;
-  chatModelOriginPill.title = name;
+  applyPrivacyMosaic(chatModelOriginPill, 'model-origin-provider:' + name);
+  chatModelOriginPill.title = chatShell.classList.contains('privacy-mode') ? '' : name;
+}
+
+function modelOptionTitle(label, provider) {
+  const model = String(label || '');
+  const origin = String(provider || '').trim();
+  return origin && !chatShell.classList.contains('privacy-mode')
+    ? model + ' · ' + origin
+    : model;
 }
 
 function modelMenuIsOpen() {
@@ -249,13 +258,14 @@ function renderModelMenuList() {
     const isSelected = option.value === selectedChatModel;
     const pinned = isModelPinned(option.value);
     const badge = option.provider
-      ? '<span class="chat-model-origin-pill" title="' + escapeModelAttr(option.provider) + '">'
+      ? '<span class="chat-model-origin-pill" title="'
+        + escapeModelAttr(chatShell.classList.contains('privacy-mode') ? '' : option.provider) + '">'
         + highlightModelText(option.provider, terms) + '</span>'
       : '';
     return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
       + '" role="option" id="chat-model-option-' + index + '"'
       + ' data-value="' + escapeModelAttr(option.value) + '"'
-      + ' title="' + escapeModelAttr(option.provider ? option.label + ' · ' + option.provider : option.label) + '"'
+      + ' title="' + escapeModelAttr(modelOptionTitle(option.label, option.provider)) + '"'
       + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
       + '<button type="button" class="chat-model-option-main" data-model-pick="'
       + escapeModelAttr(option.value) + '">'
@@ -271,6 +281,9 @@ function renderModelMenuList() {
       + '</button>'
       + '</div>';
   }).join('');
+  chatModelList.querySelectorAll('.chat-model-origin-pill').forEach((badge) => {
+    applyPrivacyMosaic(badge, 'model-menu-provider:' + badge.textContent);
+  });
 
   const empty = !modelMenuMatches.length;
   chatModelEmpty.classList.toggle('is-hidden', !empty);
@@ -413,9 +426,7 @@ function chooseModelOption(value) {
     localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
     const selected = modelMenuOptions.find((o) => o.value === selectedChatModel);
     chatModelSelect.textContent = selected ? selected.label : 'Model';
-    chatModelSelect.title = selected
-      ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
-      : '';
+    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
     syncModelOriginPill(true, selected && selected.provider);
     chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
       const isSelected = btn.getAttribute('data-value') === selectedChatModel;
@@ -509,9 +520,7 @@ function syncModelSelector(data) {
   const selected = remoteOptions.find((o) => o.value === selectedChatModel);
   if (!menuOpen) {
     chatModelSelect.textContent = selected ? selected.label : 'Model';
-    chatModelSelect.title = selected
-      ? (selected.provider ? selected.label + ' · ' + selected.provider : selected.label)
-      : '';
+    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
   }
   selectedRemoteModelId = selectedChatModel;
   localStorage.setItem(REMOTE_MODEL_KEY, selectedRemoteModelId);
@@ -563,7 +572,6 @@ function updateServerChip(data) {
   }
 
   const project = inProjectChat() ? getProject(activeProjectId) : null;
-  const viaSuffix = ' via ' + providerLabel;
   if (remoteChecking) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
@@ -574,13 +582,16 @@ function updateServerChip(data) {
     hideComposerHint();
   } else if (project && !activeId) {
     modelHintEl.classList.remove('is-hidden');
-    modelHintEl.textContent = 'Shared instructions & memory apply · ' + modelName + viaSuffix;
+    setModelHintWithProvider('Shared instructions & memory apply · ' + modelName, providerLabel);
     updateComposerHint();
   } else {
     modelHintEl.classList.remove('is-hidden');
-    modelHintEl.textContent = project
-      ? 'Chatting with ' + modelName + ' · Project: ' + project.name + viaSuffix
-      : ('Chatting with ' + modelName + viaSuffix);
+    setModelHintWithProvider(
+      project
+        ? 'Chatting with ' + modelName + ' · Project: ' + project.name
+        : 'Chatting with ' + modelName,
+      providerLabel
+    );
     updateComposerHint();
   }
   syncComposerThinkVisibility(remoteSelected);
@@ -1870,6 +1881,19 @@ function syncPrivacyModeUi(enabled) {
       ? 'Server connection status'
       : (serverChip.dataset.detailTitle || serverChip.title);
   }
+  const selected = modelMenuOptions.find((option) => option.value === selectedChatModel);
+  if (chatModelSelect) {
+    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
+  }
+  if (chatModelOriginPill) {
+    chatModelOriginPill.title = enabled ? '' : chatModelOriginPill.textContent;
+  }
+  chatModelList?.querySelectorAll('.chat-model-option').forEach((optionEl) => {
+    const option = modelMenuOptions.find((item) => item.value === optionEl.dataset.value);
+    optionEl.title = option ? modelOptionTitle(option.label, option.provider) : '';
+    const badge = optionEl.querySelector('.chat-model-origin-pill');
+    if (badge) badge.title = enabled ? '' : badge.textContent;
+  });
   if (!btnPrivacyMode) return;
   btnPrivacyMode.classList.toggle('is-active', enabled);
   btnPrivacyMode.setAttribute('aria-pressed', enabled ? 'true' : 'false');

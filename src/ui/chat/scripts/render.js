@@ -1121,14 +1121,18 @@ function syncProjectChrome() {
     modelHintEl.classList.remove('is-hidden');
     const suffix = project ? ' · Project: ' + project.name : '';
     const current = modelHintEl.textContent || '';
+    const provider = modelHintEl.querySelector('.model-hint-provider')?.textContent || '';
     if (incognito && !activeId) {
       modelHintEl.textContent = 'Temporary session — stays in memory only until you close the tab.'
         + (project ? ' · Project: ' + project.name : '');
     } else if (current.startsWith('Chatting with ')) {
       const model = current.replace(/^Chatting with /, '').split(/ · | via /)[0];
-      modelHintEl.textContent = project && !activeId
-        ? 'Shared instructions & memory apply · ' + model
-        : 'Chatting with ' + model + suffix;
+      setModelHintWithProvider(
+        project && !activeId
+          ? 'Shared instructions & memory apply · ' + model
+          : 'Chatting with ' + model + suffix,
+        provider
+      );
     } else if (project && !activeId) {
       modelHintEl.textContent = 'Shared instructions and memory apply to chats in this project.';
     }

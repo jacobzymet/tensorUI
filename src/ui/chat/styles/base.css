@@ -1053,7 +1053,7 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
   color: var(--color-ink-2);
 }
 
-/* Privacy mode is a screen-sharing aid for the sidebar. The mosaic is
+/* Privacy mode is a screen-sharing aid for identity-bearing UI surfaces. The mosaic is
    synthetic—not a filter over the real glyphs—and therefore carries no shape
    information from the protected title or provider name. */
 .privacy-mask {
@@ -1077,14 +1077,32 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
   box-shadow: var(--privacy-pixels);
   pointer-events: none;
 }
+.model-hint-provider {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: -0.18em;
+  white-space: nowrap;
+}
 .privacy-mode .convo-item:not(.is-active) .convo-title,
 .privacy-mode .sidebar-project-chip-name,
-.privacy-mode .sidebar-server-provider {
+.privacy-mode .sidebar-server-provider,
+.privacy-mode .model-hint-provider,
+.privacy-mode .chat-model-origin-pill.privacy-mask,
+.privacy-mode .chat-model-origin-pill.privacy-mask * {
   color: transparent;
+}
+.privacy-mode .chat-model-origin-pill .chat-model-mark {
+  background: transparent;
+}
+.privacy-mode .chat-model-origin-pill.privacy-mask {
+  overflow: hidden;
 }
 .privacy-mode .convo-item:not(.is-active) .privacy-mask::after,
 .privacy-mode .sidebar-project-chip-name.privacy-mask::after,
-.privacy-mode .sidebar-server-provider.privacy-mask::after {
+.privacy-mode .sidebar-server-provider.privacy-mask::after,
+.privacy-mode .model-hint-provider.privacy-mask::after,
+.privacy-mode .chat-model-origin-pill.privacy-mask::after {
   content: "";
   opacity: 1;
   filter: blur(0);
