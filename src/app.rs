@@ -8,8 +8,8 @@ use crate::{
     local_llm::LocalLlmManager,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, ProviderUpsertOptions,
-        ProvidersConfig, RemoteModelOption, mask_token, normalize_provider_base,
-        probe_provider_catalog, probe_provider_health, split_openai_base,
+        ProvidersConfig, RemoteModelOption, enrich_local_catalog, mask_token,
+        normalize_provider_base, probe_provider_endpoint,
     },
     store::{self, StorageMode, StoreError},
 };
@@ -269,21 +269,22 @@ impl App {
         false
     }
 
-    pub fn provider_warm_targets(&self) -> (Vec<WarmTarget>, Vec<WarmTarget>) {
+    pub fn provider_warm_targets(&self) -> Vec<WarmTarget> {
         if self.encryption_enabled() && !self.encryption_unlocked() {
-            return (Vec::new(), Vec::new());
+            return Vec::new();
         }
-        let health_targets = self
-            .config
+        self.config
             .providers
             .items
             .iter()
             .filter(|remote| {
                 let base = remote.base.trim();
-                !base.is_empty()
-                    && !self
-                        .remote_health
-                        .is_fresh(remote.api_style, base, remote.token.trim())
+                if base.is_empty() {
+                    return false;
+                }
+                let token = remote.token.trim();
+                !self.remote_health.is_fresh(remote.api_style, base, token)
+                    || !self.remote_catalog.is_fresh(remote.api_style, base, token)
             })
             .map(|remote| {
                 (
@@ -293,29 +294,7 @@ impl App {
                     remote.allow_insecure_tls,
                 )
             })
-            .collect();
-        let catalog_targets = self
-            .config
-            .providers
-            .items
-            .iter()
-            .filter(|remote| {
-                let base = remote.base.trim();
-                !base.is_empty()
-                    && !self
-                        .remote_catalog
-                        .is_fresh(remote.api_style, base, remote.token.trim())
-            })
-            .map(|remote| {
-                (
-                    remote.api_style,
-                    remote.base.trim().to_string(),
-                    Zeroizing::new(remote.token.trim().to_string()),
-                    remote.allow_insecure_tls,
-                )
-            })
-            .collect();
-        (health_targets, catalog_targets)
+            .collect()
     }
 
     pub fn remote_model_catalog_cached(&self) -> Vec<RemoteModelOption> {
@@ -936,35 +915,15 @@ impl App {
             .any(|m| m.thinking_supported)
     }
 
-    /// Primary ports owned by every configured provider *other* than `base`.
-    /// Feeds `probe_provider_catalog` so providers can't absorb each other.
-    pub fn other_provider_ports(&self, base: &str) -> Vec<u16> {
-        let own = normalize_provider_base(base, ApiStyle::Openai);
-        self.config
-            .providers
-            .items
-            .iter()
-            .filter(|provider| {
-                let candidate = provider.base.trim();
-                !candidate.is_empty()
-                    && normalize_provider_base(candidate, provider.api_style) != own
-            })
-            .filter_map(|provider| split_openai_base(provider.base.trim()).map(|(_, _, port)| port))
-            .collect()
-    }
-
     pub fn warm_provider_caches(&self) {
-        let (health_targets, catalog_targets) = self.provider_warm_targets();
-        for (style, base, token, insecure) in health_targets {
-            let health = crate::http::with_insecure_provider_tls(insecure, || {
-                probe_provider_health(&base, &token, style)
+        for (style, base, token, insecure) in self.provider_warm_targets() {
+            let (health, catalog) = crate::http::with_insecure_provider_tls(insecure, || {
+                probe_provider_endpoint(&base, &token, style)
             });
             self.store_remote_health(style, &base, &token, health);
-        }
-        for (style, base, token, insecure) in catalog_targets {
-            let others = self.other_provider_ports(&base);
+            self.store_remote_catalog(style, &base, &token, catalog.clone());
             let catalog = crate::http::with_insecure_provider_tls(insecure, || {
-                probe_provider_catalog(&base, &token, style, &[], &others)
+                enrich_local_catalog(&base, &token, style, catalog)
             });
             self.store_remote_catalog(style, &base, &token, catalog);
         }
@@ -1030,7 +989,7 @@ mod tests {
         assert!(app.config.providers.items.is_empty());
         assert!(app.public_providers().is_empty());
         assert!(!app.remote_caches_need_warm());
-        assert_eq!(app.provider_warm_targets(), (Vec::new(), Vec::new()));
+        assert!(app.provider_warm_targets().is_empty());
 
         app.unlock_disk_encryption(TEST_PASSPHRASE).unwrap();
         let restored = &app.config.providers.items[0];

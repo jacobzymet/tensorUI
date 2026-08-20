@@ -1199,20 +1199,25 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
 .privacy-mode .sidebar-server-provider,
 .privacy-mode .model-hint-provider,
 .privacy-mode .chat-model-origin-pill.privacy-mask,
-.privacy-mode .chat-model-origin-pill.privacy-mask * {
+.privacy-mode .chat-model-origin-pill.privacy-mask *,
+.privacy-mode .chat-model-group-name.privacy-mask,
+.privacy-mode .chat-model-group-name.privacy-mask * {
   color: transparent;
 }
-.privacy-mode .chat-model-origin-pill .chat-model-mark {
+.privacy-mode .chat-model-origin-pill .chat-model-mark,
+.privacy-mode .chat-model-group-name .chat-model-mark {
   background: transparent;
 }
-.privacy-mode .chat-model-origin-pill.privacy-mask {
+.privacy-mode .chat-model-origin-pill.privacy-mask,
+.privacy-mode .chat-model-group-name.privacy-mask {
   overflow: hidden;
 }
 .privacy-mode .convo-item:not(.is-active) .privacy-mask::after,
 .privacy-mode .sidebar-project-chip-name.privacy-mask::after,
 .privacy-mode .sidebar-server-provider.privacy-mask::after,
 .privacy-mode .model-hint-provider.privacy-mask::after,
-.privacy-mode .chat-model-origin-pill.privacy-mask::after {
+.privacy-mode .chat-model-origin-pill.privacy-mask::after,
+.privacy-mode .chat-model-group-name.privacy-mask::after {
   content: "";
   opacity: 1;
   filter: blur(0);

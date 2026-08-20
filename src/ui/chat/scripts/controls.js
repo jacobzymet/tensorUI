@@ -38,14 +38,26 @@ function activeStream() {
   return activeId ? activeStreams.get(activeId) || null : null;
 }
 
-function abortStream(convoId) {
+function abortStream(convoId, { cancelServer = true } = {}) {
   const stream = activeStreams.get(convoId);
-  if (!stream) return;
-  try { stream.controller.abort(); } catch { /* ignore */ }
+  if (stream) {
+    if (cancelServer) stream.cancelled = true;
+    try { stream.controller.abort(); } catch { /* ignore */ }
+  }
+  if (cancelServer && convoId) {
+    fetch('/api/chat/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: convoId,
+        ...(stream?.turnId ? { turn_id: stream.turnId } : {}),
+      }),
+    }).catch(() => {});
+  }
 }
 
-function abortAllStreams() {
-  for (const id of [...activeStreams.keys()]) abortStream(id);
+function abortAllStreams({ cancelServer = true } = {}) {
+  for (const id of [...activeStreams.keys()]) abortStream(id, { cancelServer });
 }
 
 function abortActiveSend() {
@@ -587,6 +599,7 @@ function saveQueuedMessageEdit(row, rawText) {
 }
 
 function dispatchOutboundTurn(convo, item) {
+  const previousTitle = convo.title;
   const userMessage = {
     role: 'user',
     content: item.displayText || (item.attachments?.length ? '(attachment)' : ''),
@@ -600,7 +613,7 @@ function dispatchOutboundTurn(convo, item) {
     );
   }
   convo.updatedAt = Date.now();
-  saveConversations();
+  saveConversations({ immediate: true });
   renderSidebar();
   if (activeId === convo.id) {
     showThread(convo);
@@ -620,6 +633,9 @@ function dispatchOutboundTurn(convo, item) {
     deepResearch: item.turn.deepResearch,
     deepResearchOutput: item.turn.deepResearchOutput,
     forceTools: item.turn.forceTools,
+    dispatchedMessage: userMessage,
+    queueItem: item,
+    previousTitle,
   });
 }
 
@@ -763,7 +779,7 @@ function fillSettingsFormFromState() {
   document.getElementById('settingThinkingEffort').value = settings.thinkingEffort;
   document.getElementById('settingEnterSends').checked = settings.enterSends;
   document.getElementById('settingSkillWebSearch').checked = settings.skillWebSearch;
-  document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'auto';
+  document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'off';
   document.getElementById('settingWebSearchBackend').value = settings.webSearchBackend || 'auto';
   document.getElementById('settingWebSearchResults').value = String(settings.webSearchResults || 6);
   document.getElementById('settingWebSearchRegion').value = settings.webSearchRegion || 'us-en';
@@ -838,10 +854,24 @@ function settingsFormIsDirty() {
 const SETTINGS_SAVE_CHECK =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 
-function syncSettingsSaveButton({ saved = false } = {}) {
+function syncSettingsSaveButton({ saved = false, saving = false, failed = false } = {}) {
   const btn = document.getElementById('btnSettingsSave');
   if (!btn) return;
   const dirty = settingsFormIsDirty();
+  if (saving) {
+    btn.disabled = true;
+    btn.classList.remove('is-saved');
+    btn.innerHTML = '<span>Saving…</span>';
+    btn.setAttribute('aria-label', 'Saving settings');
+    return;
+  }
+  if (failed) {
+    btn.disabled = false;
+    btn.classList.remove('is-saved');
+    btn.innerHTML = '<span>Retry save</span>';
+    btn.setAttribute('aria-label', 'Settings could not be saved; retry');
+    return;
+  }
   if (saved && !dirty) {
     btn.disabled = true;
     btn.classList.add('is-saved');
@@ -1492,7 +1522,7 @@ function setThinkingEffort(effort, persist = true) {
   }
 }
 
-function commitSettings() {
+async function commitSettings() {
   if (!requireUnlockedData()) return;
   const backgroundUrl = document.getElementById('settingChatBackgroundUrl');
   if (pendingChatBackgroundImage && !normalizeChatBackgroundImage(pendingChatBackgroundImage)) {
@@ -1508,7 +1538,16 @@ function commitSettings() {
   if (!next.skillDeepResearch) {
     next.deepResearch = 'off';
   }
-  saveSettings(next);
+  const previous = settings;
+  syncSettingsSaveButton({ saving: true });
+  const saved = await saveSettings(next, { immediate: true });
+  if (!saved) {
+    if (!diskEncryptionLocked()) {
+      applySettingsInMemory(previous);
+      syncSettingsSaveButton({ failed: true });
+    }
+    return;
+  }
   syncThinkingEffortControls(settings.thinkingEffort);
   syncResearchControls();
   syncAttachButton();

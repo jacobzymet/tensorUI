@@ -45,13 +45,24 @@ function agentStepRailHtml() {
   );
 }
 
-function wrapTimelineStep(innerHtml, { think = false, live = false, done = false } = {}) {
+function wrapTimelineStep(innerHtml, {
+  think = false,
+  live = false,
+  done = false,
+  justSettled = false,
+  startedAt = 0,
+  toolName = '',
+} = {}) {
   const classes = ['agent-step'];
   if (think) classes.push('is-think');
   if (live) classes.push('is-live');
   if (done) classes.push('is-done');
+  if (justSettled) classes.push('is-just-done');
+  const attrs = [];
+  if (toolName) attrs.push('data-tool-name="' + escapeHtml(toolName) + '"');
+  if (startedAt) attrs.push('data-tool-started="' + String(startedAt) + '"');
   return (
-    '<div class="' + classes.join(' ') + '">' +
+    '<div class="' + classes.join(' ') + '"' + (attrs.length ? ' ' + attrs.join(' ') : '') + '>' +
       agentStepRailHtml() +
       innerHtml +
     '</div>'
@@ -461,6 +472,7 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
     }
     traceSidebar?.classList.add('is-empty');
     delete traceSidebarBody.dataset.sidebarSig;
+    afterTraceTimelinePaint({ live: false });
     return;
   }
   let timelineHtml = '';
@@ -508,6 +520,7 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
       }
       traceSidebar?.classList.add('is-empty');
       delete traceSidebarBody.dataset.sidebarSig;
+      afterTraceTimelinePaint({ live: false });
       return;
     }
     traceSidebar?.classList.remove('is-empty');
@@ -520,11 +533,13 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
       '\0' +
       timelineSignature(deferredNotices);
 
+    let rebuilt = false;
     if (openThink) {
       if (
         traceSidebarBody.dataset.sidebarSig !== committedSig ||
         !traceSidebarBody.querySelector(':scope > .agent-step.is-live-think')
       ) {
+        rebuilt = true;
         traceSidebarBody.innerHTML =
           timelineHtml +
           wrapTimelineStep(
@@ -555,12 +570,14 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
       }
     } else {
       if (traceSidebarBody.dataset.sidebarSig !== committedSig) {
+        rebuilt = true;
         traceSidebarBody.innerHTML = timelineHtml;
         traceSidebarBody.dataset.sidebarSig = committedSig;
         enhanceCodeBlocks(traceSidebarBody);
         traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
       }
     }
+    afterTraceTimelinePaint({ live: true, rebuilt });
     if (stickTraceSidebar || wasNearBottom) {
       stickTraceSidebar = true;
       scrollTraceSidebarToBottom({ force: true });
@@ -581,6 +598,7 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
       }
       traceSidebar?.classList.add('is-empty');
       delete traceSidebarBody.dataset.sidebarSig;
+      afterTraceTimelinePaint({ live: false });
       return;
     }
     traceSidebar?.classList.remove('is-empty');
@@ -591,6 +609,7 @@ function paintTraceSidebarContent(message, { live = false } = {}) {
       enhanceCodeBlocks(traceSidebarBody);
       traceSidebarBody.querySelectorAll('.think-body').forEach((el) => enhanceCodeBlocks(el));
     }
+    afterTraceTimelinePaint({ live: false });
     if (stickTraceSidebar || wasNearBottom) {
       stickTraceSidebar = true;
       scrollTraceSidebarToBottom({ force: true });
@@ -712,6 +731,125 @@ function skillLabel(name, args) {
   if (name === 'ask_user') return 'Clarifying questions';
   if (name === 'activate_skill' || name === 'read_skill') return 'Activate skill';
   return name || 'Skill';
+}
+
+function skillLiveVerb(name, args) {
+  if (name === 'web_search') {
+    return String(args?.kind || '').toLowerCase() === 'news' ? 'Scanning news' : 'Searching';
+  }
+  if (name === 'fetch_url') return 'Fetching';
+  if (name === 'ask_user') return 'Waiting';
+  if (name === 'activate_skill' || name === 'read_skill') return 'Loading skill';
+  return 'Running';
+}
+
+function skillToolIcon(name, args) {
+  const news = name === 'web_search' && String(args?.kind || '').toLowerCase() === 'news';
+  if (name === 'web_search' && !news) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+  }
+  if (name === 'web_search' || name === 'fetch_url') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/><path d="M3 12h18"/></svg>';
+  }
+  if (name === 'activate_skill' || name === 'read_skill') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3"/><path d="m6.8 6.8 2.1 2.1"/><path d="M3 12h3"/><path d="m6.8 17.2 2.1-2.1"/><path d="M12 18v3"/><path d="m17.2 17.2-2.1-2.1"/><path d="M18 12h3"/><path d="m17.2 6.8-2.1 2.1"/><circle cx="12" cy="12" r="2.2"/></svg>';
+  }
+  if (name === 'ask_user') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>';
+}
+
+function formatToolElapsed(ms) {
+  const sec = Math.max(0, Number(ms) || 0) / 1000;
+  if (sec < 9.95) return sec.toFixed(1) + 's';
+  return Math.round(sec) + 's';
+}
+
+function toolDurationMs(part, now = Date.now()) {
+  if (!part) return 0;
+  if (part.live && part.startedAt) return Math.max(0, now - Number(part.startedAt));
+  if (Number.isFinite(part.durationMs) && part.durationMs >= 0) return part.durationMs;
+  if (part.startedAt && part.endedAt) return Math.max(0, Number(part.endedAt) - Number(part.startedAt));
+  return 0;
+}
+
+let toolClockTimer = 0;
+let toolClockRoot = null;
+
+function tickLiveToolClocks(root) {
+  if (!root) return 0;
+  const now = Date.now();
+  const nodes = root.querySelectorAll('.agent-step.is-live[data-tool-started] .agent-step-elapsed');
+  nodes.forEach((el) => {
+    const step = el.closest('.agent-step');
+    const started = Number(step && step.dataset.toolStarted);
+    if (!started) return;
+    const next = formatToolElapsed(now - started);
+    if (el.textContent !== next) el.textContent = next;
+  });
+  return nodes.length;
+}
+
+function stopLiveToolClocks() {
+  if (toolClockTimer) {
+    window.clearTimeout(toolClockTimer);
+    toolClockTimer = 0;
+  }
+  toolClockRoot = null;
+}
+
+function syncLiveToolClocks(root) {
+  if (!root || !tickLiveToolClocks(root)) {
+    if (!root || toolClockRoot === root) stopLiveToolClocks();
+    return;
+  }
+  toolClockRoot = root;
+  if (toolClockTimer) return;
+  const tick = () => {
+    if (!toolClockRoot || !tickLiveToolClocks(toolClockRoot)) {
+      stopLiveToolClocks();
+      return;
+    }
+    toolClockTimer = window.setTimeout(tick, prefersReducedMotion() ? 400 : 90);
+  };
+  toolClockTimer = window.setTimeout(tick, prefersReducedMotion() ? 400 : 90);
+}
+
+function scheduleJustSettledClear(part) {
+  if (!part || part.settleTimer) return;
+  part.settleTimer = window.setTimeout(() => {
+    part.justSettled = false;
+    part.settleTimer = 0;
+  }, 450);
+}
+
+function afterTraceTimelinePaint({ live = false, rebuilt = false } = {}) {
+  if (!traceSidebarBody) return;
+  if (live) {
+    const paintKey = 'live:' + String(selectedTraceMsgIndex);
+    if (traceSidebarBody.dataset.paintKey !== paintKey) {
+      delete traceSidebarBody.dataset.liveStepCount;
+      traceSidebarBody.dataset.paintKey = paintKey;
+    }
+    const prev = Number(traceSidebarBody.dataset.liveStepCount || 0);
+    const steps = traceSidebarBody.querySelectorAll(':scope > .agent-step');
+    if (rebuilt && steps.length > prev) {
+      for (let i = prev; i < steps.length; i += 1) {
+        motionEnter(steps[i], {
+          y: 10,
+          duration: 240,
+          delay: Math.min(i - prev, 5) * 28,
+        });
+      }
+    }
+    traceSidebarBody.dataset.liveStepCount = String(steps.length);
+    syncLiveToolClocks(traceSidebarBody);
+  } else {
+    delete traceSidebarBody.dataset.liveStepCount;
+    delete traceSidebarBody.dataset.paintKey;
+    stopLiveToolClocks();
+  }
 }
 
 function findClarifyPart(stream, id) {
@@ -913,15 +1051,40 @@ function agentStepResultHtml(result) {
   );
 }
 
-function agentStepHtml({ name, detail, result, note, live, kind }) {
+function agentStepHtml({
+  name,
+  detail,
+  result,
+  note,
+  live,
+  kind,
+  startedAt,
+  durationMs,
+  endedAt,
+  justSettled,
+}) {
   let kindLabel = skillLabel(name, { kind });
   const resultText = String(result || '');
   if (name === 'ask_user' && !live && /ask_user\b/i.test(resultText)) {
     kindLabel = 'Clarifying questions · rejected';
   }
+  const elapsedMs = toolDurationMs({ live, startedAt, durationMs, endedAt });
+  const elapsed = elapsedMs > 0 || live ? formatToolElapsed(elapsedMs) : '';
+  const status = live
+    ? '<span class="agent-step-status thinking-label">' + escapeHtml(skillLiveVerb(name, { kind })) + '</span>'
+    : '';
+  const meta = (status || elapsed)
+    ? '<span class="agent-step-meta">' + status +
+      (elapsed ? '<span class="agent-step-elapsed">' + escapeHtml(elapsed) + '</span>' : '') +
+      '</span>'
+    : '';
   return wrapTimelineStep(
-    '<div class="agent-step-card">' +
-      '<div class="agent-step-kind">' + escapeHtml(kindLabel) + '</div>' +
+    '<div class="agent-step-card"' + (live ? ' aria-busy="true"' : '') + '>' +
+      '<div class="agent-step-head">' +
+        '<span class="agent-step-icon" aria-hidden="true">' + skillToolIcon(name, { kind }) + '</span>' +
+        '<div class="agent-step-kind">' + escapeHtml(kindLabel) + '</div>' +
+        meta +
+      '</div>' +
       (note
         ? '<div class="agent-step-note">' + escapeHtml(note) + '</div>'
         : '') +
@@ -929,9 +1092,18 @@ function agentStepHtml({ name, detail, result, note, live, kind }) {
         ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em>'
           + '<span class="agent-step-detail-value">' + escapeHtml(detail) + '</span></div>'
         : '') +
+      (live && !resultText
+        ? '<div class="agent-step-await" aria-hidden="true"><span class="agent-step-await-bar"></span></div>'
+        : '') +
       agentStepResultHtml(result) +
     '</div>',
-    { live: !!live, done: !live }
+    {
+      live: !!live,
+      done: !live,
+      justSettled: !!justSettled,
+      startedAt: live ? Number(startedAt) || 0 : 0,
+      toolName: name || '',
+    }
   );
 }
 
@@ -1885,6 +2057,20 @@ if (window.marked) {
   window.marked.use({
     gfm: true,
     breaks: true,
+    // GFM treats ~pair~ as strike; that false-positives on ~$725 / (~$875M/day).
+    // Only ~~text~~ counts. Return undefined (not false) so marked does not fall back.
+    tokenizer: {
+      del(src) {
+        const cap = /^~~(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))~~(?=[^~]|$)/.exec(src);
+        if (!cap) return undefined;
+        return {
+          type: 'del',
+          raw: cap[0],
+          text: cap[1],
+          tokens: this.lexer.inlineTokens(cap[1]),
+        };
+      },
+    },
     renderer: {
       code({ text, lang }) {
         const language = ((lang || '').match(/^[\w+-]+/) || [''])[0].toLowerCase();

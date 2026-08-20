@@ -6,6 +6,7 @@ pub mod config;
 pub mod crypto;
 pub mod encryption_transition;
 pub mod http;
+pub mod live;
 pub mod local_llm;
 pub mod prompts;
 pub mod providers;

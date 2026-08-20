@@ -79,6 +79,15 @@ mod tests {
     }
 
     #[test]
+    fn persisted_writes_stay_under_no_keepalive_quota() {
+        // Chats and the background image exceed the browser's 64 KiB keepalive quota,
+        // which silently rejects the request and freezes preferences on disk.
+        assert!(!CHAT_JS.contains("keepalive:"));
+        assert!(CHAT_JS.contains("putJsonWithRetry('/api/data/store'"));
+        assert!(CHAT_JS.contains("putJsonWithRetry('/api/data/preferences'"));
+    }
+
+    #[test]
     fn locked_chat_ui_labels_provider_state_as_unavailable() {
         assert!(CHAT_JS.contains("network.inference_mode === 'locked'"));
         assert!(CHAT_JS.contains("serverProviderName.textContent = 'Encrypted'"));

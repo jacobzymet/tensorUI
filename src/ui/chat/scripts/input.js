@@ -632,7 +632,7 @@ function resolveTurnSkills(mentionIds) {
       web_search: webSearch,
       web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
         ? settings.webSearchDepth
-        : 'auto',
+        : DEFAULT_SETTINGS.webSearchDepth,
       web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
         ? settings.webSearchBackend
         : 'auto',

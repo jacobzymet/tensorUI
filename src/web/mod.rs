@@ -1,14 +1,17 @@
 mod embed;
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use axum::{
     Json, Router,
     body::Body,
-    extract::{OriginalUri, Path, State},
+    extract::{DefaultBodyLimit, OriginalUri, Path, State},
     http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
@@ -25,8 +28,8 @@ use crate::{
     chat, encryption_transition,
     providers::{
         ApiStyle, ProviderHealth, ProviderHealthKind, ProviderPublic, RemoteModelOption,
-        apply_thinking_control, find_provider_for_base, normalize_openai_base,
-        probe_provider_catalog, probe_provider_health, probe_provider_style,
+        apply_thinking_control, enrich_local_catalog, find_provider_for_base,
+        normalize_openai_base, probe_provider_endpoint, probe_provider_style,
     },
     store::{self, StorageMode},
     system,
@@ -35,6 +38,14 @@ use embed::{
     APP_ICON_PNG, CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS,
     SETTINGS_HTML, UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
 };
+
+const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
+const CHAT_STORE_LIMIT: usize = 64 * 1024 * 1024;
+const CHAT_PREFERENCES_LIMIT: usize = 4 * 1024 * 1024;
+const ATTACHMENT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
+const _: () = assert!(ATTACHMENT_REQUEST_LIMIT > 8 * 1024 * 1024 * 4 / 3);
+const _: () = assert!(CHAT_PREFERENCES_LIMIT > 1024 * 1024 * 4 / 3);
+const _: () = assert!(CHAT_STORE_LIMIT > CHAT_REQUEST_LIMIT);
 
 pub type SharedApp = Arc<Mutex<App>>;
 
@@ -181,6 +192,7 @@ fn locked_api_request_allowed(method: &axum::http::Method, path: &str) -> bool {
 
 static PROVIDER_CACHE_WARM_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static PROVIDER_CACHE_WARM_ALLOWED: AtomicBool = AtomicBool::new(true);
+const WARM_CONCURRENCY: usize = 4;
 
 fn schedule_provider_cache_warm(app: SharedApp) {
     if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
@@ -208,54 +220,51 @@ fn schedule_provider_cache_warm(app: SharedApp) {
         }
         let _clear = ClearInFlight;
 
-        // Snapshot stale targets under a short lock; probe without holding App.
-        let (health_targets, catalog_targets) = match app.lock() {
+        let targets = match app.lock() {
             Ok(guard) => guard.provider_warm_targets(),
             Err(_) => return,
         };
-        // Ports owned by sibling providers, resolved under the same lock so the
-        // probe below can keep each provider's catalog to its own endpoint.
-        let catalog_others: Vec<Vec<u16>> = match app.lock() {
-            Ok(guard) => catalog_targets
-                .iter()
-                .map(|(_, base, _, _)| guard.other_provider_ports(base))
-                .collect(),
-            Err(_) => return,
-        };
+        warm_provider_targets(&app, targets);
+    });
+}
 
-        let health_results: Vec<_> = health_targets
-            .into_iter()
-            .filter_map(|(style, base, token, insecure)| {
-                if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
-                    return None;
+fn warm_provider_targets(
+    app: &SharedApp,
+    targets: Vec<(ApiStyle, String, zeroize::Zeroizing<String>, bool)>,
+) {
+    if targets.is_empty() {
+        return;
+    }
+    let workers = WARM_CONCURRENCY.min(targets.len()).max(1);
+    let queue = Mutex::new(targets.into_iter().collect::<VecDeque<_>>());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let Some((style, base, token, insecure)) =
+                        queue.lock().ok().and_then(|mut queue| queue.pop_front())
+                    else {
+                        return;
+                    };
+                    let (health, catalog) =
+                        crate::http::with_insecure_provider_tls(insecure, || {
+                            probe_provider_endpoint(&base, &token, style)
+                        });
+                    if let Ok(guard) = app.lock() {
+                        guard.store_remote_health(style, &base, &token, health);
+                        guard.store_remote_catalog(style, &base, &token, catalog.clone());
+                    }
+                    let catalog = crate::http::with_insecure_provider_tls(insecure, || {
+                        enrich_local_catalog(&base, &token, style, catalog)
+                    });
+                    if let Ok(guard) = app.lock() {
+                        guard.store_remote_catalog(style, &base, &token, catalog);
+                    }
                 }
-                let health = crate::http::with_insecure_provider_tls(insecure, || {
-                    probe_provider_health(&base, &token, style)
-                });
-                Some((style, base, token, health))
-            })
-            .collect();
-        let catalog_results: Vec<_> = catalog_targets
-            .into_iter()
-            .zip(catalog_others)
-            .filter_map(|((style, base, token, insecure), others)| {
-                if !PROVIDER_CACHE_WARM_ALLOWED.load(Ordering::SeqCst) {
-                    return None;
-                }
-                let catalog = crate::http::with_insecure_provider_tls(insecure, || {
-                    probe_provider_catalog(&base, &token, style, &[], &others)
-                });
-                Some((style, base, token, catalog))
-            })
-            .collect();
-
-        if let Ok(guard) = app.lock() {
-            for (style, base, token, health) in health_results {
-                guard.store_remote_health(style, &base, &token, health);
-            }
-            for (style, base, token, catalog) in catalog_results {
-                guard.store_remote_catalog(style, &base, &token, catalog);
-            }
+            });
         }
     });
 }
@@ -273,7 +282,12 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
 
     let security = ApiSecurity::new(listener.local_addr()?)?;
     let api = Router::new()
-        .route("/api/chat/completions", post(chat_completions))
+        .route(
+            "/api/chat/completions",
+            post(chat_completions).layer(DefaultBodyLimit::max(CHAT_REQUEST_LIMIT)),
+        )
+        .route("/api/chat/live/{conversation_id}", get(chat_live))
+        .route("/api/chat/cancel", post(chat_cancel))
         .route("/api/chat/clarify", post(chat_clarify))
         .route("/api/chat/steer", post(chat_steer))
         .route("/api/chat/title", post(chat_title))
@@ -299,10 +313,17 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/api/data/encryption/disable", post(disable_encryption))
         .route("/api/data/encryption/unlock", post(unlock_encryption))
         .route("/api/data/encryption/lock", post(lock_encryption))
-        .route("/api/data/store", get(get_chat_store).put(put_chat_store))
+        .route(
+            "/api/data/store",
+            get(get_chat_store)
+                .put(put_chat_store)
+                .layer(DefaultBodyLimit::max(CHAT_STORE_LIMIT)),
+        )
         .route(
             "/api/data/preferences",
-            get(get_chat_preferences).put(put_chat_preferences),
+            get(get_chat_preferences)
+                .put(put_chat_preferences)
+                .layer(DefaultBodyLimit::max(CHAT_PREFERENCES_LIMIT)),
         )
         .route("/api/skills", get(list_skills).post(create_skill))
         .route("/api/skills/import", post(import_skill))
@@ -310,7 +331,10 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             "/api/skills/{id}",
             axum::routing::patch(update_skill).delete(delete_skill),
         )
-        .route("/api/attachments/extract", post(extract_attachment))
+        .route(
+            "/api/attachments/extract",
+            post(extract_attachment).layer(DefaultBodyLimit::max(ATTACHMENT_REQUEST_LIMIT)),
+        )
         .route("/api/updates/check", get(check_updates))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&app),
@@ -670,12 +694,41 @@ async fn chat_completions(
         obj.insert("model".to_string(), serde_json::Value::String(model));
     }
     apply_thinking_control(&mut body, thinking_model.as_ref());
+    let conversation_id = body
+        .as_object_mut()
+        .and_then(|obj| obj.remove("conversation_id"))
+        .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
+        .filter(|id| !id.is_empty());
+    let conversation_id = conversation_id.map(validate_live_id).transpose()?;
     let key = (!token.trim().is_empty()).then_some(token.as_str());
     let wants_agent = body.get("agent").and_then(|v| v.as_bool()).unwrap_or(false)
         || body
             .get("deep_research")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+    let deep_research = body
+        .get("deep_research")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let deep_research_output = body
+        .get("deep_research_output")
+        .and_then(|v| v.as_str())
+        .filter(|value| *value == "brief")
+        .unwrap_or("long")
+        .to_string();
+    let turn_model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if let Some(id) = conversation_id.as_deref()
+        && let Some(existing) = crate::live::hub().info(id)
+        && !existing.finished
+    {
+        return Err(ApiError::conflict(
+            "A response is already in progress for that conversation.",
+        ));
+    }
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
         Ok(request) if agent::should_run_agent(&request, &user_skills) => {
             if request.messages.is_empty() {
@@ -709,13 +762,72 @@ async fn chat_completions(
         }
     };
 
-    let response = Response::builder()
+    let stream = if let Some(conversation_id) = conversation_id {
+        let info = crate::live::LiveTurnInfo {
+            conversation_id,
+            turn_id: crate::live::new_turn_id(),
+            agent: wants_agent,
+            deep_research,
+            deep_research_output,
+            model: turn_model,
+            finished: false,
+        };
+        crate::live::hub().start(info, stream).map_err(|_| {
+            ApiError::conflict("A response is already in progress for that conversation.")
+        })?
+    } else {
+        stream
+    };
+
+    sse_response(stream)
+}
+
+fn sse_response(stream: crate::agent::chat::ChatStream) -> Result<Response, ApiError> {
+    Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
+        .header("x-accel-buffering", "no")
         .body(Body::from_stream(stream))
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    Ok(response)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn chat_live(Path(conversation_id): Path<String>) -> Result<Response, ApiError> {
+    let id = validate_live_id(conversation_id)?;
+    let Some(stream) = crate::live::hub().subscribe(&id) else {
+        return Err(ApiError::not_found("No live turn for that conversation"));
+    };
+    sse_response(stream)
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelTurnBody {
+    conversation_id: String,
+    turn_id: Option<String>,
+}
+
+async fn chat_cancel(
+    Json(body): Json<CancelTurnBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let id = validate_live_id(body.conversation_id)?;
+    let turn_id = body.turn_id.map(validate_live_id).transpose()?;
+    let cancelled = crate::live::hub().cancel(&id, turn_id.as_deref());
+    Ok(Json(
+        serde_json::json!({ "ok": true, "cancelled": cancelled }),
+    ))
+}
+
+fn validate_live_id(raw: impl AsRef<str>) -> Result<String, ApiError> {
+    let id = raw.as_ref().trim();
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(ApiError::bad_request("Invalid live turn identifier"));
+    }
+    Ok(id.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -850,42 +962,34 @@ async fn test_provider(
 
     let probe_base = base.clone();
     let probe_token = token.clone();
-    // Testing one URL the user typed: keep the result to that endpoint rather
-    // than reporting models that actually belong to an already-saved provider.
-    let probe_others = {
-        let app = app.lock().map_err(|_| ApiError::lock())?;
-        app.other_provider_ports(&base)
-    };
-    let (probe, catalog) = tokio::task::spawn_blocking(move || {
+    let probe = tokio::task::spawn_blocking(move || {
         crate::http::with_insecure_provider_tls(allow_insecure_tls, || {
             let probe = probe_provider_style(&probe_base, &probe_token, forced_style);
             let catalog =
                 if probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty) {
-                    Some(probe_provider_catalog(
+                    enrich_local_catalog(
                         &probe_base,
                         &probe_token,
                         probe.api_style,
-                        &[],
-                        &probe_others,
-                    ))
+                        probe.catalog.clone(),
+                    )
                 } else {
-                    None
+                    probe.catalog.clone()
                 };
             (probe, catalog)
         })
     })
     .await
     .map_err(|error| ApiError::bad_request(format!("connection test failed: {error}")))?;
+    let (probe, catalog) = probe;
 
-    let mut model_count = 0;
-    {
+    let model_count = {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         app.store_remote_health(probe.api_style, &base, &token, probe.health.clone());
-        if let Some(catalog) = catalog {
-            model_count = catalog.len();
-            app.store_remote_catalog(probe.api_style, &base, &token, catalog);
-        }
-    }
+        let model_count = catalog.len();
+        app.store_remote_catalog(probe.api_style, &base, &token, catalog);
+        model_count
+    };
 
     Ok(Json(TestProviderResponse {
         ok: probe.health.ok || matches!(probe.health.kind, ProviderHealthKind::Empty),
@@ -1437,9 +1541,12 @@ struct AppState {
     font_mono: String,
     font_scale: &'static str,
     thinking_supported: bool,
+    encryption_enabled: bool,
+    encryption_unlocked: bool,
     config_path: String,
     network: NetworkSummary,
     providers: Vec<ProviderPublic>,
+    live_turns: Vec<crate::live::LiveTurnInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1569,9 +1676,12 @@ impl AppState {
                 font_mono: crate::config::DEFAULT_UI_FONT_MONO.into(),
                 font_scale: "default",
                 thinking_supported: false,
+                encryption_enabled: true,
+                encryption_unlocked: false,
                 config_path: String::new(),
                 network: NetworkSummary::locked(),
                 providers: Vec::new(),
+                live_turns: Vec::new(),
             };
         }
         Self {
@@ -1582,9 +1692,12 @@ impl AppState {
             font_mono: app.config.ui.font_mono.clone(),
             font_scale: app.config.ui.font_scale.as_str(),
             thinking_supported: app.thinking_supported(),
+            encryption_enabled: app.encryption_enabled(),
+            encryption_unlocked: app.encryption_unlocked(),
             config_path: app.config_path.display().to_string(),
             network: NetworkSummary::from_app(app),
             providers: app.public_providers(),
+            live_turns: crate::live::hub().list(),
         }
     }
 }
@@ -1607,6 +1720,22 @@ impl ApiError {
     fn bad_request(message: impl AsRef<str>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
+            message: message.as_ref().to_string(),
+            code: None,
+        }
+    }
+
+    fn not_found(message: impl AsRef<str>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.as_ref().to_string(),
+            code: None,
+        }
+    }
+
+    fn conflict(message: impl AsRef<str>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
             message: message.as_ref().to_string(),
             code: None,
         }
@@ -1652,6 +1781,8 @@ mod tests {
             (Method::GET, "/api/providers"),
             (Method::POST, "/api/providers/test"),
             (Method::POST, "/api/chat/completions"),
+            (Method::GET, "/api/chat/live/abc"),
+            (Method::POST, "/api/chat/cancel"),
             (Method::GET, "/api/data/store"),
             (Method::GET, "/api/data/preferences"),
             (Method::GET, "/api/skills"),
@@ -1687,6 +1818,8 @@ mod tests {
         app.lock_disk_encryption();
 
         let state = AppState::from_app(&app);
+        assert!(state.encryption_enabled);
+        assert!(!state.encryption_unlocked);
         assert!(state.config_path.is_empty());
         assert!(state.providers.is_empty());
         assert!(state.network.remote_base.is_empty());
@@ -1704,5 +1837,17 @@ mod tests {
         assert!(data.skills_dir.is_empty());
         assert!(data.encryption_enabled);
         assert!(!data.encryption_unlocked);
+    }
+
+    #[test]
+    fn live_identifiers_are_small_and_path_safe() {
+        assert_eq!(
+            validate_live_id(" turn_abc-123.test ").ok().as_deref(),
+            Some("turn_abc-123.test")
+        );
+        for invalid in ["", " ", "contains/slash", "contains space", "💥"] {
+            assert!(validate_live_id(invalid).is_err(), "{invalid:?} must fail");
+        }
+        assert!(validate_live_id("x".repeat(129)).is_err());
     }
 }

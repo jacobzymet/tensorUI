@@ -70,7 +70,7 @@ const DEFAULT_SETTINGS = {
   thinkingEffort: 'auto', // auto | off | low | medium | high | max
   enterSends: true,
   skillWebSearch: true,
-  webSearchDepth: 'auto', // auto | off | light | standard | deep
+  webSearchDepth: 'off', // off | auto | light | standard | deep
   webSearchBackend: 'auto',
   webSearchResults: 6,
   webSearchRegion: 'us-en',
@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS = {
   selectedChatModel: '',
   recentModelIds: [],
   pinnedModelIds: [],
+  collapsedModelProviders: [],
   sidebarCollapsed: false,
   privacyMode: false,
   updateDismissed: '',
@@ -181,7 +182,13 @@ let chatBackgroundApplyToken = 0;
 function normalizeChatBackgroundImage(value) {
   const source = typeof value === 'string' ? value.trim() : '';
   if (!source) return '';
-  if (/^data:image\/(?:png|jpe?g|webp|gif|avif);base64,/i.test(source)) return source;
+  if (/^data:image\/(?:png|jpe?g|webp|gif|avif);base64,/i.test(source)) {
+    const encoded = source.slice(source.indexOf(',') + 1);
+    if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return '';
+    const padding = encoded.endsWith('==') ? 2 : (encoded.endsWith('=') ? 1 : 0);
+    const estimatedBytes = Math.floor(encoded.length * 3 / 4) - padding;
+    return estimatedBytes <= CHAT_BACKGROUND_MAX_BYTES ? source : '';
+  }
   if (source.length > 4096) return '';
   try {
     const url = new URL(source);
@@ -560,12 +567,13 @@ let selectedRemoteModelId = '';
 let selectedChatModel = '';
 let recentModelIds = [];
 let pinnedModelIds = [];
+let collapsedModelProviders = [];
 let modelMenuOptions = [];
 /** Options passing the current filter — what the arrow keys actually walk. */
 let modelMenuMatches = [];
 let modelMenuFilter = '';
 let modelMenuActiveIndex = -1;
-let modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'all');
+let modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'cloud');
 let latestState = null;
 
 function normalizeModelIds(ids, limit) {
@@ -580,6 +588,7 @@ function persistModelPickerState() {
     selectedChatModel,
     recentModelIds: recentModelIds.slice(),
     pinnedModelIds: pinnedModelIds.slice(),
+    collapsedModelProviders: collapsedModelProviders.slice(),
   }, { immediate: true });
 }
 
@@ -602,12 +611,27 @@ function isModelPinned(value) {
   return !!value && pinnedModelIds.includes(value);
 }
 
+function isModelProviderCollapsed(key) {
+  return !!key && collapsedModelProviders.includes(key);
+}
+
+function toggleModelProviderCollapsed(key) {
+  if (!key) return;
+  if (isModelProviderCollapsed(key)) {
+    collapsedModelProviders = collapsedModelProviders.filter((id) => id !== key);
+  } else {
+    collapsedModelProviders = normalizeModelIds([key, ...collapsedModelProviders], 64);
+  }
+  persistModelPickerState();
+  if (modelMenuIsOpen()) applyModelFilter({ keepActive: true });
+}
+
 function togglePinnedModel(value) {
   if (!value) return;
   if (isModelPinned(value)) {
     savePinnedModelIds(pinnedModelIds.filter((id) => id !== value));
     if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
-      modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+      modelMenuTab = recentModelIds.length ? 'recents' : fallbackModelMenuTab();
     }
   } else {
     savePinnedModelIds([value, ...pinnedModelIds.filter((id) => id !== value)]);
@@ -625,7 +649,8 @@ function hydrateModelPickerState() {
   selectedRemoteModelId = selectedChatModel;
   recentModelIds = normalizeModelIds(settings.recentModelIds, RECENT_MODELS_MAX);
   pinnedModelIds = normalizeModelIds(settings.pinnedModelIds, PINNED_MODELS_MAX);
-  modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'all');
+  collapsedModelProviders = normalizeModelIds(settings.collapsedModelProviders, 64);
+  modelMenuTab = recentModelIds.length ? 'recents' : (pinnedModelIds.length ? 'pins' : 'cloud');
 }
 
 function newId(prefix) {
@@ -804,6 +829,55 @@ let storageReady = false;
 let saveStoreTimer = null;
 let saveSettingsTimer = null;
 let settingsWriteChain = Promise.resolve();
+let storeWriteChain = Promise.resolve();
+let storageWriteEpoch = 0;
+let persistenceWarningAt = 0;
+
+function reportPersistenceFailure(path, error) {
+  console.warn('Could not persist ' + path, error);
+  const now = Date.now();
+  if (now - persistenceWarningAt < 5000 || typeof showComposerHint !== 'function') return;
+  persistenceWarningAt = now;
+  showComposerHint('Could not save local changes. Check the server and retry.', { warn: true });
+}
+
+/**
+ * Never set `keepalive` here: chats and the background image push these payloads
+ * far past the browser's 64 KiB keepalive quota, and over-quota requests are
+ * rejected before they ever reach the server.
+ */
+async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => true } = {}) {
+  const body = JSON.stringify(payload);
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!valid()) return false;
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+    if (!valid()) return false;
+    try {
+      const response = await fetch(path, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      if (response.ok) return true;
+      // Most client errors are deterministic; only timeout and throttling merit a retry.
+      if (
+        response.status >= 400 &&
+        response.status < 500 &&
+        response.status !== 408 &&
+        response.status !== 429
+      ) {
+        lastError = new Error(path + ' rejected the write (' + response.status + ')');
+        break;
+      }
+      lastError = new Error(path + ' responded ' + response.status);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  reportPersistenceFailure(path, lastError);
+  return false;
+}
 
 function storePayload() {
   return {
@@ -828,22 +902,57 @@ function requireUnlockedData() {
   return false;
 }
 
-function saveStore() {
+function enqueueStoreWrite(snapshot) {
+  const epoch = storageWriteEpoch;
+  storeWriteChain = storeWriteChain
+    .catch(() => {})
+    .then(() => putJsonWithRetry('/api/data/store', snapshot, {
+      valid: () => epoch === storageWriteEpoch && !diskEncryptionLocked(),
+    }));
+  return storeWriteChain;
+}
+
+function saveStore({ immediate = true } = {}) {
   if (!storageReady || diskEncryptionLocked()) return;
-  clearTimeout(saveStoreTimer);
-  saveStoreTimer = setTimeout(() => {
+  const put = () => {
     if (diskEncryptionLocked()) return;
-    fetch('/api/data/store', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(storePayload()),
-    }).catch(() => {});
+    enqueueStoreWrite(storePayload());
+  };
+  clearTimeout(saveStoreTimer);
+  saveStoreTimer = null;
+  if (immediate) {
+    put();
+    return;
+  }
+  saveStoreTimer = setTimeout(() => {
+    saveStoreTimer = null;
+    put();
   }, 120);
 }
 
-function saveConversations() {
-  saveStore();
+function saveConversations({ immediate = true } = {}) {
+  saveStore({ immediate });
 }
+
+/** Best-effort flush when a tab is backgrounded; normal user actions save earlier. */
+function flushPendingWrites() {
+  if (!storageReady || diskEncryptionLocked()) return;
+  if (saveStoreTimer) {
+    clearTimeout(saveStoreTimer);
+    saveStoreTimer = null;
+    enqueueStoreWrite(storePayload());
+  }
+  if (saveSettingsTimer) {
+    clearTimeout(saveSettingsTimer);
+    saveSettingsTimer = null;
+    enqueueSettingsWrite({ ...settings });
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushPendingWrites();
+});
+window.addEventListener('pagehide', flushPendingWrites);
 
 function provisionalTitle(text) {
   const src = String(text || '').replace(/\s+/g, ' ').trim() || 'New chat';
@@ -1131,6 +1240,7 @@ function normalizeSettings(parsed) {
       : '',
     recentModelIds: normalizeModelIds(parsed.recentModelIds, RECENT_MODELS_MAX),
     pinnedModelIds: normalizeModelIds(parsed.pinnedModelIds, PINNED_MODELS_MAX),
+    collapsedModelProviders: normalizeModelIds(parsed.collapsedModelProviders, 64),
     sidebarCollapsed: parsed.sidebarCollapsed === true,
     privacyMode: parsed.privacyMode === true,
     updateDismissed: typeof parsed.updateDismissed === 'string'
@@ -1143,21 +1253,16 @@ function normalizeSettings(parsed) {
 }
 
 function enqueueSettingsWrite(snapshot) {
+  const epoch = storageWriteEpoch;
   settingsWriteChain = settingsWriteChain
     .catch(() => {})
-    .then(async () => {
-      const response = await fetch('/api/data/preferences', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(snapshot),
-        keepalive: true,
-      });
-      if (!response.ok) throw new Error('Could not save preferences');
-    });
+    .then(() => putJsonWithRetry('/api/data/preferences', snapshot, {
+      valid: () => epoch === storageWriteEpoch && !diskEncryptionLocked(),
+    }));
   return settingsWriteChain;
 }
 
-function saveSettings(next, { immediate = false } = {}) {
+function applySettingsInMemory(next) {
   settings = next;
   applyChatBackground(settings);
   updateGreeting();
@@ -1165,16 +1270,22 @@ function saveSettings(next, { immediate = false } = {}) {
   syncAgentButton();
   syncResearchControls();
   syncAttachButton();
-  if (!storageReady || diskEncryptionLocked()) return;
+}
+
+function saveSettings(next, { immediate = true } = {}) {
+  applySettingsInMemory(next);
+  if (!storageReady || diskEncryptionLocked()) return Promise.resolve(false);
   clearTimeout(saveSettingsTimer);
+  saveSettingsTimer = null;
   if (immediate) {
-    enqueueSettingsWrite({ ...settings });
-    return;
+    return enqueueSettingsWrite({ ...settings });
   }
   saveSettingsTimer = setTimeout(() => {
+    saveSettingsTimer = null;
     if (diskEncryptionLocked()) return;
     enqueueSettingsWrite({ ...settings });
   }, 120);
+  return Promise.resolve(true);
 }
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -1491,13 +1602,23 @@ function refreshUiFromMemoryStore() {
 }
 
 function clearMemoryAfterLock() {
+  storageWriteEpoch += 1;
   clearTimeout(saveStoreTimer);
+  saveStoreTimer = null;
   clearTimeout(saveSettingsTimer);
-  abortAllStreams();
+  saveSettingsTimer = null;
+  abortAllStreams({ cancelServer: false });
   activeStreams.clear();
   outboundQueues.clear();
   editingQueueId = null;
   stickByConvo.clear();
+  selectedChatModel = '';
+  selectedRemoteModelId = '';
+  recentModelIds = [];
+  pinnedModelIds = [];
+  collapsedModelProviders = [];
+  modelMenuOptions = [];
+  modelMenuMatches = [];
   projects = [];
   conversations = [];
   activeProjectId = null;

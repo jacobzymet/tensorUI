@@ -229,8 +229,8 @@ impl WebSearchKind {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WebSearchDepth {
-    Off,
     #[default]
+    Off,
     Auto,
     Light,
     Standard,
@@ -3392,7 +3392,8 @@ mod tests {
     }
 
     #[test]
-    fn scrape_plan_auto_fetches_pages() {
+    fn scrape_plan_defaults_to_snippets_only() {
+        assert_eq!(WebSearchDepth::default(), WebSearchDepth::Off);
         assert!(WebSearchDepth::Off.scrape_plan().is_none());
         assert_eq!(WebSearchDepth::Auto.scrape_plan(), Some((3, 2800)));
         assert_eq!(WebSearchDepth::Deep.scrape_plan(), Some((6, 4800)));

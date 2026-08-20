@@ -779,8 +779,7 @@
 }
 .chat-model-tabs {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  display: flex;
   gap: 0.2rem;
   padding: 0.45rem 0.55rem 0.35rem;
   border-bottom: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
@@ -791,7 +790,9 @@
   background: transparent;
   color: var(--color-muted);
   border-radius: var(--radius-pill);
-  padding: 0.38rem 0.6rem;
+  padding: 0.38rem 0.55rem;
+  flex: 1 1 0;
+  min-width: 0;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 500;
@@ -802,6 +803,7 @@
     color var(--dur-short) var(--ease-out),
     background var(--dur-short) var(--ease-out);
 }
+.chat-model-tab.is-hidden { display: none !important; }
 .chat-model-tab:hover {
   color: var(--color-ink-2);
   background: var(--surface-hover);
@@ -819,6 +821,75 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+.chat-model-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-model-group + .chat-model-group {
+  margin-top: 0.2rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
+}
+.chat-model-group-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  border-radius: var(--radius-pill);
+  padding: 0.32rem 0.55rem;
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+.chat-model-group-toggle:hover {
+  color: var(--color-ink-2);
+  background: var(--surface-hover);
+}
+.chat-model-group-toggle .think-chevron {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 auto;
+  opacity: 0.85;
+  transition: transform var(--dur-short) var(--ease-out);
+}
+.chat-model-group.is-collapsed .chat-model-group-toggle .think-chevron {
+  transform: rotate(-90deg);
+}
+.chat-model-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-model-group-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.chat-model-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.chat-model-group.is-collapsed .chat-model-group-list {
+  display: none;
 }
 .chat-model-empty {
   margin: 0;

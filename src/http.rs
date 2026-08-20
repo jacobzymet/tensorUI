@@ -82,6 +82,11 @@ fn build_client(timeout: Duration, insecure: bool, user_agent: &str) -> Client {
     builder.build().expect("reqwest client")
 }
 
+const LLM_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+static SECURE_BLOCKING_LLM: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+static INSECURE_BLOCKING_LLM: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+
 fn build_blocking_client(
     timeout: Duration,
     insecure: bool,
@@ -101,11 +106,18 @@ pub fn llm_client(timeout: Duration, allow_insecure_tls: bool) -> Client {
     build_client(timeout, allow_insecure_tls, APP_UA)
 }
 
-/// Blocking client for provider probes. The opt-in is scoped by
-/// `with_insecure_provider_tls` at the provider boundary.
-pub fn llm_blocking_client(_api_base: &str, timeout: Duration) -> reqwest::blocking::Client {
+/// Blocking client for provider probes. Reused so TLS sessions stay warm.
+/// The insecure-certificate opt-in is scoped by `with_insecure_provider_tls`.
+/// Callers should still set a per-request timeout; the pool default is 2s.
+pub fn llm_blocking_client(_api_base: &str, _timeout: Duration) -> reqwest::blocking::Client {
     let insecure = INSECURE_PROVIDER_TLS.with(Cell::get);
-    build_blocking_client(timeout, insecure, APP_UA)
+    let slot = if insecure {
+        &INSECURE_BLOCKING_LLM
+    } else {
+        &SECURE_BLOCKING_LLM
+    };
+    slot.get_or_init(|| build_blocking_client(LLM_PROBE_TIMEOUT, insecure, APP_UA))
+        .clone()
 }
 
 /// Async client for public HTTPS (search / page fetch). Always verifies TLS.

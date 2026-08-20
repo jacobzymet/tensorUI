@@ -10,10 +10,11 @@ use zeroize::Zeroize;
 
 use crate::{anthropic, http};
 
-const SCAN_PORTS: &[u16] = &[8080, 8081, 8090, 3000, 11434];
 /// How long a probe result is considered fresh. Expired entries are still served
 /// (stale-while-revalidate) so Chat polling never briefly sees an empty catalog.
 const HEALTH_CACHE: Duration = Duration::from_secs(30);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -602,45 +603,37 @@ impl CatalogCache {
         }
     }
 
-    pub fn probe(
-        &self,
-        style: ApiStyle,
-        base: &str,
-        token: &str,
-        extra_ports: &[u16],
-        other_provider_ports: &[u16],
-    ) -> Vec<RemoteModelOption> {
+    pub fn probe(&self, style: ApiStyle, base: &str, token: &str) -> Vec<RemoteModelOption> {
         if self.is_fresh(style, base, token)
             && let Some(catalog) = self.peek(style, base, token)
         {
             return catalog;
         }
-        let catalog = probe_provider_catalog(base, token, style, extra_ports, other_provider_ports);
+        let catalog = probe_provider_catalog(base, token, style);
         self.put(style, base, token, catalog.clone());
         self.peek(style, base, token).unwrap_or(catalog)
     }
 }
 
 pub fn probe_provider_health(base: &str, token: &str, style: ApiStyle) -> ProviderHealth {
-    match fetch_remote_models(base, token, style) {
-        Ok(models) => ProviderHealth {
-            ok: true,
-            kind: ProviderHealthKind::Ready,
-            model: models.first().cloned(),
-            status: Some("ready".into()),
-            error: None,
-        },
-        Err(error) => {
-            let kind = classify_provider_error(&error);
-            ProviderHealth {
-                ok: false,
-                kind,
-                model: None,
-                status: Some(kind.as_str().into()),
-                error: Some(error),
-            }
-        }
-    }
+    probe_provider_endpoint(base, token, style).0
+}
+
+/// One `GET {base}/models`. Health and capability flags are derived from that JSON.
+pub fn probe_provider_endpoint(
+    base: &str,
+    token: &str,
+    style: ApiStyle,
+) -> (ProviderHealth, Vec<RemoteModelOption>) {
+    catalog_and_health_from_payload(
+        base,
+        style,
+        fetch_models_payload(base, token, style, PROBE_TIMEOUT),
+    )
+}
+
+pub fn probe_provider_catalog(base: &str, token: &str, style: ApiStyle) -> Vec<RemoteModelOption> {
+    probe_provider_endpoint(base, token, style).1
 }
 
 #[derive(Debug, Clone)]
@@ -648,6 +641,7 @@ pub struct ProviderStyleProbe {
     pub api_style: ApiStyle,
     pub health: ProviderHealth,
     pub detected: bool,
+    pub catalog: Vec<RemoteModelOption>,
 }
 
 pub fn probe_provider_style(
@@ -656,40 +650,71 @@ pub fn probe_provider_style(
     forced: Option<ApiStyle>,
 ) -> ProviderStyleProbe {
     if let Some(style) = forced {
+        let (health, catalog) = probe_provider_endpoint(base, token, style);
         return ProviderStyleProbe {
             api_style: style,
-            health: probe_provider_health(base, token, style),
+            health,
             detected: false,
+            catalog,
         };
     }
-    let (style, health) = detect_provider_api_style(base, token);
+    let (style, health, catalog) = detect_provider_api_style(base, token);
     ProviderStyleProbe {
         api_style: style,
         health,
         detected: true,
+        catalog,
     }
 }
 
-pub fn detect_provider_api_style(base: &str, token: &str) -> (ApiStyle, ProviderHealth) {
-    let timeout = Duration::from_secs(2);
-    let openai_models = fetch_remote_models_with_timeout(base, token, ApiStyle::Openai, timeout);
-    let anthropic_models =
-        fetch_remote_models_with_timeout(base, token, ApiStyle::Anthropic, timeout);
-    let openai_route = style_route_signal(base, token, ApiStyle::Openai, timeout);
-    let anthropic_route = style_route_signal(base, token, ApiStyle::Anthropic, timeout);
+pub fn detect_provider_api_style(
+    base: &str,
+    token: &str,
+) -> (ApiStyle, ProviderHealth, Vec<RemoteModelOption>) {
+    let timeout = PROBE_TIMEOUT;
+    let (openai_payload, anthropic_payload, openai_route, anthropic_route) =
+        std::thread::scope(|scope| {
+            let openai_payload =
+                scope.spawn(|| fetch_models_payload(base, token, ApiStyle::Openai, timeout));
+            let anthropic_payload =
+                scope.spawn(|| fetch_models_payload(base, token, ApiStyle::Anthropic, timeout));
+            let openai_route =
+                scope.spawn(|| style_route_signal(base, token, ApiStyle::Openai, timeout));
+            let anthropic_route =
+                scope.spawn(|| style_route_signal(base, token, ApiStyle::Anthropic, timeout));
+            (
+                openai_payload
+                    .join()
+                    .unwrap_or_else(|_| Err("style probe failed".into())),
+                anthropic_payload
+                    .join()
+                    .unwrap_or_else(|_| Err("style probe failed".into())),
+                openai_route.join().unwrap_or(RouteSignal::Unknown),
+                anthropic_route.join().unwrap_or(RouteSignal::Unknown),
+            )
+        });
+
+    let openai_models = openai_payload
+        .as_ref()
+        .ok()
+        .and_then(|body| model_ids_from_body(body).ok());
+    let anthropic_models = anthropic_payload
+        .as_ref()
+        .ok()
+        .and_then(|body| model_ids_from_body(body).ok());
 
     let mut openai_score = score_style_candidate(
         base,
         token,
         ApiStyle::Openai,
-        openai_models.as_ref().ok(),
+        openai_models.as_ref(),
         openai_route,
     );
     let mut anthropic_score = score_style_candidate(
         base,
         token,
         ApiStyle::Anthropic,
-        anthropic_models.as_ref().ok(),
+        anthropic_models.as_ref(),
         anthropic_route,
     );
 
@@ -706,16 +731,37 @@ pub fn detect_provider_api_style(base: &str, token: &str) -> (ApiStyle, Provider
         || (anthropic_score == openai_score
             && style_hint(base, token) == Some(ApiStyle::Anthropic));
 
-    if prefer_anthropic {
-        (
-            ApiStyle::Anthropic,
-            health_from_models_result(anthropic_models.or(openai_models)),
-        )
+    let (style, winner, fallback) = if prefer_anthropic {
+        (ApiStyle::Anthropic, anthropic_payload, openai_payload)
     } else {
-        (
-            ApiStyle::Openai,
-            health_from_models_result(openai_models.or(anthropic_models)),
-        )
+        (ApiStyle::Openai, openai_payload, anthropic_payload)
+    };
+    let (mut health, catalog) = catalog_and_health_from_payload(base, style, winner);
+    if !health.ok {
+        health = catalog_and_health_from_payload(base, style, fallback).0;
+    }
+    (style, health, catalog)
+}
+
+fn catalog_and_health_from_payload(
+    base: &str,
+    style: ApiStyle,
+    payload: Result<serde_json::Value, String>,
+) -> (ProviderHealth, Vec<RemoteModelOption>) {
+    match payload {
+        Ok(body) => {
+            let catalog = catalog_from_models_body(base, style, &body);
+            let health = if catalog.is_empty() {
+                health_from_models_result(Err("Remote /models returned no models".into()))
+            } else {
+                health_from_models_result(Ok(catalog
+                    .iter()
+                    .map(|item| item.model.clone())
+                    .collect()))
+            };
+            (health, catalog)
+        }
+        Err(error) => (health_from_models_result(Err(error)), Vec::new()),
     }
 }
 
@@ -758,7 +804,7 @@ fn style_route_signal(base: &str, token: &str, style: ApiStyle, timeout: Duratio
     };
     let url = format!("{base}/{path}");
     let client = http::llm_blocking_client(&base, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     for (name, value) in provider_auth_headers(style, token) {
         request = request.header(&name, &value);
     }
@@ -868,8 +914,110 @@ pub fn classify_provider_error(error: &str) -> ProviderHealthKind {
     ProviderHealthKind::Error
 }
 
-fn fetch_remote_models(base: &str, token: &str, style: ApiStyle) -> Result<Vec<String>, String> {
-    fetch_remote_models_with_timeout(base, token, style, Duration::from_secs(2))
+fn probe_http_error(error: reqwest::Error) -> String {
+    let kind = if error.is_timeout() {
+        "timed out"
+    } else if error.is_connect() {
+        "failed to connect"
+    } else {
+        ""
+    };
+    let mut msg = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(inner) = source {
+        let next = inner.to_string();
+        if !next.is_empty() && !msg.contains(&next) {
+            msg = format!("{msg}: {next}");
+        }
+        source = inner.source();
+    }
+    if kind.is_empty() || msg.to_ascii_lowercase().contains(kind) {
+        msg
+    } else {
+        format!("{kind}: {msg}")
+    }
+}
+
+fn catalog_from_models_body(
+    api_base: &str,
+    style: ApiStyle,
+    body: &serde_json::Value,
+) -> Vec<RemoteModelOption> {
+    let Some(primary) = normalize_provider_base(api_base, style) else {
+        return Vec::new();
+    };
+    let Ok(models) = model_ids_from_body(body) else {
+        return Vec::new();
+    };
+    let thinking = thinking_from_models_body(body);
+    let attachments = attachments_from_models_body(body, style);
+    let contexts = contexts_from_models_body(body);
+    let port = split_openai_base(&primary)
+        .map(|(_, _, port)| port)
+        .unwrap_or(80);
+    let mut out = Vec::with_capacity(models.len());
+    let mut seen = std::collections::HashSet::new();
+    for model in models {
+        let id = format!("remote|{primary}|{model}");
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let thinking = thinking.get(&model).cloned().unwrap_or_default();
+        let attachments_supported = attachments.get(&model).copied().unwrap_or(false);
+        let context_length = contexts
+            .get(&model)
+            .copied()
+            .or_else(|| context_length_fuzzy(&contexts, &model));
+        out.push(RemoteModelOption {
+            id,
+            model: model.clone(),
+            base: primary.clone(),
+            port,
+            ready: true,
+            label: model,
+            thinking_supported: thinking.supported,
+            thinking_control: thinking.control,
+            thinking_efforts: thinking.efforts,
+            thinking_can_disable: thinking.can_disable,
+            attachments_supported,
+            context_length,
+            provider_id: String::new(),
+            provider_name: String::new(),
+        });
+    }
+    out.sort_by(|a, b| a.model.cmp(&b.model));
+    out
+}
+
+/// Local-only capability routes (`/props`, Ollama `/api/show`, LM Studio).
+/// Safe to run after the `/models` catalog is already stored so the UI is not blocked.
+pub fn enrich_local_catalog(
+    api_base: &str,
+    token: &str,
+    style: ApiStyle,
+    mut catalog: Vec<RemoteModelOption>,
+) -> Vec<RemoteModelOption> {
+    if catalog.is_empty() || !base_is_local(api_base) {
+        return catalog;
+    }
+    let models: Vec<String> = catalog.iter().map(|item| item.model.clone()).collect();
+    let thinking = local_thinking_support(api_base, token, style, &models, LOCAL_PROBE_TIMEOUT);
+    let attachments =
+        local_attachments_support(api_base, token, style, &models, LOCAL_PROBE_TIMEOUT);
+    for item in &mut catalog {
+        if let Some(capabilities) = thinking.get(&item.model) {
+            item.thinking_supported |= capabilities.supported;
+            if item.thinking_control.is_none() && capabilities.control.is_some() {
+                item.thinking_control = capabilities.control.clone();
+                item.thinking_efforts = capabilities.efforts.clone();
+                item.thinking_can_disable = capabilities.can_disable;
+            }
+        }
+        if let Some(supported) = attachments.get(&item.model).copied() {
+            item.attachments_supported |= supported;
+        }
+    }
+    catalog
 }
 
 /// Resolve whether each model supports controllable reasoning / thinking.
@@ -883,7 +1031,7 @@ fn fetch_remote_models(base: &str, token: &str, style: ApiStyle) -> Result<Vec<S
 /// Anthropic Messages can translate `reasoning_effort`, but the models list does
 /// not say which Claude variants accept extended thinking — so we never invent
 /// a control dialect from ApiStyle alone (unlike image attachments).
-fn fetch_remote_thinking_support(
+fn local_thinking_support(
     api_base: &str,
     token: &str,
     style: ApiStyle,
@@ -895,24 +1043,11 @@ fn fetch_remote_thinking_support(
         return out;
     }
 
-    if let Some(from_list) = thinking_from_models_endpoint(api_base, token, style, timeout) {
-        for (model, supported) in from_list {
-            out.insert(model, supported);
-        }
-    }
-
     let Some(root) = props_root_from_openai_base(api_base) else {
         return out;
     };
-    // Everything below probes local-inference-server routes. A cloud provider
-    // has none of them, and the per-model loops would fire one request per
-    // model — hundreds of them, serially, for a catalog like OpenRouter's.
-    // Its `/models` payload already carried the capability data above.
-    if !base_is_local(api_base) {
-        return out;
-    }
 
-    let probe_timeout = timeout.min(Duration::from_millis(800));
+    let probe_timeout = timeout.min(LOCAL_PROBE_TIMEOUT);
 
     // llama-server /props. Confirm the route exists once before asking per
     // model, otherwise a server without it costs one request per model.
@@ -940,7 +1075,6 @@ fn fetch_remote_thinking_support(
         }
     }
 
-    // Ollama native show API (skip entirely when /api/tags is absent).
     if root_has_get_path(&root, token, "/api/tags", probe_timeout) {
         for model in models {
             if let Some(supported) =
@@ -951,13 +1085,11 @@ fn fetch_remote_thinking_support(
         }
     }
 
-    // LM Studio native models API (reasoning options object).
     if let Some(from_lms) = fetch_lmstudio_thinking_map(&root, token, probe_timeout) {
         for model in models {
             if let Some(capabilities) = from_lms.get(model).cloned() {
                 merge_thinking_capabilities(&mut out, model, capabilities);
             } else {
-                // LM Studio keys sometimes omit publisher prefix.
                 let leaf = model.rsplit('/').next().unwrap_or(model);
                 if let Some((_, capabilities)) = from_lms
                     .iter()
@@ -976,7 +1108,7 @@ fn root_has_get_path(root: &str, token: &str, path: &str, timeout: Duration) -> 
     let root = root.trim_end_matches('/');
     let url = format!("{root}{path}");
     let client = http::llm_blocking_client(root, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
@@ -986,25 +1118,10 @@ fn root_has_get_path(root: &str, token: &str, path: &str, timeout: Duration) -> 
     }
 }
 
-fn thinking_from_models_endpoint(
-    api_base: &str,
-    token: &str,
-    style: ApiStyle,
-    timeout: Duration,
-) -> Option<HashMap<String, ThinkingCapabilities>> {
-    let base = normalize_provider_base(api_base, style)?;
-    let url = format!("{base}/models");
-    let client = http::llm_blocking_client(&base, timeout);
-    let mut request = client.get(&url);
-    for (name, value) in provider_auth_headers(style, token) {
-        request = request.header(&name, &value);
-    }
-    let response = request.send().ok()?;
-    if response.status().as_u16() != 200 {
-        return None;
-    }
-    let body = response.json::<serde_json::Value>().ok()?;
-    let data = body.get("data")?.as_array()?;
+fn thinking_from_models_body(body: &serde_json::Value) -> HashMap<String, ThinkingCapabilities> {
+    let Some(data) = body.get("data").and_then(|v| v.as_array()) else {
+        return HashMap::new();
+    };
     let mut out = HashMap::new();
     for entry in data {
         let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
@@ -1014,7 +1131,7 @@ fn thinking_from_models_endpoint(
             out.insert(id.to_string(), capabilities);
         }
     }
-    if out.is_empty() { None } else { Some(out) }
+    out
 }
 
 fn thinking_capabilities_from_model_object(
@@ -1141,7 +1258,7 @@ fn fetch_ollama_show_body(
     let root = root.trim_end_matches('/');
     let url = format!("{root}/api/show");
     let client = http::llm_blocking_client(root, timeout);
-    let mut request = client.post(&url);
+    let mut request = client.post(&url).timeout(timeout);
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
@@ -1160,7 +1277,7 @@ fn fetch_ollama_show_body(
 /// 2. Ollama `POST {root}/api/show` → `capabilities` includes `"vision"`
 /// 3. LM Studio `GET {root}/api/v1/models` → `capabilities.vision`
 /// 4. Anthropic Messages style: protocol supports image content blocks
-fn fetch_remote_attachments_support(
+fn local_attachments_support(
     api_base: &str,
     token: &str,
     style: ApiStyle,
@@ -1171,27 +1288,16 @@ fn fetch_remote_attachments_support(
     if models.is_empty() {
         return out;
     }
-
     if style == ApiStyle::Anthropic {
         for model in models {
             out.insert(model.clone(), true);
         }
     }
 
-    if let Some(from_list) = attachments_from_models_endpoint(api_base, token, style, timeout) {
-        for (model, supported) in from_list {
-            out.insert(model, supported);
-        }
-    }
-
     let Some(root) = props_root_from_openai_base(api_base) else {
         return out;
     };
-    // Local-inference-server routes only; see `base_is_local`.
-    if !base_is_local(api_base) {
-        return out;
-    }
-    let probe_timeout = timeout.min(Duration::from_millis(800));
+    let probe_timeout = timeout.min(LOCAL_PROBE_TIMEOUT);
 
     if root_has_get_path(&root, token, "/api/tags", probe_timeout) {
         for model in models {
@@ -1222,31 +1328,30 @@ fn fetch_remote_attachments_support(
     out
 }
 
-fn fetch_remote_context_lengths(
-    api_base: &str,
-    token: &str,
+fn attachments_from_models_body(
+    body: &serde_json::Value,
     style: ApiStyle,
-    timeout: Duration,
-) -> HashMap<String, u64> {
+) -> HashMap<String, bool> {
     let mut out = HashMap::new();
-    let Some(base) = normalize_provider_base(api_base, style) else {
+    let Some(data) = body.get("data").and_then(|v| v.as_array()) else {
         return out;
     };
-    let url = format!("{base}/models");
-    let client = http::llm_blocking_client(&base, timeout);
-    let mut request = client.get(&url);
-    for (name, value) in provider_auth_headers(style, token) {
-        request = request.header(&name, &value);
+    for entry in data {
+        let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if style == ApiStyle::Anthropic {
+            out.insert(id.to_string(), true);
+        }
+        if let Some(supported) = attachments_hint_from_model_object(entry) {
+            out.insert(id.to_string(), supported);
+        }
     }
-    let Ok(response) = request.send() else {
-        return out;
-    };
-    if response.status().as_u16() != 200 {
-        return out;
-    }
-    let Ok(body) = response.json::<serde_json::Value>() else {
-        return out;
-    };
+    out
+}
+
+fn contexts_from_models_body(body: &serde_json::Value) -> HashMap<String, u64> {
+    let mut out = HashMap::new();
     let Some(data) = body.get("data").and_then(|v| v.as_array()) else {
         return out;
     };
@@ -1269,37 +1374,6 @@ fn context_length_fuzzy(map: &HashMap<String, u64>, model: &str) -> Option<u64> 
     map.iter()
         .find(|(key, _)| key.as_str() == leaf || key.ends_with(&format!("/{leaf}")))
         .map(|(_, len)| *len)
-}
-
-fn attachments_from_models_endpoint(
-    api_base: &str,
-    token: &str,
-    style: ApiStyle,
-    timeout: Duration,
-) -> Option<HashMap<String, bool>> {
-    let base = normalize_provider_base(api_base, style)?;
-    let url = format!("{base}/models");
-    let client = http::llm_blocking_client(&base, timeout);
-    let mut request = client.get(&url);
-    for (name, value) in provider_auth_headers(style, token) {
-        request = request.header(&name, &value);
-    }
-    let response = request.send().ok()?;
-    if response.status().as_u16() != 200 {
-        return None;
-    }
-    let body = response.json::<serde_json::Value>().ok()?;
-    let data = body.get("data")?.as_array()?;
-    let mut out = HashMap::new();
-    for entry in data {
-        let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if let Some(supported) = attachments_hint_from_model_object(entry) {
-            out.insert(id.to_string(), supported);
-        }
-    }
-    if out.is_empty() { None } else { Some(out) }
 }
 
 fn attachments_hint_from_model_object(entry: &serde_json::Value) -> Option<bool> {
@@ -1421,7 +1495,7 @@ fn fetch_lmstudio_vision_map(
     let root = root.trim_end_matches('/');
     let url = format!("{root}/api/v1/models");
     let client = http::llm_blocking_client(root, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
@@ -1462,7 +1536,7 @@ fn fetch_lmstudio_thinking_map(
     let root = root.trim_end_matches('/');
     let url = format!("{root}/api/v1/models");
     let client = http::llm_blocking_client(root, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
@@ -1526,7 +1600,7 @@ fn fetch_remote_props_body(
         _ => format!("{root}/props"),
     };
     let client = http::llm_blocking_client(root, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
@@ -1552,28 +1626,31 @@ fn urlencoding_path(value: &str) -> String {
     out
 }
 
-fn fetch_remote_models_with_timeout(
+fn fetch_models_payload(
     base: &str,
     token: &str,
     style: ApiStyle,
     timeout: Duration,
-) -> Result<Vec<String>, String> {
+) -> Result<serde_json::Value, String> {
     let Some(base) = normalize_provider_base(base, style) else {
         return Err("No provider URL configured".into());
     };
     let url = format!("{base}/models");
     let client = http::llm_blocking_client(&base, timeout);
-    let mut request = client.get(&url);
+    let mut request = client.get(&url).timeout(timeout);
     for (name, value) in provider_auth_headers(style, token) {
         request = request.header(&name, &value);
     }
-    let response = request.send().map_err(|error| error.to_string())?;
+    let response = request.send().map_err(probe_http_error)?;
     if response.status().as_u16() != 200 {
         return Err(format!("Remote responded with {}", response.status()));
     }
-    let body = response
+    response
         .json::<serde_json::Value>()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+}
+
+fn model_ids_from_body(body: &serde_json::Value) -> Result<Vec<String>, String> {
     let models = body
         .get("data")
         .and_then(|v| v.as_array())
@@ -1590,9 +1667,7 @@ fn fetch_remote_models_with_timeout(
     }
 }
 
-/// True for hosts that can plausibly be "a dev server on the port next door" —
-/// loopback and the common local hostnames. A cloud API's hostname is never
-/// this, no matter how the user reaches it.
+/// True for loopback and common local hostnames.
 fn host_is_local(host: &str) -> bool {
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
     host.eq_ignore_ascii_case("localhost")
@@ -1601,153 +1676,6 @@ fn host_is_local(host: &str) -> bool {
         || host
             .parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback())
-}
-
-/// Ports to probe for one provider's catalog.
-///
-/// Sibling scanning is a convenience for the single-provider local-server case
-/// ("I typed 8080 but llama-server came up on 8081"). It only makes sense
-/// against localhost: probing a cloud host like openrouter.ai on a dozen
-/// unrelated ports adds seconds of latency and risks the host's WAF flagging
-/// the burst of connections and blocking the *real* request too — which reads
-/// to the user as "the provider just doesn't show its models." Sibling
-/// scanning is also switched off once a second provider exists, since the
-/// user has then said exactly where their endpoints live — otherwise two
-/// providers on neighbouring ports each absorb the other's catalog and every
-/// model appears twice under the wrong badge.
-fn catalog_scan_ports(
-    primary_port: u16,
-    host: &str,
-    style: ApiStyle,
-    extra_ports: &[u16],
-    other_provider_ports: &[u16],
-) -> Vec<u16> {
-    let scan_siblings =
-        style == ApiStyle::Openai && other_provider_ports.is_empty() && host_is_local(host);
-    let mut ports = vec![primary_port];
-    if scan_siblings {
-        ports.extend_from_slice(extra_ports);
-        ports.extend_from_slice(SCAN_PORTS);
-        for delta in 1..=4u16 {
-            ports.push(primary_port.saturating_add(delta));
-            if primary_port > delta {
-                ports.push(primary_port - delta);
-            }
-        }
-    }
-    ports.sort_unstable();
-    ports.dedup();
-    // Belt and braces: never claim a port another provider owns.
-    ports.retain(|port| *port == primary_port || !other_provider_ports.contains(port));
-    ports
-}
-
-/// Keep the configured base byte-for-byte (after normalization) for the
-/// primary probe. Cloud providers often use a prefix before `/v1` — notably
-/// OpenRouter's `/api/v1` — so rebuilding every URL as `host:port/v1` silently
-/// points the catalog request at the wrong route. Only locally discovered
-/// sibling ports use the conventional `/v1` path.
-fn catalog_candidate_base(
-    primary: &str,
-    scheme: &str,
-    host: &str,
-    primary_port: u16,
-    port: u16,
-) -> String {
-    if port == primary_port {
-        primary.to_string()
-    } else {
-        format!("{scheme}://{host}:{port}/v1")
-    }
-}
-
-/// `other_provider_ports` carries the primary ports of every *other* configured
-/// provider; see [`catalog_scan_ports`].
-pub fn probe_provider_catalog(
-    base: &str,
-    token: &str,
-    style: ApiStyle,
-    extra_ports: &[u16],
-    other_provider_ports: &[u16],
-) -> Vec<RemoteModelOption> {
-    let Some(primary) = normalize_provider_base(base, style) else {
-        return Vec::new();
-    };
-    let Some((scheme, host, primary_port)) = split_openai_base(&primary) else {
-        return Vec::new();
-    };
-
-    let ports = catalog_scan_ports(
-        primary_port,
-        &host,
-        style,
-        extra_ports,
-        other_provider_ports,
-    );
-
-    let sibling_timeout = Duration::from_millis(450);
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for port in ports {
-        let candidate = catalog_candidate_base(&primary, &scheme, &host, primary_port, port);
-        let timeout = if port == primary_port {
-            Duration::from_secs(2)
-        } else {
-            sibling_timeout
-        };
-        let Ok(models) = fetch_remote_models_with_timeout(&candidate, token, style, timeout) else {
-            continue;
-        };
-        let thinking = fetch_remote_thinking_support(&candidate, token, style, &models, timeout);
-        let attachments =
-            fetch_remote_attachments_support(&candidate, token, style, &models, timeout);
-        let contexts = fetch_remote_context_lengths(&candidate, token, style, timeout);
-        for model in models {
-            let id = format!("remote|{candidate}|{model}");
-            if !seen.insert(id.clone()) {
-                continue;
-            }
-            let thinking = thinking.get(&model).cloned().unwrap_or_default();
-            let attachments_supported = attachments.get(&model).copied().unwrap_or(false);
-            let context_length = contexts
-                .get(&model)
-                .copied()
-                .or_else(|| context_length_fuzzy(&contexts, &model));
-            out.push(RemoteModelOption {
-                id,
-                model: model.clone(),
-                base: candidate.clone(),
-                port,
-                ready: true,
-                label: model,
-                thinking_supported: thinking.supported,
-                thinking_control: thinking.control,
-                thinking_efforts: thinking.efforts,
-                thinking_can_disable: thinking.can_disable,
-                attachments_supported,
-                context_length,
-                provider_id: String::new(),
-                provider_name: String::new(),
-            });
-        }
-    }
-    out.sort_by(|a, b| a.port.cmp(&b.port).then(a.model.cmp(&b.model)));
-    out.sort_by(|a, b| {
-        let a_primary = a.base == primary;
-        let b_primary = b.base == primary;
-        b_primary
-            .cmp(&a_primary)
-            .then(a.model.cmp(&b.model))
-            .then(a.port.cmp(&b.port))
-    });
-    let mut deduped = Vec::with_capacity(out.len());
-    let mut seen_models = std::collections::HashSet::new();
-    for item in out {
-        if seen_models.insert(item.model.clone()) {
-            deduped.push(item);
-        }
-    }
-    deduped
 }
 
 pub fn split_openai_base(base: &str) -> Option<(String, String, u16)> {
@@ -1938,69 +1866,33 @@ mod tests {
     }
 
     #[test]
-    fn lone_local_openai_provider_scans_sibling_ports() {
-        let ports = catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[], &[]);
-        assert!(ports.contains(&8099), "primary port is always probed");
-        assert!(ports.contains(&8098), "neighbouring ports are discovered");
-        assert!(ports.contains(&11434), "well-known ports are discovered");
+    fn catalog_from_models_uses_configured_base_and_capability_fields() {
+        let body = serde_json::json!({
+            "data": [{
+                "id": "openai/o4-mini",
+                "reasoning": { "supported_efforts": ["high", "medium", "low"] },
+                "capabilities": { "vision": true },
+                "context_length": 128000
+            }]
+        });
+        let catalog =
+            catalog_from_models_body("https://openrouter.ai/api/v1", ApiStyle::Openai, &body);
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].base, "https://openrouter.ai/api/v1");
+        assert_eq!(catalog[0].port, 443);
+        assert_eq!(catalog[0].model, "openai/o4-mini");
+        assert!(catalog[0].thinking_supported);
+        assert!(catalog[0].attachments_supported);
+        assert_eq!(catalog[0].context_length, Some(128000));
     }
 
     #[test]
-    fn localhost_hostname_and_loopback_ipv6_also_scan() {
-        for host in ["localhost", "::1", "LOCALHOST"] {
-            let ports = catalog_scan_ports(8099, host, ApiStyle::Openai, &[], &[]);
-            assert!(ports.len() > 1, "{host} should be treated as local");
-        }
-    }
-
-    #[test]
-    fn cloud_host_never_port_scans() {
-        // A cloud API (e.g. openrouter.ai) is never "a dev server on the port
-        // next door" — scanning it risks the host's WAF blocking the burst of
-        // connections, which can take the real request down with it.
-        let ports = catalog_scan_ports(443, "openrouter.ai", ApiStyle::Openai, &[], &[]);
-        assert_eq!(ports, vec![443]);
-    }
-
-    #[test]
-    fn primary_catalog_candidate_preserves_provider_path_prefix() {
-        let candidate = catalog_candidate_base(
-            "https://openrouter.ai/api/v1",
-            "https",
-            "openrouter.ai",
-            443,
-            443,
-        );
-        assert_eq!(candidate, "https://openrouter.ai/api/v1");
-    }
-
-    #[test]
-    fn sibling_catalog_candidate_uses_local_openai_route() {
-        let candidate = catalog_candidate_base(
-            "http://127.0.0.1:8099/custom/v1",
-            "http",
-            "127.0.0.1",
-            8099,
-            8100,
-        );
-        assert_eq!(candidate, "http://127.0.0.1:8100/v1");
-    }
-
-    #[test]
-    fn second_provider_disables_sibling_scanning() {
-        // 8098 belongs to another provider: probing it here would let this
-        // provider claim the other's models under its own badge.
-        let ports = catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[], &[8098]);
-        assert_eq!(ports, vec![8099]);
-    }
-
-    #[test]
-    fn scan_never_claims_a_port_another_provider_owns() {
-        let ports =
-            catalog_scan_ports(8099, "127.0.0.1", ApiStyle::Openai, &[8098], &[8098, 11434]);
-        assert!(!ports.contains(&8098));
-        assert!(!ports.contains(&11434));
-        assert!(ports.contains(&8099));
+    fn catalog_from_models_preserves_local_path_prefix() {
+        let body = serde_json::json!({ "data": [{ "id": "local-model" }] });
+        let catalog =
+            catalog_from_models_body("http://127.0.0.1:8099/custom/v1", ApiStyle::Openai, &body);
+        assert_eq!(catalog[0].base, "http://127.0.0.1:8099/custom/v1");
+        assert_eq!(catalog[0].port, 8099);
     }
 
     #[test]
@@ -2027,14 +1919,6 @@ mod tests {
         ] {
             assert!(!base_is_local(base), "{base} should not be probed locally");
         }
-    }
-
-    #[test]
-    fn anthropic_never_port_scans() {
-        assert_eq!(
-            catalog_scan_ports(443, "api.anthropic.com", ApiStyle::Anthropic, &[], &[]),
-            vec![443]
-        );
     }
 
     #[test]
@@ -2166,6 +2050,23 @@ mod tests {
         assert_eq!(classify_route_status(405), RouteSignal::Present);
         assert_eq!(classify_route_status(401), RouteSignal::Present);
         assert_eq!(classify_route_status(200), RouteSignal::Present);
+    }
+
+    #[test]
+    fn connect_failures_are_waiting_not_unreachable() {
+        // reqwest 0.12 often omits "connection refused" / "timed out" from Display.
+        assert_eq!(
+            classify_provider_error(
+                "failed to connect: error sending request for url (http://127.0.0.1:8080/v1/models)"
+            ),
+            ProviderHealthKind::Waiting
+        );
+        assert_eq!(
+            classify_provider_error(
+                "timed out: error sending request for url (https://openrouter.ai/api/v1/models)"
+            ),
+            ProviderHealthKind::Waiting
+        );
     }
 
     #[test]

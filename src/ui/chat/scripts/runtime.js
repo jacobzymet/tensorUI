@@ -21,6 +21,7 @@ function createStreamTyper(onPaint) {
   let raf = 0;
   let inReasoning = false;
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let catchingUp = false;
 
   function pending() {
     return target.length - shown.length;
@@ -54,7 +55,7 @@ function createStreamTyper(onPaint) {
   }
 
   function schedule() {
-    if (reduceMotion) {
+    if (reduceMotion || catchingUp) {
       shown = target;
       onPaint(shown, true);
       return;
@@ -94,6 +95,17 @@ function createStreamTyper(onPaint) {
       if (raf) {
         cancelAnimationFrame(raf);
         raf = 0;
+      }
+    },
+    setCatchingUp(next) {
+      catchingUp = !!next;
+      if (catchingUp) {
+        if (raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        shown = target;
+        onPaint(shown, true);
       }
     },
     /** Instantly catch up — call when the SSE stream closes or aborts. */
@@ -149,9 +161,101 @@ function modelOptionTitle(label, provider) {
     : model;
 }
 
+function hostLooksLocal(host) {
+  const value = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (!value) return false;
+  if (
+    value === 'localhost'
+    || value === '::1'
+    || value === '0.0.0.0'
+    || value.endsWith('.local')
+  ) return true;
+  if (
+    value === '127.0.0.1'
+    || value.startsWith('127.')
+    || /^(?:fc|fd)[0-9a-f]{2}:/.test(value)
+    || value.startsWith('fe80:')
+  ) return true;
+  if (value.startsWith('10.') || value.startsWith('192.168.') || value.startsWith('169.254.')) return true;
+  const match = value.match(/^172\.(\d+)\./);
+  if (!match) return false;
+  const octet = Number(match[1]);
+  return octet >= 16 && octet <= 31;
+}
+
+function modelLooksLocal(option) {
+  const base = String(option?.base || '');
+  if (!base) return false;
+  try {
+    const url = new URL(base.includes('://') ? base : 'http://' + base);
+    return hostLooksLocal(url.hostname);
+  } catch {
+    return /localhost|127\.0\.0\.1|\.local/i.test(base);
+  }
+}
+
+function modelProviderKey(option) {
+  return String(option?.providerId || option?.provider || option?.base || 'provider').trim() || 'provider';
+}
+
+function modelProviderLabel(option) {
+  return String(option?.provider || '').trim() || 'Provider';
+}
+
+function modelMenuHasLocal() {
+  return modelMenuOptions.some(modelLooksLocal);
+}
+
+function modelMenuHasCloud() {
+  return modelMenuOptions.some((option) => !modelLooksLocal(option));
+}
+
+function fallbackModelMenuTab() {
+  const selected = modelMenuOptions.find((option) => option.value === selectedChatModel);
+  if (selected && modelLooksLocal(selected) && modelMenuHasLocal()) return 'local';
+  if (modelMenuHasCloud()) return 'cloud';
+  if (modelMenuHasLocal()) return 'local';
+  return 'recents';
+}
+
+function normalizeModelMenuTab(tab) {
+  if (tab === 'recents' || tab === 'pins' || tab === 'local' || tab === 'cloud') return tab;
+  return fallbackModelMenuTab();
+}
+
+function modelMenuUsesProviderGroups() {
+  return modelMenuTab === 'local' || modelMenuTab === 'cloud';
+}
+
+function groupModelOptions(options) {
+  const groups = [];
+  const byKey = new Map();
+  options.forEach((option) => {
+    const key = modelProviderKey(option);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: modelProviderLabel(option), options: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.options.push(option);
+  });
+  return groups;
+}
+
+function visibleModelMenuOptions() {
+  if (!modelMenuUsesProviderGroups()) return modelMenuMatches;
+  const forceOpen = modelFilterTerms().length > 0;
+  return groupModelOptions(modelMenuMatches).flatMap((group) => (
+    forceOpen || !isModelProviderCollapsed(group.key) ? group.options : []
+  ));
+}
+
 function modelMenuIsOpen() {
   return chatModelMenu && !chatModelMenu.classList.contains('is-hidden');
 }
+
+let modelMenuCloseTimer = null;
 
 function modelSearchEnabled() {
   return modelMenuOptions.length >= MODEL_SEARCH_MIN_OPTIONS;
@@ -162,7 +266,8 @@ function modelFilterTerms() {
 }
 
 function modelMenuSourceOptions() {
-  if (modelMenuTab === 'all') return modelMenuOptions.slice();
+  if (modelMenuTab === 'local') return modelMenuOptions.filter(modelLooksLocal);
+  if (modelMenuTab === 'cloud') return modelMenuOptions.filter((option) => !modelLooksLocal(option));
   const byValue = new Map(modelMenuOptions.map((option) => [option.value, option]));
   const order = modelMenuTab === 'pins' ? pinnedModelIds : recentModelIds;
   return order
@@ -173,21 +278,28 @@ function modelMenuSourceOptions() {
 function syncModelMenuTabs() {
   const tabs = chatModelMenu?.querySelectorAll('[data-model-tab]');
   if (!tabs) return;
+  const hasLocal = modelMenuHasLocal();
+  const hasCloud = modelMenuHasCloud();
   tabs.forEach((tab) => {
-    const active = tab.getAttribute('data-model-tab') === modelMenuTab;
+    const name = tab.getAttribute('data-model-tab');
+    if (name === 'local') tab.classList.toggle('is-hidden', !hasLocal);
+    if (name === 'cloud') tab.classList.toggle('is-hidden', !hasCloud);
+    const active = name === modelMenuTab;
     tab.classList.toggle('is-active', active);
     tab.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   if (chatModelList) {
     const label = modelMenuTab === 'recents'
       ? 'Recent models'
-      : (modelMenuTab === 'pins' ? 'Pinned models' : 'All models');
+      : (modelMenuTab === 'pins'
+        ? 'Pinned models'
+        : (modelMenuTab === 'local' ? 'Local models' : 'Cloud models'));
     chatModelList.setAttribute('aria-label', label);
   }
 }
 
 function setModelMenuTab(tab, { keepActive = false } = {}) {
-  const next = tab === 'recents' || tab === 'pins' ? tab : 'all';
+  const next = normalizeModelMenuTab(tab);
   if (modelMenuTab === next && modelMenuIsOpen()) {
     applyModelFilter({ keepActive });
     return;
@@ -251,38 +363,74 @@ function highlightModelText(value, terms) {
   return out;
 }
 
+function renderModelOptionHtml(option, index, { showProvider, terms }) {
+  const isSelected = option.value === selectedChatModel;
+  const pinned = isModelPinned(option.value);
+  const badge = showProvider && option.provider
+    ? '<span class="chat-model-origin-pill" title="'
+      + escapeModelAttr(chatShell.classList.contains('privacy-mode') ? '' : option.provider) + '">'
+      + highlightModelText(option.provider, terms) + '</span>'
+    : '';
+  return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
+    + '" role="option" id="chat-model-option-' + index + '"'
+    + ' data-value="' + escapeModelAttr(option.value) + '"'
+    + ' title="' + escapeModelAttr(modelOptionTitle(option.label, option.provider)) + '"'
+    + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
+    + '<button type="button" class="chat-model-option-main" data-model-pick="'
+    + escapeModelAttr(option.value) + '">'
+    + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
+    + badge
+    + '</button>'
+    + '<button type="button" class="chat-model-pin' + (pinned ? ' is-pinned' : '') + '"'
+    + ' data-model-pin="' + escapeModelAttr(option.value) + '"'
+    + ' aria-label="' + (pinned ? 'Unpin model' : 'Pin model') + '"'
+    + ' aria-pressed="' + (pinned ? 'true' : 'false') + '"'
+    + ' title="' + (pinned ? 'Unpin' : 'Pin') + '">'
+    + MODEL_PIN_ICON
+    + '</button>'
+    + '</div>';
+}
+
 function renderModelMenuList() {
   const terms = modelFilterTerms();
   const sourceCount = modelMenuSourceOptions().length;
-  chatModelList.innerHTML = modelMenuMatches.map((option, index) => {
-    const isSelected = option.value === selectedChatModel;
-    const pinned = isModelPinned(option.value);
-    const badge = option.provider
-      ? '<span class="chat-model-origin-pill" title="'
-        + escapeModelAttr(chatShell.classList.contains('privacy-mode') ? '' : option.provider) + '">'
-        + highlightModelText(option.provider, terms) + '</span>'
-      : '';
-    return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
-      + '" role="option" id="chat-model-option-' + index + '"'
-      + ' data-value="' + escapeModelAttr(option.value) + '"'
-      + ' title="' + escapeModelAttr(modelOptionTitle(option.label, option.provider)) + '"'
-      + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
-      + '<button type="button" class="chat-model-option-main" data-model-pick="'
-      + escapeModelAttr(option.value) + '">'
-      + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
-      + badge
-      + '</button>'
-      + '<button type="button" class="chat-model-pin' + (pinned ? ' is-pinned' : '') + '"'
-      + ' data-model-pin="' + escapeModelAttr(option.value) + '"'
-      + ' aria-label="' + (pinned ? 'Unpin model' : 'Pin model') + '"'
-      + ' aria-pressed="' + (pinned ? 'true' : 'false') + '"'
-      + ' title="' + (pinned ? 'Unpin' : 'Pin') + '">'
-      + MODEL_PIN_ICON
-      + '</button>'
-      + '</div>';
-  }).join('');
+  const grouped = modelMenuUsesProviderGroups();
+  const forceOpen = !!terms.length;
+  let html = '';
+  let optionIndex = 0;
+  if (grouped) {
+    groupModelOptions(modelMenuMatches).forEach((group) => {
+      const collapsed = !forceOpen && isModelProviderCollapsed(group.key);
+      html += '<section class="chat-model-group' + (collapsed ? ' is-collapsed' : '') + '"'
+        + ' data-provider-key="' + escapeModelAttr(group.key) + '">'
+        + '<button type="button" class="chat-model-group-toggle" data-model-group="'
+        + escapeModelAttr(group.key) + '"'
+        + ' aria-expanded="' + (collapsed ? 'false' : 'true') + '">'
+        + THINK_CHEVRON
+        + '<span class="chat-model-group-name">' + highlightModelText(group.label, terms) + '</span>'
+        + '<span class="chat-model-group-count">' + group.options.length + '</span>'
+        + '</button>'
+        + '<div class="chat-model-group-list" role="group" aria-label="'
+        + escapeModelAttr(group.label) + '">';
+      if (!collapsed) {
+        group.options.forEach((option) => {
+          html += renderModelOptionHtml(option, optionIndex, { showProvider: false, terms });
+          optionIndex += 1;
+        });
+      }
+      html += '</div></section>';
+    });
+  } else {
+    html = modelMenuMatches.map((option, index) => (
+      renderModelOptionHtml(option, index, { showProvider: true, terms })
+    )).join('');
+  }
+  chatModelList.innerHTML = html;
   chatModelList.querySelectorAll('.chat-model-origin-pill').forEach((badge) => {
     applyPrivacyMosaic(badge, 'model-menu-provider:' + badge.textContent);
+  });
+  chatModelList.querySelectorAll('.chat-model-group-name').forEach((label) => {
+    applyPrivacyMosaic(label, 'model-menu-provider-group:' + label.textContent);
   });
 
   const empty = !modelMenuMatches.length;
@@ -292,7 +440,11 @@ function renderModelMenuList() {
     if (modelMenuTab === 'recents' && !terms.length) {
       chatModelEmpty.textContent = 'Models you pick will show up here.';
     } else if (modelMenuTab === 'pins' && !terms.length) {
-      chatModelEmpty.textContent = 'Pin models from All or Recents to keep them here.';
+      chatModelEmpty.textContent = 'Pin models from Recents, Local, or Cloud to keep them here.';
+    } else if (modelMenuTab === 'local' && !terms.length) {
+      chatModelEmpty.textContent = 'No local models.';
+    } else if (modelMenuTab === 'cloud' && !terms.length) {
+      chatModelEmpty.textContent = 'No cloud models.';
     } else if (terms.length) {
       chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
     } else {
@@ -308,18 +460,19 @@ function renderModelMenuList() {
 
 /** Re-filter and repaint the open menu after the query changed. */
 function applyModelFilter({ keepActive = false } = {}) {
+  const visible = () => visibleModelMenuOptions();
   const previous = keepActive && modelMenuActiveIndex >= 0
-    ? modelMenuMatches[modelMenuActiveIndex]
+    ? visible()[modelMenuActiveIndex]
     : null;
   computeModelMatches();
   renderModelMenuList();
+  const options = visible();
   const restored = previous
-    ? modelMenuMatches.findIndex((option) => option.value === previous.value)
+    ? options.findIndex((option) => option.value === previous.value)
     : -1;
   if (restored >= 0) modelMenuActiveIndex = restored;
   else {
-    const selected = modelMenuMatches.findIndex((option) => option.value === selectedChatModel);
-    modelMenuActiveIndex = modelMenuMatches.length ? Math.max(0, selected) : -1;
+    modelMenuActiveIndex = options.findIndex((option) => option.value === selectedChatModel);
   }
   paintModelMenuActive();
   if (modelMenuIsOpen()) positionModelMenu();
@@ -349,6 +502,8 @@ function positionModelMenu() {
 
 function closeModelMenu({ restoreFocus = false } = {}) {
   if (!chatModelMenu || chatModelMenu.classList.contains('is-hidden')) return;
+  clearTimeout(modelMenuCloseTimer);
+  modelMenuCloseTimer = null;
   chatModelMenu.classList.remove('is-open');
   chatModelSelectWrap.classList.remove('is-open');
   chatModelSelect.setAttribute('aria-expanded', 'false');
@@ -367,15 +522,21 @@ function closeModelMenu({ restoreFocus = false } = {}) {
     finish();
     return;
   }
-  window.setTimeout(finish, 180);
+  modelMenuCloseTimer = window.setTimeout(() => {
+    modelMenuCloseTimer = null;
+    finish();
+  }, 180);
 }
 
 function paintModelMenuActive() {
-  const options = chatModelList.querySelectorAll('.chat-model-option');
-  options.forEach((btn, index) => {
-    btn.classList.toggle('is-active', index === modelMenuActiveIndex);
+  const activeValue = visibleModelMenuOptions()[modelMenuActiveIndex]?.value || '';
+  const nodes = chatModelList.querySelectorAll('.chat-model-option');
+  let active = null;
+  nodes.forEach((node) => {
+    const isActive = !!activeValue && node.getAttribute('data-value') === activeValue;
+    node.classList.toggle('is-active', isActive);
+    if (isActive) active = node;
   });
-  const active = options[modelMenuActiveIndex];
   if (active) active.scrollIntoView({ block: 'nearest' });
   if (chatModelSearch) {
     if (active) chatModelSearch.setAttribute('aria-activedescendant', active.id);
@@ -385,6 +546,8 @@ function paintModelMenuActive() {
 
 function openModelMenu() {
   if (!modelMenuOptions.length || chatModelSelectWrap.classList.contains('is-hidden')) return;
+  clearTimeout(modelMenuCloseTimer);
+  modelMenuCloseTimer = null;
   if (chatModelMenu.parentElement !== document.body) {
     document.body.appendChild(chatModelMenu);
   }
@@ -393,9 +556,13 @@ function openModelMenu() {
   modelMenuFilter = '';
   if (chatModelSearch) chatModelSearch.value = '';
   if (modelMenuTab === 'recents' && !recentModelIds.length) {
-    modelMenuTab = pinnedModelIds.length ? 'pins' : 'all';
+    modelMenuTab = pinnedModelIds.length ? 'pins' : fallbackModelMenuTab();
   } else if (modelMenuTab === 'pins' && !pinnedModelIds.length) {
-    modelMenuTab = recentModelIds.length ? 'recents' : 'all';
+    modelMenuTab = recentModelIds.length ? 'recents' : fallbackModelMenuTab();
+  } else if (modelMenuTab === 'local' && !modelMenuHasLocal()) {
+    modelMenuTab = fallbackModelMenuTab();
+  } else if (modelMenuTab === 'cloud' && !modelMenuHasCloud()) {
+    modelMenuTab = fallbackModelMenuTab();
   }
   syncModelMenuTabs();
   chatModelMenu.classList.remove('is-hidden');
@@ -403,7 +570,7 @@ function openModelMenu() {
   chatModelSelect.setAttribute('aria-expanded', 'true');
   computeModelMatches();
   renderModelMenuList();
-  modelMenuActiveIndex = Math.max(0, modelMenuMatches.findIndex((o) => o.value === selectedChatModel));
+  modelMenuActiveIndex = visibleModelMenuOptions().findIndex((o) => o.value === selectedChatModel);
   positionModelMenu();
   paintModelMenuActive();
   // Typing filters immediately when the field is there; otherwise the
@@ -454,6 +621,95 @@ function escapeModelText(value) {
     .replace(/</g, '&lt;');
 }
 
+/** Map a saved picker id onto the current catalog without dropping unknown ids. */
+function resolveSavedModelId(savedId, options) {
+  const id = String(savedId || '').trim();
+  if (!id || !options.length) return id;
+  if (options.some((option) => option.value === id)) return id;
+  const stripped = id.replace(/^remote\|/, '');
+  const suffixHits = options.filter((option) => option.value.endsWith('|' + stripped));
+  if (suffixHits.length === 1) return suffixHits[0].value;
+  const parts = stripped.split('|');
+  if (parts.length >= 2) {
+    const model = parts[parts.length - 1];
+    const base = parts.slice(0, -1).join('|');
+    const baseHits = options.filter((option) => {
+      if (option.label !== model) return false;
+      return option.base === base
+        || option.value.includes('|' + base + '|')
+        || option.value.endsWith('|' + base + '|' + model);
+    });
+    if (baseHits.length === 1) return baseHits[0].value;
+  }
+  const labelHits = options.filter((option) => option.label && id.endsWith('|' + option.label));
+  if (labelHits.length === 1) return labelHits[0].value;
+  return id;
+}
+
+function remapSavedModelIds(ids, options) {
+  const seen = new Set();
+  const next = [];
+  (Array.isArray(ids) ? ids : []).forEach((id) => {
+    const resolved = resolveSavedModelId(id, options);
+    if (!resolved || seen.has(resolved)) return;
+    seen.add(resolved);
+    next.push(resolved);
+  });
+  return next;
+}
+
+function sameIdList(a, b) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+function modelIdLabel(id) {
+  const parts = String(id || '').split('|').filter(Boolean);
+  return parts[parts.length - 1] || '';
+}
+
+function catalogOptionFromRemote(model) {
+  return {
+    value: model.id,
+    label: model.model || model.label,
+    provider: String(model.provider_name || '').trim(),
+    providerId: String(model.provider_id || '').trim(),
+    base: String(model.base || '').trim(),
+    ready: !!model.ready,
+    thinking: !!model.thinking_supported,
+  };
+}
+
+/**
+ * `remote_count` counts configured providers, not providers that returned models, so
+ * a provider with an empty or failing catalog must not keep this permanently false.
+ */
+function modelCatalogIsComplete(network, options) {
+  return options.length > 0 && !network?.remote_checking;
+}
+
+function resolveCollapsedProviderKey(savedKey, options) {
+  const key = String(savedKey || '').trim();
+  if (!key || !options.length) return key;
+  if (options.some((option) => modelProviderKey(option) === key)) return key;
+  const nameHits = options.filter((option) => option.provider === key);
+  if (nameHits.length) return modelProviderKey(nameHits[0]);
+  const baseHits = options.filter((option) => option.base === key);
+  if (baseHits.length) return modelProviderKey(baseHits[0]);
+  return key;
+}
+
+function remapCollapsedProviderKeys(keys, options) {
+  const seen = new Set();
+  const next = [];
+  (Array.isArray(keys) ? keys : []).forEach((key) => {
+    const resolved = resolveCollapsedProviderKey(key, options);
+    if (!resolved || seen.has(resolved)) return;
+    seen.add(resolved);
+    next.push(resolved);
+  });
+  return next;
+}
+
 function syncModelSelector(data) {
   const network = data.network || {};
   const remoteModels = network.remote_models || [];
@@ -471,35 +727,33 @@ function syncModelSelector(data) {
   chatModelSelectWrap.classList.remove('is-hidden');
   if (wasHidden) refreshStarfieldClearZone();
 
-  const remoteOptions = remoteModels.map((m) => ({
-    value: m.id,
-    label: m.model || m.label,
-    provider: (m.provider_name || '').trim(),
-    providerId: (m.provider_id || '').trim(),
-    ready: !!m.ready,
-    thinking: !!m.thinking_supported,
-  }));
+  const remoteOptions = remoteModels.map(catalogOptionFromRemote);
   modelMenuOptions = remoteOptions;
+  const remappedPins = remapSavedModelIds(pinnedModelIds, remoteOptions);
+  const remappedRecents = remapSavedModelIds(recentModelIds, remoteOptions);
+  const remappedCollapsed = remapCollapsedProviderKeys(collapsedModelProviders, remoteOptions);
+  let pickerChanged = !sameIdList(remappedPins, pinnedModelIds)
+    || !sameIdList(remappedRecents, recentModelIds)
+    || !sameIdList(remappedCollapsed, collapsedModelProviders);
+  pinnedModelIds = remappedPins;
+  recentModelIds = remappedRecents;
+  collapsedModelProviders = remappedCollapsed;
   if (!recentModelIds.length && selectedChatModel && remoteOptions.some((o) => o.value === selectedChatModel)) {
-    rememberRecentModel(selectedChatModel);
+    recentModelIds = [selectedChatModel];
+    pickerChanged = true;
+  }
+  const resolvedSelected = resolveSavedModelId(selectedRemoteModelId || selectedChatModel, remoteOptions);
+  if (resolvedSelected && resolvedSelected !== selectedChatModel) {
+    selectedChatModel = resolvedSelected;
+    pickerChanged = true;
   }
   const allValues = remoteOptions.map((o) => o.value);
-  if (!allValues.includes(selectedChatModel)) {
-    // Migrate older model ids (remote|base|model) by matching model+base suffix.
-    const legacy = selectedRemoteModelId || selectedChatModel;
-    const migrated = remoteOptions.find((o) => {
-      if (!legacy) return false;
-      if (o.value === legacy) return true;
-      return o.value.endsWith('|' + legacy.replace(/^remote\|/, ''))
-        || legacy.endsWith('|' + (o.label || ''));
-    });
-    if (migrated) {
-      selectedChatModel = migrated.value;
-    } else if (!menuOpen) {
-      selectedChatModel = remoteOptions[0].value;
-    }
-    persistModelPickerState();
+  const catalogComplete = modelCatalogIsComplete(network, remoteOptions);
+  if ((!selectedChatModel || !allValues.includes(selectedChatModel)) && catalogComplete && !menuOpen) {
+    selectedChatModel = remoteOptions[0].value;
+    pickerChanged = true;
   }
+  if (pickerChanged) persistModelPickerState();
 
   const signature = [
     selectedChatModel,
@@ -516,8 +770,12 @@ function syncModelSelector(data) {
   }
   const selected = remoteOptions.find((o) => o.value === selectedChatModel);
   if (!menuOpen) {
-    chatModelSelect.textContent = selected ? selected.label : 'Model';
-    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
+    chatModelSelect.textContent = selected
+      ? selected.label
+      : (modelIdLabel(selectedChatModel) || 'Model');
+    chatModelSelect.title = selected
+      ? modelOptionTitle(selected.label, selected.provider)
+      : (selectedChatModel ? modelIdLabel(selectedChatModel) : '');
   }
   selectedRemoteModelId = selectedChatModel;
   syncModelOriginPill(true, selected && selected.provider);
@@ -526,10 +784,15 @@ function syncModelSelector(data) {
 
 function selectedRemoteModel(data) {
   const models = data?.network?.remote_models || [];
-  return models.find((m) => m.id === selectedRemoteModelId)
-    || models.find((m) => m.id === selectedChatModel)
-    || models[0]
-    || null;
+  if (!models.length) return null;
+  const options = modelMenuOptions.length ? modelMenuOptions : models.map(catalogOptionFromRemote);
+  const saved = selectedRemoteModelId || selectedChatModel;
+  const resolved = resolveSavedModelId(saved, options);
+  const matched = models.find((model) => model.id === resolved)
+    || models.find((model) => model.id === saved);
+  if (matched) return matched;
+  if (saved && !modelCatalogIsComplete(data?.network, options)) return null;
+  return saved ? null : (models[0] || null);
 }
 
 function updateServerChip(data) {
@@ -613,13 +876,61 @@ function updateServerChip(data) {
   updateSendEnabled();
 }
 
+let encryptionStateSync = null;
+
+function syncExternalEncryptionState(data) {
+  if (!dataInfo || typeof data?.encryption_enabled !== 'boolean') return;
+  const serverEnabled = data.encryption_enabled;
+  const serverUnlocked = data.encryption_unlocked === true;
+  if (serverEnabled && !serverUnlocked) {
+    if (!dataInfo.encryption_enabled || dataInfo.encryption_unlocked) {
+      dataInfo.encryption_enabled = true;
+      dataInfo.encryption_unlocked = false;
+      clearMemoryAfterLock();
+    }
+    return;
+  }
+  if (
+    dataInfo.encryption_enabled === serverEnabled
+    && (!serverEnabled || dataInfo.encryption_unlocked)
+  ) {
+    return;
+  }
+  if (encryptionStateSync) return;
+  encryptionStateSync = (async () => {
+    const response = await fetch('/api/data');
+    if (!response.ok) throw new Error('Could not refresh encryption state');
+    dataInfo = await response.json();
+    browserStorage = !!dataInfo.browser_storage;
+    await loadDiskDataAfterUnlock();
+    refreshLocalDataPane();
+    refreshSettingsDataSummary();
+  })()
+    .catch((error) => {
+      console.warn('Could not synchronize encryption state', error);
+      promptUnlockSession();
+    })
+    .finally(() => {
+      encryptionStateSync = null;
+    });
+}
+
+let statePollInFlight = false;
+
 async function pollState() {
+  if (statePollInFlight) return;
+  statePollInFlight = true;
   try {
     const response = await fetch('/api/state');
     if (!response.ok) return;
-    updateServerChip(await response.json());
+    const data = await response.json();
+    syncExternalEncryptionState(data);
+    updateServerChip(data);
+    void resumeLiveTurns(data.live_turns);
   } catch {
     // control server briefly unreachable — retry on the next tick
+  } finally {
+    statePollInFlight = false;
   }
 }
 
@@ -1042,11 +1353,23 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
       refreshTraceSidebar({ animate: false });
     }
     if (hasActivity) maybeAutoOpenTraceSidebar(convo.id);
+  } else {
+    syncLiveToolClocks(answerEl);
   }
 }
 
 /** Stream an assistant reply; safe to leave the conversation while it runs. */
-async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = false, deepResearchOutput = 'long', forceTools = [] }) {
+async function runAssistantTurn(convo, {
+  useAgent,
+  text,
+  skills,
+  deepResearch = false,
+  deepResearchOutput = 'long',
+  forceTools = [],
+  dispatchedMessage = null,
+  queueItem = null,
+  previousTitle = '',
+}) {
   if (!serverReady || activeStreams.has(convo.id)) return;
   resetTraceAutoOpenState();
 
@@ -1054,7 +1377,7 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     web_search: !!settings.skillWebSearch,
     web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
       ? settings.webSearchDepth
-      : 'auto',
+      : DEFAULT_SETTINGS.webSearchDepth,
     web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
       ? settings.webSearchBackend
       : 'auto',
@@ -1096,6 +1419,217 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
   }
 
+  const stream = beginLiveStream(convo, {
+    useAgent,
+    deepResearch,
+    deepResearchOutput,
+    turnSkills,
+    turnForceTools,
+  });
+
+  const apiMessages = convo.messages.map((message) => {
+    if (message.role !== 'user') {
+      return { role: message.role, content: message.content };
+    }
+    return {
+      role: 'user',
+      content: userMessageApiContent(message),
+    };
+  });
+  if (apiMessages.length > 0) {
+    const last = apiMessages[apiMessages.length - 1];
+    if (last.role === 'user') last.content = text;
+  }
+  const systemPrompt = buildSystemPrompt(convo.projectId, { excludeConvoId: convo.id });
+  if (systemPrompt) {
+    apiMessages.unshift({ role: 'system', content: systemPrompt });
+  }
+
+  const remote = selectedRemoteModel(latestState);
+  const requestBody = {
+    messages: apiMessages,
+    agent: useAgent,
+    skills: turnSkills,
+    force_tools: turnForceTools,
+    ...(convo.incognito ? {} : { conversation_id: convo.id }),
+    ...(thinkingSupported && activeThinkingEffort !== 'auto'
+      ? { thinking_effort: activeThinkingEffort }
+      : {}),
+  };
+  if (deepResearch) {
+    requestBody.deep_research = true;
+    requestBody.deep_research_output = deepResearchOutput === 'brief' ? 'brief' : 'long';
+  }
+  if (remote) {
+    requestBody.remote_base = remote.base;
+    requestBody.model = remote.model;
+  }
+
+  let response = null;
+  try {
+    response = await fetch('/api/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: stream.controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status === 409) {
+        dropLiveSubscriber(convo.id, stream);
+        if (dispatchedMessage && queueItem) {
+          const index = convo.messages.indexOf(dispatchedMessage);
+          if (index >= 0) convo.messages.splice(index, 1);
+          if (!convo.messages.length && previousTitle) convo.title = previousTitle;
+          getOutboundQueue(convo.id).unshift(queueItem);
+          convo.updatedAt = Date.now();
+          saveConversations({ immediate: true });
+          if (activeId === convo.id) {
+            renderThread(convo);
+            renderOutboundQueue(convo);
+          }
+          renderSidebar();
+          updateComposerHint();
+        }
+        await attachLiveTurn(convo, {});
+        return;
+      }
+      const problem = await response.json().catch(() => null);
+      throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      if (!stream.cancelled) {
+        dropLiveSubscriber(convo.id, stream);
+        return;
+      }
+    } else {
+      stream.errorMessage = error.message || 'The request failed.';
+    }
+  }
+  await driveAssistantSse(convo, stream, response);
+}
+
+function dropLiveSubscriber(convoId, stream) {
+  if (activeStreams.get(convoId) !== stream) return;
+  activeStreams.delete(convoId);
+  renderSidebar();
+  syncComposerStreamUi();
+}
+
+function commitLiveAssistant(convo, message, turnId) {
+  if (turnId) message.liveTurnId = turnId;
+  const existing = turnId
+    ? convo.messages.find(
+      (item) => item.role === 'assistant' && item.liveTurnId === turnId
+    )
+    : null;
+  if (existing) {
+    Object.assign(existing, message);
+    return existing;
+  }
+  convo.messages.push(message);
+  return message;
+}
+
+async function syncConvoFromStore(convoId) {
+  try {
+    const response = await fetch('/api/data/store');
+    if (!response.ok) return conversations.find((item) => item.id === convoId) || null;
+    const parsed = parseStorePayload(await response.json());
+    const fresh = (parsed.conversations || []).find((item) => item.id === convoId);
+    if (!fresh) return conversations.find((item) => item.id === convoId) || null;
+    const idx = conversations.findIndex((item) => item.id === convoId);
+    if (idx >= 0) {
+      const localUpdated = Number(conversations[idx]?.updatedAt) || 0;
+      const freshUpdated = Number(fresh.updatedAt) || 0;
+      if (freshUpdated >= localUpdated) conversations[idx] = fresh;
+    } else {
+      conversations.push(fresh);
+    }
+    return conversations.find((item) => item.id === convoId) || null;
+  } catch {
+    return conversations.find((item) => item.id === convoId) || null;
+  }
+}
+
+async function resumeLiveTurns(list) {
+  if (!Array.isArray(list) || diskEncryptionLocked() || !storageReady) return;
+  for (const info of list) {
+    const id = info && String(info.conversation_id || '').trim();
+    if (!id || activeStreams.has(id)) continue;
+    let convo = conversations.find((item) => item.id === id);
+    if (!convo) convo = await syncConvoFromStore(id);
+    if (!convo) continue;
+    const viewing = activeId === convo.id;
+    if (viewing) {
+      const synced = await syncConvoFromStore(id);
+      if (synced) convo = synced;
+    }
+    if (
+      info.finished
+      && info.turn_id
+      && convo.messages.some(
+        (message) => message.role === 'assistant' && message.liveTurnId === info.turn_id
+      )
+    ) {
+      continue;
+    }
+    if (viewing) showThread(convo);
+    void attachLiveTurn(convo, info);
+  }
+}
+
+async function attachLiveTurn(convo, info) {
+  if (!convo || activeStreams.has(convo.id) || !serverReady) return;
+  beginLiveStream(convo, {
+    useAgent: !!info?.agent,
+    deepResearch: !!info?.deep_research,
+    deepResearchOutput: info?.deep_research_output === 'brief' ? 'brief' : 'long',
+    turnSkills: {},
+    turnForceTools: [],
+    catchingUp: true,
+    turnId: info?.turn_id || null,
+    turnModel: info?.model || '',
+  });
+  const stream = activeStreams.get(convo.id);
+  if (!stream) return;
+  try {
+    const response = await fetch('/api/chat/live/' + encodeURIComponent(convo.id), {
+      signal: stream.controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        activeStreams.delete(convo.id);
+        renderSidebar();
+        syncComposerStreamUi();
+        return;
+      }
+      const problem = await response.json().catch(() => null);
+      throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
+    }
+    await driveAssistantSse(convo, stream, response);
+  } catch (error) {
+    if (error.name === 'AbortError' && stream.cancelled) {
+      await driveAssistantSse(convo, stream, null);
+      return;
+    }
+    dropLiveSubscriber(convo.id, stream);
+  }
+}
+
+function beginLiveStream(convo, {
+  useAgent,
+  deepResearch,
+  deepResearchOutput,
+  turnSkills,
+  turnForceTools,
+  catchingUp = false,
+  turnId = null,
+  turnModel = '',
+} = {}) {
+  if (activeStreams.has(convo.id)) return activeStreams.get(convo.id);
   const stream = {
     controller: new AbortController(),
     useAgent,
@@ -1110,6 +1644,10 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     dom: null,
     steerId: null,
     pendingSteers: [],
+    catchingUp: !!catchingUp,
+    turnId: turnId || null,
+    turnModel: String(turnModel || ''),
+    cancelled: false,
   };
   activeStreams.set(convo.id, stream);
   renderSidebar();
@@ -1118,9 +1656,12 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     ensureStreamDom(convo, stream);
     scrollToBottom({ force: true });
   }
+  return stream;
+}
 
+async function driveAssistantSse(convo, stream, response) {
   const remote = selectedRemoteModel(latestState);
-  const turnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
+  const fallbackTurnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
   const usageStats = {
     completionTokens: 0,
     promptTokens: 0,
@@ -1133,9 +1674,9 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     if (activeId === convo.id && stream.dom) {
       const nextLabel = isThinkingOpen(replyText)
         ? 'Reasoning…'
-        : useAgent
-          ? (deepResearch
-            ? (deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
+        : stream.useAgent
+          ? (stream.deepResearch
+            ? (stream.deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
             : 'Writing answer')
           : (replyText && replyText.trim())
             ? 'Writing…'
@@ -1184,6 +1725,7 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
         result: '',
         note: '',
         live: true,
+        startedAt: Date.now(),
       });
       if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name, args) + '…';
     } else if (payload.phase === 'tool_result') {
@@ -1198,6 +1740,12 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
       if (last && last.name === (payload.name || last.name)) {
         last.live = false;
         last.result = resultText;
+        last.endedAt = Date.now();
+        last.durationMs = last.startedAt
+          ? Math.max(0, last.endedAt - last.startedAt)
+          : 0;
+        last.justSettled = true;
+        scheduleJustSettledClear(last);
         if (note) last.note = note;
       } else {
         stream.timeline.push({
@@ -1207,7 +1755,9 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
           result: resultText,
           note,
           live: false,
+          justSettled: true,
         });
+        scheduleJustSettledClear(stream.timeline[stream.timeline.length - 1]);
       }
       if (stream.dom) {
         stream.dom.thinkingLabel.textContent = note
@@ -1278,110 +1828,91 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     paintStreamIntoView(convo, stream, typer.shown, true);
   };
 
-  const apiMessages = convo.messages.map((message) => {
-    if (message.role !== 'user') {
-      return { role: message.role, content: message.content };
-    }
-    return {
-      role: 'user',
-      content: userMessageApiContent(message),
-    };
-  });
-  if (apiMessages.length > 0) {
-    const last = apiMessages[apiMessages.length - 1];
-    if (last.role === 'user') last.content = text;
-  }
-  const systemPrompt = buildSystemPrompt(convo.projectId, { excludeConvoId: convo.id });
-  if (systemPrompt) {
-    apiMessages.unshift({ role: 'system', content: systemPrompt });
-  }
-
-  const requestBody = {
-    messages: apiMessages,
-    agent: useAgent,
-    skills: turnSkills,
-    force_tools: turnForceTools,
-    ...(thinkingSupported && activeThinkingEffort !== 'auto'
-      ? { thinking_effort: activeThinkingEffort }
-      : {}),
-  };
-  if (deepResearch) {
-    requestBody.deep_research = true;
-    requestBody.deep_research_output = deepResearchOutput === 'brief' ? 'brief' : 'long';
-  }
-  if (remote) {
-    requestBody.remote_base = remote.base;
-    requestBody.model = remote.model;
-  }
+  if (stream.catchingUp) typer.setCatchingUp(true);
 
   try {
-    const response = await fetch('/api/chat/completions', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal: stream.controller.signal,
-    });
-    if (!response.ok) {
-      const problem = await response.json().catch(() => null);
-      throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() ?? '';
-      for (const rawEvent of events) {
-        const parsed = parseSseEvent(rawEvent);
-        if (!parsed || parsed.data === '' || parsed.data === '[DONE]') continue;
-        if (parsed.event === 'error') {
-          try {
-            stream.errorMessage = JSON.parse(parsed.data).error || parsed.data;
-          } catch {
-            stream.errorMessage = parsed.data;
+    if (response && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? '';
+        for (const rawEvent of events) {
+          const parsed = parseSseEvent(rawEvent);
+          if (!parsed || parsed.data === '' || parsed.data === '[DONE]') continue;
+          if (parsed.event === 'meta') {
+            try {
+              const meta = JSON.parse(parsed.data);
+              if (meta.turn_id) stream.turnId = String(meta.turn_id);
+              if (typeof meta.agent === 'boolean') stream.useAgent = meta.agent;
+              if (typeof meta.deep_research === 'boolean') stream.deepResearch = meta.deep_research;
+              if (meta.deep_research_output === 'brief' || meta.deep_research_output === 'long') {
+                stream.deepResearchOutput = meta.deep_research_output;
+              }
+              if (meta.model) stream.turnModel = String(meta.model);
+            } catch {
+              // ignore malformed meta
+            }
+            continue;
           }
-          continue;
-        }
-        if (parsed.event === 'agent') {
-          try {
-            onAgentEvent(JSON.parse(parsed.data));
-          } catch {
-            // ignore malformed agent frames
+          if (parsed.event === 'live') {
+            stream.catchingUp = false;
+            typer.setCatchingUp(false);
+            continue;
           }
-          continue;
-        }
-        let json;
-        try {
-          json = JSON.parse(parsed.data);
-        } catch {
-          continue;
-        }
-        ingestStreamUsage(usageStats, json);
-        const choice = json.choices && json.choices[0];
-        const deltaObj = (choice && choice.delta) || {};
-        const reasoning =
-          deltaObj.reasoning_content ||
-          deltaObj.reasoning ||
-          (choice && choice.message && (choice.message.reasoning_content || choice.message.reasoning)) ||
-          '';
-        if (reasoning) {
-          markFirstToken();
-          typer.pushReasoning(String(reasoning));
-        }
-        const delta = deltaObj.content || '';
-        if (delta) {
-          markFirstToken();
-          typer.push(delta);
+          if (parsed.event === 'error') {
+            try {
+              stream.errorMessage = JSON.parse(parsed.data).error || parsed.data;
+            } catch {
+              stream.errorMessage = parsed.data;
+            }
+            continue;
+          }
+          if (parsed.event === 'agent') {
+            try {
+              onAgentEvent(JSON.parse(parsed.data));
+            } catch {
+              // ignore malformed agent frames
+            }
+            continue;
+          }
+          let json;
+          try {
+            json = JSON.parse(parsed.data);
+          } catch {
+            continue;
+          }
+          ingestStreamUsage(usageStats, json);
+          const choice = json.choices && json.choices[0];
+          const deltaObj = (choice && choice.delta) || {};
+          const reasoning =
+            deltaObj.reasoning_content ||
+            deltaObj.reasoning ||
+            (choice && choice.message && (choice.message.reasoning_content || choice.message.reasoning)) ||
+            '';
+          if (reasoning) {
+            markFirstToken();
+            typer.pushReasoning(String(reasoning));
+          }
+          const delta = deltaObj.content || '';
+          if (delta) {
+            markFirstToken();
+            typer.push(delta);
+          }
         }
       }
     }
   } catch (error) {
-    if (error.name !== 'AbortError') {
+    if (error.name === 'AbortError') {
+      if (!stream.cancelled) {
+        dropLiveSubscriber(convo.id, stream);
+        return;
+      }
+    } else {
       stream.errorMessage = error.message || 'The request failed.';
     }
   }
@@ -1413,7 +1944,15 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
   }
 
   stream.timeline.forEach((part) => {
-    if (part.type === 'tool' || part.type === 'clarify') part.live = false;
+    if (part.type === 'tool') {
+      if (part.live && part.startedAt && !Number.isFinite(part.durationMs)) {
+        part.endedAt = Date.now();
+        part.durationMs = Math.max(0, part.endedAt - part.startedAt);
+      }
+      part.live = false;
+    } else if (part.type === 'clarify') {
+      part.live = false;
+    }
   });
   // Seal any leftover buffer so a final think/answer round joins the timeline
   // only as live content (not duplicated into parts).
@@ -1428,6 +1967,8 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
           detail: part.detail,
           result: part.result,
           ...(part.note ? { note: part.note } : {}),
+          ...(part.kind ? { kind: part.kind } : {}),
+          ...(Number.isFinite(part.durationMs) ? { durationMs: Math.round(part.durationMs) } : {}),
           live: false,
         }
         : part.type === 'clarify'
@@ -1493,7 +2034,7 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     const message = {
       role: 'assistant',
       content: visibleAnswer ? assistantText : '',
-      model: turnModel || finalStats?.upstreamModel || '',
+      model: stream.turnModel || finalStats?.upstreamModel || fallbackTurnModel || '',
     };
     if (persistedParts) message.parts = persistedParts;
     if (memoryNotices.length) message.memoryNotices = memoryNotices;
@@ -1504,8 +2045,8 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
     if (finalStats?.tokensPerSec != null) message.tokensPerSec = finalStats.tokensPerSec;
     if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
     if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
-    convo.messages.push(message);
-    const msgIndex = convo.messages.length - 1;
+    const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
+    const msgIndex = convo.messages.indexOf(committedMessage);
     if (dom && dom.row.isConnected) {
       dom.row.dataset.msgIndex = String(msgIndex);
       dom.row.dataset.raw = message.content || '';
@@ -1516,7 +2057,7 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
       const project = getProject(convo.projectId);
       if (project) project.updatedAt = Date.now();
     }
-    saveConversations();
+    saveConversations({ immediate: true });
     if (activeId === convo.id) {
       selectTraceMessage(msgIndex, {
         animate: true,
@@ -1524,14 +2065,6 @@ async function runAssistantTurn(convo, { useAgent, text, skills, deepResearch = 
       });
       if (messageHasActivity(message)) maybeAutoOpenTraceSidebar(convo.id);
     }
-  } else if (!viewing && stream.errorMessage) {
-    // Persist a short error so returning to the chat is not blank after a failed background turn.
-    convo.messages.push({
-      role: 'assistant',
-      content: 'Error: ' + stream.errorMessage,
-    });
-    convo.updatedAt = Date.now();
-    saveConversations();
   }
 
   activeStreams.delete(convo.id);
@@ -1924,6 +2457,9 @@ function syncPrivacyModeUi(enabled) {
     optionEl.title = option ? modelOptionTitle(option.label, option.provider) : '';
     const badge = optionEl.querySelector('.chat-model-origin-pill');
     if (badge) badge.title = enabled ? '' : badge.textContent;
+  });
+  chatModelList?.querySelectorAll('.chat-model-group-name').forEach((label) => {
+    applyPrivacyMosaic(label, 'model-menu-provider-group:' + label.textContent);
   });
   if (!btnPrivacyMode) return;
   btnPrivacyMode.classList.toggle('is-active', enabled);
@@ -2549,16 +3085,16 @@ function handleModelMenuKeydown(event) {
       openModelMenu();
       return;
     }
-    const count = modelMenuMatches.length;
+    const count = visibleModelMenuOptions().length;
     if (!count) return;
     const delta = event.key === 'ArrowDown' ? 1 : -1;
     const from = modelMenuActiveIndex < 0 ? (delta > 0 ? -1 : 0) : modelMenuActiveIndex;
     modelMenuActiveIndex = (from + delta + count) % count;
     paintModelMenuActive();
   } else if (event.key === 'Home' || event.key === 'End') {
-    if (!open || !modelMenuMatches.length) return;
+    if (!open || !visibleModelMenuOptions().length) return;
     event.preventDefault();
-    modelMenuActiveIndex = event.key === 'Home' ? 0 : modelMenuMatches.length - 1;
+    modelMenuActiveIndex = event.key === 'Home' ? 0 : visibleModelMenuOptions().length - 1;
     paintModelMenuActive();
   } else if (event.key === 'Enter') {
     event.preventDefault();
@@ -2566,7 +3102,7 @@ function handleModelMenuKeydown(event) {
       openModelMenu();
       return;
     }
-    const choice = modelMenuMatches[modelMenuActiveIndex];
+    const choice = visibleModelMenuOptions()[modelMenuActiveIndex];
     if (choice) chooseModelOption(choice.value);
   } else if (event.key === ' ' && event.target === chatModelSelect) {
     // Space only toggles from the button; inside the field it is a query character.
@@ -2600,6 +3136,13 @@ chatModelMenu.addEventListener('click', (event) => {
     setModelMenuTab(tab.getAttribute('data-model-tab'));
     return;
   }
+  const group = event.target.closest('[data-model-group]');
+  if (group) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleModelProviderCollapsed(group.getAttribute('data-model-group') || '');
+    return;
+  }
   if (event.target.closest('[data-model-pin], [data-model-pick], .chat-model-option')) {
     event.preventDefault();
     event.stopPropagation();
@@ -2610,6 +3153,7 @@ chatModelMenu.addEventListener('pointerdown', (event) => {
   // Let the filter field take the caret normally.
   if (event.target.closest('.chat-model-search')) return;
   if (event.target.closest('[data-model-tab]')) return;
+  if (event.target.closest('[data-model-group]')) return;
   const pin = event.target.closest('[data-model-pin]');
   if (pin) {
     event.preventDefault();
