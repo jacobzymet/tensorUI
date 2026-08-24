@@ -15,7 +15,7 @@ The app loads these at compile time (`include_str!`) via `src/prompts/`. Chat UI
 
 | Path | Used by |
 | --- | --- |
-| `chat/` | System prompt pieces assembled in the chat UI |
+| `chat/` | System prompt pieces assembled in the chat UI (including bot identity, group hold/DM actions) |
 | `title/` | Auto-generated conversation titles |
 | `agent/` | Agent mode / deep research system blocks & nudges |
 | `tools/` | OpenAI-style tool `description` strings |

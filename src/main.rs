@@ -10,8 +10,7 @@ use clap::Parser;
 use tensorui::{
     app::App,
     config::{self, Config},
-    system::open_in_browser,
-    web,
+    desktop, system, web,
 };
 use tokio::net::TcpListener;
 
@@ -30,13 +29,22 @@ struct Cli {
     #[arg(long, value_name = "ADDR")]
     bind: Option<SocketAddr>,
 
-    /// Open the UI in the default browser
+    /// Run the local server without opening the desktop window (or a browser).
     #[arg(long)]
+    headless: bool,
+
+    /// Open the UI in the default browser instead of the desktop window.
+    #[arg(long)]
+    browser: bool,
+
+    /// Deprecated alias for `--browser`.
+    #[arg(long, hide = true)]
     open: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let open_browser = cli.browser || cli.open;
     let config_path = cli.config.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path)?;
 
@@ -68,10 +76,23 @@ fn main() -> Result<()> {
     println!("TensorMI Harness listening on {url}");
     println!("  Chat     {url}/");
     println!("  Settings {url}/settings");
-    if cli.open {
-        let _ = open_in_browser(&url);
-    }
-    let result = runtime.block_on(async { server.await? });
+
+    let result = if cli.headless {
+        runtime.block_on(async { server.await? })
+    } else if open_browser {
+        let _ = system::open_in_browser(&url);
+        runtime.block_on(async { server.await? })
+    } else {
+        // Native desktop window on the main thread; server keeps running on Tokio.
+        let window_result = desktop::run_window(&url, runtime.handle());
+        server.abort();
+        match runtime.block_on(server) {
+            Ok(Ok(())) | Err(_) => {}
+            Ok(Err(error)) => return Err(error.into()),
+        }
+        window_result.map(|()| ())
+    };
+
     if let Ok(mut app) = shared.lock() {
         app.shutdown();
     }
@@ -82,7 +103,7 @@ const FOCUS_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn greet_running_instance(url: &str, bind: SocketAddr) -> Result<()> {
     match focus_running_instance(url) {
-        Some(_) => println!("TensorMI Harness is already running on {url}"),
+        Some(_) => println!("TensorMI Harness is already running — focusing the open window."),
         None => bail!(
             "{bind} is already in use by another program — pass --bind to choose a different address"
         ),

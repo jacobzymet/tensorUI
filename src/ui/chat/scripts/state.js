@@ -10,7 +10,7 @@ const TRACE_DESKTOP_MQ = window.matchMedia('(min-width: 821px)');
  * deliberately unrelated to the protected text, so it cannot be sharpened or
  * processed back into the original words.
  */
-function applyPrivacyMosaic(el, seed) {
+function applyPrivacyMosaic(el, seed, { dense = false } = {}) {
   if (!el) return;
   let state = 2166136261;
   const source = String(seed || 'private-surface');
@@ -26,9 +26,10 @@ function applyPrivacyMosaic(el, seed) {
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
 
-  const columns = 15 + Math.floor(random() * 12);
+  const rows = dense ? 6 : 3;
+  const columns = dense ? 6 : (15 + Math.floor(random() * 12));
   const shadows = [];
-  for (let row = 0; row < 3; row += 1) {
+  for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       if (column > 0 && random() < 0.2) continue;
       const shade = 1 + Math.floor(random() * 4);
@@ -38,7 +39,27 @@ function applyPrivacyMosaic(el, seed) {
     }
   }
   el.classList.add('privacy-mask');
+  if (dense) el.classList.add('privacy-mask-dense');
   el.style.setProperty('--privacy-pixels', shadows.join(', '));
+}
+
+function isPrivacyModeOn() {
+  return !!document.getElementById('chatShell')?.classList.contains('privacy-mode');
+}
+
+/** Native `title` tooltips leak mosaiced identity; keep the value for when privacy turns off. */
+function setIdentityTitle(el, text) {
+  if (!el) return;
+  const value = String(text || '');
+  if (value) el.dataset.identityTitle = value;
+  else delete el.dataset.identityTitle;
+  el.title = isPrivacyModeOn() ? '' : value;
+}
+
+function syncIdentityTitles(privacyOn) {
+  document.querySelectorAll('[data-identity-title]').forEach((el) => {
+    el.title = privacyOn ? '' : (el.dataset.identityTitle || '');
+  });
 }
 
 const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
@@ -139,6 +160,7 @@ const btnNewChat = document.getElementById('btnNewChat');
 const btnNewChatLabel = document.getElementById('btnNewChatLabel');
 const btnNewIncognitoChat = document.getElementById('btnNewIncognitoChat');
 const topbarIncognito = document.getElementById('topbarIncognito');
+const topbarBotsHold = document.getElementById('topbarBotsHold');
 const btnSend = document.getElementById('btnSend');
 const btnBranch = document.getElementById('btnBranch');
 const btnStop = document.getElementById('btnStop');
@@ -527,6 +549,8 @@ const composerMentionIds = new Set();
 /** Textarea currently driving the @mention menu (composer or message edit). */
 let mentionInput = composerInput;
 const convoTitleEl = document.getElementById('convoTitle');
+const topbarBotRoster = document.getElementById('topbarBotRoster');
+const btnTopbarGroupEdit = document.getElementById('btnTopbarGroupEdit');
 const greetingEl = document.getElementById('greeting');
 const modelHintEl = document.getElementById('modelHint');
 
@@ -691,6 +715,15 @@ function normalizeConversation(convo) {
     pinnedAt: typeof convo.pinnedAt === 'number' && Number.isFinite(convo.pinnedAt)
       ? convo.pinnedAt
       : null,
+    surface: convo.surface === 'bots' ? 'bots' : 'chat',
+    botKind: convo.botKind === 'group' || convo.botKind === 'dm' ? convo.botKind : null,
+    botId: typeof convo.botId === 'string' ? convo.botId : null,
+    participantBotIds: Array.isArray(convo.participantBotIds)
+      ? convo.participantBotIds.filter((id) => typeof id === 'string')
+      : [],
+    groupMemory: typeof convo.groupMemory === 'string' ? convo.groupMemory : '',
+    botsHeldBy: typeof convo.botsHeldBy === 'string' ? convo.botsHeldBy : null,
+    sideThreadOf: typeof convo.sideThreadOf === 'string' ? convo.sideThreadOf : null,
   };
 }
 
@@ -737,6 +770,7 @@ function parseStorePayload(parsed) {
     return {
       projects: [],
       conversations: ensureConversationSortOrders(parsed.map(normalizeConversation)),
+      bots: [],
     };
   }
   if (parsed && typeof parsed === 'object') {
@@ -749,18 +783,19 @@ function parseStorePayload(parsed) {
           ? parsed.conversations.map(normalizeConversation)
           : []
       ),
+      bots: Array.isArray(parsed.bots) ? parsed.bots.map(normalizeBot) : [],
     };
   }
-  return { projects: [], conversations: [] };
+  return { projects: [], conversations: [], bots: [] };
 }
 
 function loadStoreFromLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { projects: [], conversations: [] };
+    if (!raw) return { projects: [], conversations: [], bots: [] };
     return parseStorePayload(JSON.parse(raw));
   } catch {
-    return { projects: [], conversations: [] };
+    return { projects: [], conversations: [], bots: [] };
   }
 }
 
@@ -815,14 +850,20 @@ function mergeLegacyStore(primary, legacy, preferLegacy = false) {
   second.conversations.forEach((item) => {
     if (!conversationsById.has(item.id)) conversationsById.set(item.id, item);
   });
+  const botsById = new Map((first.bots || []).map((item) => [item.id, item]));
+  (second.bots || []).forEach((item) => {
+    if (!botsById.has(item.id)) botsById.set(item.id, item);
+  });
   return {
     projects: [...projectsById.values()],
     conversations: [...conversationsById.values()],
+    bots: [...botsById.values()],
   };
 }
 
 let projects = [];
 let conversations = [];
+let bots = [];
 let dataInfo = null;
 let browserStorage = false;
 let storageReady = false;
@@ -884,6 +925,7 @@ function storePayload() {
     version: 2,
     projects,
     conversations: conversations.filter((convo) => !convo.incognito),
+    bots,
   };
 }
 
@@ -1009,6 +1051,7 @@ function firstUserText(convo) {
 
 function needsGeneratedTitle(convo) {
   if (!convo || convo.incognito) return false;
+  if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) return false;
   if (convo.titleEdited) return false;
   const userText = firstUserText(convo);
   if (!userText) return false;
@@ -1083,9 +1126,9 @@ function revealGeneratedTitle(convo, title) {
     );
   }
   if (sidebarEl) {
-    sidebarEl.title = title;
+    setIdentityTitle(sidebarEl, title);
     const row = sidebarEl.closest('.convo-item');
-    if (row) row.title = title;
+    if (row) setIdentityTitle(row, title);
     typeTitleInto(sidebarEl, sidebarLabel);
   } else renderSidebar();
   if (activeId === convo.id && convoTitleEl && !convo.incognito) {
@@ -1126,6 +1169,8 @@ let draftIncognito = false;
 let activeProjectId = null;
 /** 'chat' | 'projects' */
 let mainView = 'chat';
+/** 'chat' | 'bots' — wordmark surface. Bots is a label-only destination for now. */
+let appSurface = 'chat';
 let suppressUrlSync = false;
 let editingProjectId = null;
 let creatingProject = false;
@@ -1292,7 +1337,8 @@ let settings = { ...DEFAULT_SETTINGS };
 
 function storeIsEmpty(store) {
   return !(store.projects && store.projects.length)
-    && !(store.conversations && store.conversations.length);
+    && !(store.conversations && store.conversations.length)
+    && !(store.bots && store.bots.length);
 }
 
 function refreshLocalDataPane() {
@@ -1462,6 +1508,7 @@ async function migrateLegacyBrowserState(store, rawPreferences, { preferLegacySt
       version: 2,
       projects: mergedStore.projects,
       conversations: mergedStore.conversations,
+      bots: mergedStore.bots || [],
     }),
   });
   if (!storeResponse.ok) throw new Error('Could not migrate browser chat data to disk');
@@ -1503,10 +1550,12 @@ async function initLocalData() {
   if (!dataInfo) {
     projects = [];
     conversations = [];
+    bots = [];
     settings = { ...DEFAULT_SETTINGS };
   } else if (dataInfo.encryption_enabled && !dataInfo.encryption_unlocked) {
     projects = [];
     conversations = [];
+    bots = [];
     settings = { ...DEFAULT_SETTINGS };
     // Stay on disk mode but wait for unlock before reading encrypted files.
   } else {
@@ -1517,13 +1566,14 @@ async function initLocalData() {
         if (problem.code === 'encrypted_locked') {
           projects = [];
           conversations = [];
+          bots = [];
           settings = { ...DEFAULT_SETTINGS };
           if (dataInfo) dataInfo.encryption_unlocked = false;
         } else {
           throw new Error(problem.error || 'Could not load chats');
         }
       } else {
-        const store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [] };
+        const store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [], bots: [] };
         const prefRes = await fetch('/api/data/preferences');
         const rawPrefs = prefRes.ok ? await prefRes.json() : {};
         const migrated = await migrateLegacyBrowserState(store, rawPrefs, {
@@ -1531,11 +1581,13 @@ async function initLocalData() {
         });
         projects = migrated.store.projects;
         conversations = migrated.store.conversations;
+        bots = migrated.store.bots || [];
         settings = migrated.preferences;
       }
     } catch {
       projects = [];
       conversations = [];
+      bots = [];
       settings = { ...DEFAULT_SETTINGS };
     }
   }
@@ -1621,6 +1673,7 @@ function clearMemoryAfterLock() {
   modelMenuMatches = [];
   projects = [];
   conversations = [];
+  bots = [];
   activeProjectId = null;
   settings = { ...DEFAULT_SETTINGS };
   refreshUiFromMemoryStore();
@@ -1639,6 +1692,7 @@ async function loadDiskDataAfterUnlock() {
   const migrated = await migrateLegacyBrowserState(store, rawPrefs);
   projects = migrated.store.projects;
   conversations = migrated.store.conversations;
+  bots = migrated.store.bots || [];
   settings = migrated.preferences;
   hydrateModelPickerState();
   hideUnlockSession();
@@ -1690,7 +1744,10 @@ function currentProjectId() {
   return activeProjectId;
 }
 
-function buildSystemPrompt(projectIdOverride, { excludeConvoId = null } = {}) {
+function buildSystemPrompt(projectIdOverride, opts = {}) {
+  const excludeConvoId = opts.excludeConvoId || opts.excludeConvoId || null;
+  const convo = opts.convo || null;
+  const speakerBot = opts.speakerBot || opts.speakerBot || null;
   const P = window.TENSORUI_PROMPTS || {};
   const fill = window.fillPrompt || ((t) => t);
   const parts = [];
@@ -1743,6 +1800,12 @@ function buildSystemPrompt(projectIdOverride, { excludeConvoId = null } = {}) {
     if (continuity) parts.push(continuity);
   }
 
+  if (convo && typeof botSystemPromptParts === 'function') {
+    botSystemPromptParts(convo, speakerBot).forEach((part) => {
+      if (part) parts.push(part);
+    });
+  }
+
   if (parts.length === 0) return null;
   const base = P['chat.base'] || 'You are a helpful assistant.';
   return base + '\n\n' + parts.join('\n\n');
@@ -1766,6 +1829,8 @@ function messagePlainExcerpt(message, maxChars) {
   }
   content = String(content || '')
     .replace(/<\/?(?:global_)?memory_update>/gi, '')
+    .replace(/<\/?bot_(?:hold|resume|dm_user|group_post|memory_update)\b[^>]*>/gi, '')
+    .replace(/<\/?group_memory_update>/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!content) return '';
@@ -1818,14 +1883,54 @@ function buildProjectContinuityDigest(projectId, excludeConvoId) {
   ), { blocks: blocks.join('\n\n') });
 }
 
+function emptyBotActions() {
+  return { hold: false, resume: false, dmUser: null, groupPost: null };
+}
+
+function mergeBotActions(into, extra) {
+  if (!extra) return into;
+  if (extra.hold) into.hold = true;
+  if (extra.resume) into.resume = true;
+  if (extra.dmUser) into.dmUser = extra.dmUser;
+  if (extra.groupPost) into.groupPost = extra.groupPost;
+  return into;
+}
+
+function extractTaggedBlock(source, names) {
+  const list = Array.isArray(names) ? names : [names];
+  let cleaned = source;
+  let captured = null;
+  list.forEach((name) => {
+    const re = new RegExp(
+      '<' + name + '\\b[^>]*>\\s*([\\s\\S]*?)\\s*</' + name + '>',
+      'gi'
+    );
+    cleaned = cleaned.replace(re, (_, body) => {
+      const next = String(body || '').trim();
+      if (next) captured = next;
+      return '';
+    });
+    const wrap = new RegExp('\\[\\[' + name + '\\]\\]\\s*([\\s\\S]*?)\\s*\\[\\[/' + name + '\\]\\]', 'gi');
+    cleaned = cleaned.replace(wrap, (_, body) => {
+      const next = String(body || '').trim();
+      if (next) captured = next;
+      return '';
+    });
+  });
+  return { cleaned, captured };
+}
+
 /**
- * Pull memory update blocks out of assistant text.
+ * Pull memory update blocks and bot coordination tags out of assistant text.
  * While streaming, hide an unclosed opener so the XML never flashes in the UI.
  */
 function applyMemoryUpdateProtocol(text, { streaming = false } = {}) {
   let cleaned = text || '';
   let memory = null;
   let globalMemory = null;
+  let botMemory = null;
+  let groupMemory = null;
+  const botActions = emptyBotActions();
   cleaned = cleaned.replace(/<global_memory_update>\s*([\s\S]*?)\s*<\/global_memory_update>/gi, (_, body) => {
     const next = String(body || '').trim();
     if (next) globalMemory = next;
@@ -1836,15 +1941,53 @@ function applyMemoryUpdateProtocol(text, { streaming = false } = {}) {
     if (next) memory = next;
     return '';
   });
+  cleaned = cleaned.replace(/<bot_memory_update>\s*([\s\S]*?)\s*<\/bot_memory_update>/gi, (_, body) => {
+    const next = String(body || '').trim();
+    if (next) botMemory = next;
+    return '';
+  });
+  cleaned = cleaned.replace(/<group_memory_update>\s*([\s\S]*?)\s*<\/group_memory_update>/gi, (_, body) => {
+    const next = String(body || '').trim();
+    if (next) groupMemory = next;
+    return '';
+  });
+  if (/<bot_hold\b[^>]*\/?\s*>|\[\[hold\]\]/i.test(cleaned)) botActions.hold = true;
+  if (/<bot_resume\b[^>]*\/?\s*>|\[\[resume\]\]/i.test(cleaned)) botActions.resume = true;
+  cleaned = cleaned.replace(/<bot_hold\b[^>]*\/?\s*>\s*(?:<\/bot_hold>)?/gi, '');
+  cleaned = cleaned.replace(/<bot_resume\b[^>]*\/?\s*>\s*(?:<\/bot_resume>)?/gi, '');
+  cleaned = cleaned.replace(/\[\[hold\]\]/gi, '');
+  cleaned = cleaned.replace(/\[\[resume\]\]/gi, '');
+  const dm = extractTaggedBlock(cleaned, ['bot_dm_user', 'dm_user']);
+  cleaned = dm.cleaned;
+  if (dm.captured) botActions.dmUser = dm.captured;
+  const post = extractTaggedBlock(cleaned, ['bot_group_post', 'group_post']);
+  cleaned = post.cleaned;
+  if (post.captured) botActions.groupPost = post.captured;
   if (streaming) {
     const lower = cleaned.toLowerCase();
-    const globalOpen = lower.lastIndexOf('<global_memory_update>');
-    const projectOpen = lower.lastIndexOf('<memory_update>');
-    const open = Math.max(globalOpen, projectOpen);
+    const tags = [
+      '<global_memory_update>',
+      '<memory_update>',
+      '<bot_memory_update>',
+      '<group_memory_update>',
+      '<bot_hold',
+      '<bot_resume',
+      '<bot_dm_user',
+      '<bot_group_post',
+      '[[hold]]',
+      '[[resume]]',
+      '[[dm_user]]',
+      '[[group_post]]',
+    ];
+    let open = -1;
+    tags.forEach((tag) => {
+      const at = lower.lastIndexOf(tag);
+      if (at > open) open = at;
+    });
     if (open !== -1) cleaned = cleaned.slice(0, open);
   }
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trimEnd();
-  return { cleaned, memory, globalMemory };
+  return { cleaned, memory, globalMemory, botMemory, groupMemory, botActions };
 }
 
 function projectIsProjectOnly(projectId) {
@@ -1878,14 +2021,20 @@ function persistProjectMemory(projectId, memoryText) {
   return true;
 }
 
-function applyExtractedMemories(convo, extracted) {
-  const result = { globalUpdated: false, projectUpdated: false };
+function applyExtractedMemories(convo, extracted, speakerBotId = null) {
+  const result = { globalUpdated: false, projectUpdated: false, botUpdated: false, groupUpdated: false };
   if (!extracted || convo?.incognito) return result;
   if (extracted.memory != null && convo.projectId) {
     result.projectUpdated = persistProjectMemory(convo.projectId, extracted.memory);
   }
   if (extracted.globalMemory != null && !projectIsProjectOnly(convo.projectId)) {
     result.globalUpdated = persistGlobalMemory(extracted.globalMemory);
+  }
+  if (extracted.botMemory != null && speakerBotId && typeof persistBotMemory === 'function') {
+    result.botUpdated = persistBotMemory(speakerBotId, extracted.botMemory);
+  }
+  if (extracted.groupMemory != null && typeof persistGroupMemory === 'function' && typeof isBotGroup === 'function' && isBotGroup(convo)) {
+    result.groupUpdated = persistGroupMemory(convo, extracted.groupMemory);
   }
   return result;
 }
@@ -1910,6 +2059,9 @@ function collectTurnMemoryExtraction(stream, finalText) {
     cleaned: fromFinal.cleaned,
     memory: fromAll.memory,
     globalMemory: fromAll.globalMemory,
+    botMemory: fromAll.botMemory,
+    groupMemory: fromAll.groupMemory,
+    botActions: mergeBotActions(fromAll.botActions || emptyBotActions(), fromFinal.botActions),
   };
 }
 
@@ -1917,16 +2069,27 @@ function memoryNoticeLabels(changes) {
   const labels = [];
   if (changes?.globalUpdated) labels.push('Updated long-term memory');
   if (changes?.projectUpdated) labels.push('Updated project memory');
+  if (changes?.botUpdated) labels.push('Updated bot memory');
+  if (changes?.groupUpdated) labels.push('Updated group notes');
   return labels;
 }
 
 function memoryOnlyAssistantFallback(extracted) {
   if (!extracted) return '';
+  if (extracted.botActions?.dmUser) return 'Opened a private thread.';
+  if (extracted.botActions?.groupPost) return 'Posted in the group.';
+  if (extracted.botActions?.hold) return 'Holding the room.';
+  if (extracted.botActions?.resume) return 'Resuming the room.';
   const projectHit = extracted.memory != null;
   const globalHit = extracted.globalMemory != null;
+  const botHit = extracted.botMemory != null;
+  const groupHit = extracted.groupMemory != null;
   if (projectHit && globalHit) return 'Updated memory.';
   if (projectHit) return 'Updated project memory.';
   if (globalHit) return 'Updated long-term memory.';
+  if (botHit && groupHit) return 'Updated memory.';
+  if (botHit) return 'Updated bot memory.';
+  if (groupHit) return 'Updated group notes.';
   return '';
 }
 

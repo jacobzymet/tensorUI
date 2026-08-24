@@ -2,12 +2,55 @@ function formatUserHtml(text) {
   return escapeHtml(text)
     .replace(/\n/g, '<br>')
     .replace(
-      /(^|[\s>])(@(?:web_search|fetch_url|deep_research|agent))\b/gi,
+      /(^|[\s>])(@(?:[a-z][a-z0-9_]{1,31}|everyone|user))\b/gi,
       (_, lead, token) => {
         const id = token.slice(1).toLowerCase();
         return lead + '<span class="mention" data-mention="' + id + '">' + token + '</span>';
       }
     );
+}
+
+const BOT_PING_RE = /@(?:[a-z][a-z0-9_]{1,31}|everyone|user)\b/gi;
+
+/** Wrap @pings in rendered assistant HTML (bots surface) to match user bubbles. */
+function decorateMentionTextNodes(root) {
+  if (!root || typeof isBotsSurface !== 'function' || !isBotsSurface()) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest('pre, code, .mention, a, script, style, .md-code-lang, button')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      const value = node.nodeValue || '';
+      if (!value.includes('@')) return NodeFilter.FILTER_REJECT;
+      BOT_PING_RE.lastIndex = 0;
+      if (!BOT_PING_RE.test(value)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((textNode) => {
+    const text = textNode.nodeValue || '';
+    BOT_PING_RE.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let match;
+    while ((match = BOT_PING_RE.exec(text))) {
+      if (match.index > last) {
+        frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      const span = document.createElement('span');
+      span.className = 'mention';
+      span.dataset.mention = match[0].slice(1).toLowerCase();
+      span.textContent = match[0];
+      frag.appendChild(span);
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    textNode.parentNode.replaceChild(frag, textNode);
+  });
 }
 
 function formatUserMessageHtml(message) {
@@ -17,8 +60,16 @@ function formatUserMessageHtml(message) {
     ? String(message.replyQuote).trim()
     : '';
   if (attachments.length && text === '(attachment)') text = '';
+  const replyHandle = typeof message === 'object' && message?.replyToSpeakerHandle
+    ? String(message.replyToSpeakerHandle).replace(/^@/, '').trim()
+    : '';
   const quoteHtml = replyQuote
-    ? '<div class="msg-reply-quote"><span class="msg-reply-quote-label">Replying to</span>'
+    ? '<div class="msg-reply-quote"><span class="msg-reply-quote-label">Replying to'
+      + (replyHandle
+        ? ' <span class="mention msg-reply-quote-who" data-mention="'
+          + escapeHtml(replyHandle.toLowerCase()) + '">@' + escapeHtml(replyHandle) + '</span>'
+        : '')
+      + '</span>'
       + escapeHtml(replyQuote) + '</div>'
     : '';
   const textHtml = formatUserHtml(text);
@@ -38,6 +89,8 @@ function formatUserMessageHtml(message) {
 let pendingAttachments = [];
 /** Selected assistant snippet the next send will reply to. */
 let pendingReplyQuote = null;
+/** @type {{speakerId:string,speakerHandle:string}|null} */
+let pendingReplyTarget = null;
 let attachmentsSupported = false;
 let modelContextLength = null;
 let tesseractLoading = null;
@@ -539,11 +592,11 @@ function storedAttachmentsFromPrepared(prepared) {
   }));
 }
 
-function buildUserApiContent(text, attachments, replyQuote) {
+function buildUserApiContent(text, attachments, replyQuote, replyHandle) {
   const prepared = Array.isArray(attachments) ? attachments : [];
   const textBits = [];
   const quote = String(replyQuote || '').trim();
-  if (quote) textBits.push(formatReplyQuoteForApi(quote));
+  if (quote) textBits.push(formatReplyQuoteForApi(quote, replyHandle));
   if (text && String(text).trim()) textBits.push(String(text).trim());
   for (const att of prepared) {
     if (att.sendMode === 'text' && att.apiText) textBits.push(att.apiText);
@@ -559,9 +612,60 @@ function buildUserApiContent(text, attachments, replyQuote) {
   return parts;
 }
 
-function formatReplyQuoteForApi(quote) {
+function formatReplyQuoteForApi(quote, handle) {
   const body = String(quote || '').trim().split('\n').map((line) => '> ' + line).join('\n');
-  return 'Replying to this from your previous message:\n\n' + body;
+  const who = String(handle || '').replace(/^@/, '').trim();
+  const lead = who
+    ? 'Replying to @' + who + ':'
+    : 'Replying to this from your previous message:';
+  return lead + '\n\n' + body;
+}
+
+function copyReplyFields(source, target) {
+  if (!source || !target) return target;
+  if (source.replyQuote) target.replyQuote = source.replyQuote;
+  if (source.replyToSpeakerId) {
+    target.replyToSpeakerId = source.replyToSpeakerId;
+    if (source.replyToSpeakerHandle) target.replyToSpeakerHandle = source.replyToSpeakerHandle;
+  }
+  return target;
+}
+
+function messageReplyExcerpt(raw) {
+  const text = typeof stripThinkingTags === 'function'
+    ? stripThinkingTags(String(raw || ''))
+    : String(raw || '');
+  return text.replace(/\u00a0/g, ' ').trim().slice(0, 4000);
+}
+
+function resolveReplySpeaker(convo, row, message) {
+  if (message?.speakerId) {
+    const handle = message.speakerHandle
+      || (typeof getBot === 'function' ? getBot(message.speakerId)?.handle : '')
+      || '';
+    return { speakerId: message.speakerId, speakerHandle: handle };
+  }
+  if (message?.speakerHandle && typeof botByHandle === 'function') {
+    const bot = botByHandle(message.speakerHandle);
+    if (bot) return { speakerId: bot.id, speakerHandle: bot.handle };
+  }
+  const rowId = row?.dataset?.speakerId;
+  if (rowId) {
+    return {
+      speakerId: rowId,
+      speakerHandle: row.dataset.speakerHandle || '',
+    };
+  }
+  const stream = typeof activeStreams !== 'undefined' ? activeStreams.get(activeId) : null;
+  if (stream?.dom?.row === row && typeof streamSpeakerBot === 'function') {
+    const bot = streamSpeakerBot(stream);
+    if (bot) return { speakerId: bot.id, speakerHandle: bot.handle };
+  }
+  if (typeof isBotsConvo === 'function' && isBotsConvo(convo) && convo?.botKind === 'dm' && convo.botId) {
+    const bot = typeof getBot === 'function' ? getBot(convo.botId) : null;
+    if (bot) return { speakerId: bot.id, speakerHandle: bot.handle };
+  }
+  return null;
 }
 
 function userMessageApiContent(message) {
@@ -570,7 +674,8 @@ function userMessageApiContent(message) {
     : '';
   const quote = typeof message.replyQuote === 'string' ? message.replyQuote.trim() : '';
   if (quote) {
-    raw = formatReplyQuoteForApi(quote) + (raw && raw !== '(attachment)' ? '\n\n' + raw : '');
+    raw = formatReplyQuoteForApi(quote, message.replyToSpeakerHandle)
+      + (raw && raw !== '(attachment)' ? '\n\n' + raw : '');
   }
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   if (!attachments.length) return raw;
@@ -731,8 +836,17 @@ function renderMentionMenu() {
     return;
   }
   placeMentionMenu();
-  mentionMenu.innerHTML = '<div class="mention-menu-label">Capabilities</div>';
+  mentionMenu.innerHTML = '';
+  let lastSection = '';
   mentionState.items.forEach((item, index) => {
+    const section = item.section || 'Capabilities';
+    if (section !== lastSection) {
+      lastSection = section;
+      const label = document.createElement('div');
+      label.className = 'mention-menu-label';
+      label.textContent = section;
+      mentionMenu.appendChild(label);
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'mention-option' + (index === mentionState.activeIndex ? ' is-active' : '');
@@ -759,11 +873,14 @@ function updateMentionMenu(forInput) {
     return;
   }
   const excluded = activeMentionExcludeIds();
-  const items = MENTION_OPTIONS.filter((item) => {
+  const extras = typeof extraMentionItems === 'function'
+    ? extraMentionItems(ctx.query, excluded)
+    : [];
+  const items = extras.concat(MENTION_OPTIONS.filter((item) => {
     if (!item.label.startsWith(ctx.query) || excluded.has(item.id)) return false;
     if (item.id === 'deep_research' && settings.skillDeepResearch === false) return false;
     return true;
-  });
+  }));
   if (items.length === 0) {
     closeMentionMenu();
     return;
@@ -804,7 +921,7 @@ function insertMention(item) {
   const cursor = input.selectionStart;
   const before = value.slice(0, mentionState.start);
   const after = value.slice(cursor);
-  if (input === composerInput) {
+  if (input === composerInput && !item.inline) {
     input.value = before + after;
     input.setSelectionRange(before.length, before.length);
     composerMentionIds.add(item.id);
@@ -867,13 +984,21 @@ function renderComposerReply() {
   chip.className = 'composer-reply-chip';
   const label = document.createElement('span');
   label.className = 'composer-reply-chip-label';
-  label.textContent = 'Reply';
+  const handle = pendingReplyTarget?.speakerHandle
+    ? String(pendingReplyTarget.speakerHandle).replace(/^@/, '').trim()
+    : '';
+  if (handle) {
+    label.classList.add('has-handle');
+    label.textContent = 'Reply to @' + handle;
+  } else {
+    label.textContent = 'Reply';
+  }
   const text = document.createElement('div');
   text.className = 'composer-reply-chip-text';
   text.textContent = quote;
   const remove = document.createElement('button');
   remove.type = 'button';
-  remove.setAttribute('aria-label', 'Remove reply quote');
+  remove.setAttribute('aria-label', 'Remove reply');
   remove.textContent = '×';
   remove.addEventListener('click', () => {
     clearPendingReplyQuote();
@@ -887,18 +1012,29 @@ function renderComposerReply() {
 
 function clearPendingReplyQuote() {
   pendingReplyQuote = null;
+  pendingReplyTarget = null;
   renderComposerReply();
   updateSendEnabled();
 }
 
-function setPendingReplyQuote(text) {
-  const quote = String(text || '').replace(/\u00a0/g, ' ').trim().slice(0, 4000);
+function setPendingReply(text, target = null) {
+  const quote = messageReplyExcerpt(text);
   if (!quote) return;
   pendingReplyQuote = quote;
+  pendingReplyTarget = target && target.speakerId
+    ? {
+      speakerId: String(target.speakerId),
+      speakerHandle: String(target.speakerHandle || '').replace(/^@/, ''),
+    }
+    : null;
   hideSelectionReplyBar();
   renderComposerReply();
   updateSendEnabled();
   focusComposer();
+}
+
+function setPendingReplyQuote(text) {
+  setPendingReply(text, null);
 }
 
 function hideSelectionReplyBar() {
@@ -928,6 +1064,7 @@ function assistantSelectionQuote() {
   return {
     text: text.slice(0, 4000),
     rect,
+    row,
   };
 }
 

@@ -16,12 +16,14 @@ function showSettingsPane(pane) {
 function refreshSettingsDataSummary() {
   const el = document.getElementById('settingsDataSummary');
   if (!el) return;
-  const chatCount = conversations.length;
+  const chatCount = conversations.filter((convo) => !(typeof isBotsConvo === 'function' && isBotsConvo(convo))).length;
+  const botCount = typeof bots !== 'undefined' ? bots.length : 0;
   const projectCount = projects.length;
   const chatLabel = chatCount === 1 ? '1 chat' : chatCount + ' chats';
   const projectLabel = projectCount === 1 ? '1 project' : projectCount + ' projects';
   const where = 'on disk';
-  el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + projectLabel + '.';
+  const botLabel = botCount === 1 ? '1 bot' : botCount + ' bots';
+  el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + botLabel + ' · ' + projectLabel + '.';
   const clearChats = document.getElementById('btnClearChats');
   const clearProjects = document.getElementById('btnClearProjects');
   const clearAll = document.getElementById('btnClearAllData');
@@ -38,11 +40,72 @@ function activeStream() {
   return activeId ? activeStreams.get(activeId) || null : null;
 }
 
-function abortStream(convoId, { cancelServer = true } = {}) {
+/** Hard stop for bot group hop loops — lives here so Stop works even before bots.js loads. */
+const botsOutboundStopFlags = new Set();
+/** Turns this page already started or stopped — do not resume from linger. */
+const handledLiveTurnIds = new Set();
+/** Conversations the user Stopped before a turn id arrived. */
+const cancelledLiveConvoIds = new Set();
+
+function rememberHandledLiveTurn(turnId) {
+  const id = String(turnId || '').trim();
+  if (id) handledLiveTurnIds.add(id);
+}
+
+function shouldSkipLiveTurnResume(info) {
+  const convoId = String(info?.conversation_id || '').trim();
+  const turnId = String(info?.turn_id || '').trim();
+  if (turnId && handledLiveTurnIds.has(turnId)) return true;
+  if (convoId && cancelledLiveConvoIds.has(convoId)) return true;
+  return false;
+}
+
+function noteLiveTurnUserCancel(convoId, turnId) {
+  if (convoId) cancelledLiveConvoIds.add(convoId);
+  rememberHandledLiveTurn(turnId);
+}
+
+function clearLiveTurnUserCancel(convoId) {
+  if (convoId) cancelledLiveConvoIds.delete(convoId);
+}
+
+function markBotsOutboundStopped(convoId) {
+  if (convoId) botsOutboundStopFlags.add(convoId);
+  if (typeof clearBotsInjects === 'function') clearBotsInjects(convoId);
+}
+
+function clearBotsOutboundStopped(convoId) {
+  if (convoId) botsOutboundStopFlags.delete(convoId);
+}
+
+function isBotsOutboundStopped(convoId) {
+  return !!convoId && botsOutboundStopFlags.has(convoId);
+}
+
+function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
+  if (cancelServer && !soft) markBotsOutboundStopped(convoId);
+  if (cancelServer && !soft && typeof bumpBotsOutboundEpoch === 'function') {
+    bumpBotsOutboundEpoch(convoId);
+  }
   const stream = activeStreams.get(convoId);
   if (stream) {
     if (cancelServer) stream.cancelled = true;
+    if (cancelServer && !soft) stream.hardStopped = true;
+    rememberHandledLiveTurn(stream.turnId);
+    if (cancelServer && !soft) noteLiveTurnUserCancel(convoId, stream.turnId);
     try { stream.controller.abort(); } catch { /* ignore */ }
+    // Tear down the live bubble immediately so finalize cannot paint "No response."
+    // Soft injects keep a partial reply when one exists (finalize path).
+    if (cancelServer && !soft) {
+      if (typeof discardLiveStreamRow === 'function') discardLiveStreamRow(stream);
+      else {
+        try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
+        stream.dom?.row?.remove();
+        stream.dom = null;
+      }
+    }
+  } else if (cancelServer && !soft) {
+    noteLiveTurnUserCancel(convoId, null);
   }
   if (cancelServer && convoId) {
     fetch('/api/chat/cancel', {
@@ -54,6 +117,11 @@ function abortStream(convoId, { cancelServer = true } = {}) {
       }),
     }).catch(() => {});
   }
+}
+
+/** Abort the live hop without ending the bots outbound loop. */
+function softAbortStream(convoId) {
+  abortStream(convoId, { cancelServer: true, soft: true });
 }
 
 function abortAllStreams({ cancelServer = true } = {}) {
@@ -70,8 +138,19 @@ function syncComposerStreamUi() {
   btnSend.classList.remove('is-hidden');
   btnSend.classList.toggle('is-queueing', busy);
   btnStop.classList.toggle('is-hidden', !busy);
-  btnSend.title = busy ? 'Queue message' : 'Send message';
-  btnSend.setAttribute('aria-label', busy ? 'Queue message' : 'Send message');
+  const botsBusy = busy
+    && typeof isBotsConvo === 'function'
+    && isBotsConvo(conversations.find((item) => item.id === activeId));
+  const steerLive = busy && canSteerLiveStream();
+  btnSend.title = steerLive
+    ? 'Steer live reply'
+    : (botsBusy ? 'Inject into live bot turn' : (busy ? 'Queue message' : 'Send message'));
+  btnSend.setAttribute(
+    'aria-label',
+    steerLive
+      ? 'Steer live reply'
+      : (botsBusy ? 'Inject into live bot turn' : (busy ? 'Queue message' : 'Send message'))
+  );
   updateSendEnabled();
   updateComposerHint();
   // Steer appears only while an agent reply can accept mid-turn guidance.
@@ -138,6 +217,7 @@ function refreshQueuedBubble(row, item, { paused = false, canSteer = false } = {
       content: item.displayText,
       attachments: item.attachments,
       replyQuote: item.replyQuote,
+      replyToSpeakerHandle: item.replyToSpeakerHandle,
     });
   }
   const label = row.querySelector('.msg-queued-label');
@@ -175,11 +255,12 @@ function buildQueuedBubble(item, { paused = false, canSteer = false } = {}) {
   row.dataset.raw = item.editText || item.displayText || '';
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
-  bubble.innerHTML = formatUserMessageHtml({
-    content: item.displayText,
-    attachments: item.attachments,
-    replyQuote: item.replyQuote,
-  });
+    bubble.innerHTML = formatUserMessageHtml({
+      content: item.displayText,
+      attachments: item.attachments,
+      replyQuote: item.replyQuote,
+      replyToSpeakerHandle: item.replyToSpeakerHandle,
+    });
   const meta = document.createElement('div');
   meta.className = 'msg-queued-meta';
   meta.innerHTML = queuedMetaActionsHtml(item.id, { paused, canSteer });
@@ -584,6 +665,7 @@ function saveQueuedMessageEdit(row, rawText) {
     content: item.displayText,
     attachments: item.attachments,
     replyQuote: item.replyQuote,
+    replyToSpeakerHandle: item.replyToSpeakerHandle,
   });
   if (editor) editor.replaceWith(nextBubble);
   row.classList.remove('is-editing');
@@ -599,6 +681,7 @@ function saveQueuedMessageEdit(row, rawText) {
 }
 
 function dispatchOutboundTurn(convo, item) {
+  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
   const previousTitle = convo.title;
   const userMessage = {
     role: 'user',
@@ -606,8 +689,12 @@ function dispatchOutboundTurn(convo, item) {
   };
   if (item.attachments?.length) userMessage.attachments = item.attachments;
   if (item.replyQuote) userMessage.replyQuote = item.replyQuote;
+  if (item.replyToSpeakerId) {
+    userMessage.replyToSpeakerId = item.replyToSpeakerId;
+    if (item.replyToSpeakerHandle) userMessage.replyToSpeakerHandle = item.replyToSpeakerHandle;
+  }
   convo.messages.push(userMessage);
-  if (convo.messages.length === 1) {
+  if (convo.messages.length === 1 && !convo.titleEdited && !(typeof isBotsConvo === 'function' && isBotsConvo(convo))) {
     convo.title = provisionalTitle(
       item.displayText || (item.attachments?.[0]?.name || 'Attachment')
     );
@@ -625,6 +712,10 @@ function dispatchOutboundTurn(convo, item) {
       buildBubble('user', userMessage.content, convo.messages.length - 1, userMessage, { animate: true })
     );
     scrollToBottom({ force: true });
+  }
+  if (typeof isBotsConvo === 'function' && isBotsConvo(convo) && typeof runBotsOutbound === 'function') {
+    void runBotsOutbound(convo, item, userMessage, previousTitle);
+    return;
   }
   void runAssistantTurn(convo, {
     useAgent: item.turn.useAgent,
@@ -666,12 +757,14 @@ function maybeSendNextQueued(convoId) {
 
 function clearAllChats() {
   if (!requireUnlockedData()) return;
-  if (conversations.length === 0) return;
-  const n = conversations.length;
+  const chats = conversations.filter((convo) => !(typeof isBotsConvo === 'function' && isBotsConvo(convo)));
+  if (chats.length === 0) return;
+  const n = chats.length;
   if (!confirm('Delete all ' + n + ' chat' + (n === 1 ? '' : 's') + '? This cannot be undone.')) return;
   abortActiveSend();
-  conversations = [];
-  activeId = null;
+  const keep = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
+  conversations = keep;
+  if (activeId && !conversations.some((item) => item.id === activeId)) activeId = null;
   outboundQueues.clear();
   editingQueueId = null;
   saveStore();
@@ -705,7 +798,7 @@ function clearAllChatsAndProjects() {
   if (conversations.length === 0 && projects.length === 0) return;
   if (!confirm('Delete all chats and projects from local data? This cannot be undone.')) return;
   abortActiveSend();
-  conversations = [];
+  conversations = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
   projects = [];
   activeId = null;
   activeProjectId = null;
@@ -770,6 +863,58 @@ function syncChatBackgroundForm() {
   }
 }
 
+function fillDefaultModelSetting() {
+  const select = document.getElementById('settingDefaultModel');
+  if (!select) return;
+  const options = (typeof modelMenuOptions !== 'undefined' && modelMenuOptions.length)
+    ? modelMenuOptions
+    : ((latestState?.network?.remote_models || []).map((model) => (
+      typeof catalogOptionFromRemote === 'function'
+        ? catalogOptionFromRemote(model)
+        : {
+          value: model.id,
+          label: model.model || model.label || model.id,
+          provider: String(model.provider_name || '').trim(),
+        }
+    )));
+  const current = String(selectedChatModel || settings.selectedChatModel || '').trim();
+  const previous = select.value;
+  select.replaceChildren();
+  if (!options.length) {
+    select.disabled = true;
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No models available yet';
+    select.appendChild(empty);
+    return;
+  }
+  select.disabled = false;
+  let hasCurrent = false;
+  options.forEach((option) => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.provider
+      ? (option.label + ' · ' + option.provider)
+      : option.label;
+    if (option.value === current) {
+      opt.selected = true;
+      hasCurrent = true;
+    }
+    select.appendChild(opt);
+  });
+  if (current && !hasCurrent) {
+    const opt = document.createElement('option');
+    opt.value = current;
+    opt.textContent = (typeof modelIdLabel === 'function' ? modelIdLabel(current) : '') || current;
+    opt.selected = true;
+    select.insertBefore(opt, select.firstChild);
+  } else if (!current && select.options.length) {
+    select.selectedIndex = 0;
+  } else if (!hasCurrent && previous && [...select.options].some((opt) => opt.value === previous)) {
+    select.value = previous;
+  }
+}
+
 function fillSettingsFormFromState() {
   document.getElementById('settingName').value = settings.name;
   document.getElementById('settingAbout').value = settings.about;
@@ -803,6 +948,7 @@ function fillSettingsFormFromState() {
   syncWebSearchControls();
   syncFetchUrlControls();
   syncAttachmentFallbackControls();
+  fillDefaultModelSetting();
 }
 
 function readSettingsForm() {
@@ -811,6 +957,7 @@ function readSettingsForm() {
   const webSearchPageMaxCharsRaw = Number(document.getElementById('settingWebSearchPageMaxChars').value);
   const searchResultsRaw = Number(document.getElementById('settingWebSearchResults').value);
   const searchRegionRaw = document.getElementById('settingWebSearchRegion').value.trim().toLowerCase();
+  const defaultModel = String(document.getElementById('settingDefaultModel')?.value || '').trim();
   return normalizeSettings({
     ...settings,
     name: document.getElementById('settingName').value.trim(),
@@ -841,6 +988,7 @@ function readSettingsForm() {
     chatBackgroundImageName: pendingChatBackgroundImageName,
     chatBackgroundPosition: document.getElementById('settingChatBackgroundPosition').value,
     chatBackgroundOverlay: Number(document.getElementById('settingChatBackgroundOverlay').value),
+    selectedChatModel: defaultModel || settings.selectedChatModel || '',
   });
 }
 
@@ -1143,6 +1291,7 @@ function setThinkMenuOpen(open) {
   }
   if (open) {
     setPlusMenuOpen(false);
+    if (typeof setWordmarkMenuOpen === 'function') setWordmarkMenuOpen(false);
     menu.classList.remove('is-hidden');
     btn.setAttribute('aria-expanded', 'true');
     void menu.offsetWidth;
@@ -1367,6 +1516,7 @@ function setPlusMenuOpen(open) {
   }
   if (open) {
     if (thinkMenuIsOpen()) setThinkMenuOpen(false);
+    if (typeof setWordmarkMenuOpen === 'function') setWordmarkMenuOpen(false);
     renderPlusMenu();
     plusMenu.classList.remove('is-hidden');
     placePlusMenu();
@@ -1548,6 +1698,12 @@ async function commitSettings() {
     }
     return;
   }
+  if (typeof hydrateModelPickerState === 'function') hydrateModelPickerState();
+  if (next.selectedChatModel) {
+    rememberRecentModel(next.selectedChatModel);
+    selectedRemoteModelId = next.selectedChatModel;
+  }
+  if (latestState && typeof syncModelSelector === 'function') syncModelSelector(latestState);
   syncThinkingEffortControls(settings.thinkingEffort);
   syncResearchControls();
   syncAttachButton();

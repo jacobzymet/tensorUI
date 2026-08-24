@@ -408,6 +408,7 @@ function settleAssistantRow(row, message, { animateCollapse = false } = {}) {
   if (!row || !message) return;
   const bubble = row.querySelector('.msg-bubble');
   if (!bubble) return;
+  syncMessageSpeaker(row, message);
   const collapseTimeline = animateCollapse ? false : null;
   const notesCollapsed = readProcessNotesCollapsed(row, true);
   bubble.innerHTML = renderAssistantMessage(message, {
@@ -1138,6 +1139,10 @@ function inProjectChat() {
 
 function currentRoutePath() {
   if (mainView === 'projects') return '/projects';
+  if (appSurface === 'bots') {
+    if (activeId) return '/bots/c/' + encodeURIComponent(activeId);
+    return '/bots';
+  }
   if (activeId) return '/c/' + encodeURIComponent(activeId);
   if (activeProjectId && getProject(activeProjectId)) {
     return draftIncognito
@@ -1164,9 +1169,13 @@ function parseLocationRoute() {
       try { return decodeURIComponent(part); }
       catch { return part; }
     });
-  if (parts.length === 0) return { kind: 'draft', incognito: false };
-  if (parts[0] === 'projects') return { kind: 'projects' };
-  if (parts[0] === 'ghost') return { kind: 'draft', incognito: true };
+  if (parts.length === 0) return { kind: 'draft', incognito: false, surface: 'chat' };
+  if (parts[0] === 'bots') {
+    if (parts[1] === 'c' && parts[2]) return { kind: 'convo', id: parts[2], surface: 'bots' };
+    return { kind: 'draft', incognito: false, surface: 'bots' };
+  }
+  if (parts[0] === 'projects') return { kind: 'projects', surface: 'chat' };
+  if (parts[0] === 'ghost') return { kind: 'draft', incognito: true, surface: 'chat' };
   if (parts[0] === 'c' && parts[1]) return { kind: 'convo', id: parts[1] };
   if (parts[0] === 'p' && parts[1]) {
     return {
@@ -1183,6 +1192,14 @@ function applyLocationRoute() {
   const locked = diskEncryptionLocked();
   suppressUrlSync = true;
   try {
+    if (route.surface && typeof applyAppSurface === 'function' && appSurface !== route.surface) {
+      appSurface = route.surface;
+      document.getElementById('chatShell')?.setAttribute('data-surface', appSurface);
+      try {
+        localStorage.setItem(typeof APP_SURFACE_KEY === 'string' ? APP_SURFACE_KEY : 'tensorui.chat.appSurface', appSurface);
+      } catch { /* ignore */ }
+      if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(appSurface);
+    }
     if (route.kind === 'projects') {
       showProjectsView();
     } else if (route.kind === 'convo') {
@@ -1242,6 +1259,21 @@ function syncProjectChrome() {
   if (topbarIncognito) {
     topbarIncognito.classList.toggle('is-hidden', !incognito);
   }
+  const activeConvo = conversations.find((item) => item.id === activeId);
+  const holder = activeConvo?.botsHeldBy && typeof getBot === 'function'
+    ? getBot(activeConvo.botsHeldBy)
+    : null;
+  if (topbarBotsHold) {
+    const held = !!(holder && typeof isBotGroup === 'function' && isBotGroup(activeConvo));
+    topbarBotsHold.classList.toggle('is-hidden', !held);
+    if (held) {
+      topbarBotsHold.textContent = 'Held by @' + holder.handle;
+      setIdentityTitle(
+        topbarBotsHold,
+        'Other bots wait until @' + holder.handle + ' resumes or you ping them'
+      );
+    }
+  }
 
   // Label only — the leading plus icon is a sibling span and must survive.
   btnNewChatLabel.textContent = project ? 'New chat in project' : 'New chat';
@@ -1262,6 +1294,10 @@ function syncProjectChrome() {
     emptyEyebrow.textContent = 'Project';
     emptyEyebrow.classList.remove('is-hidden');
     greetingEl.textContent = project.name;
+  } else if (!activeId && typeof isBotsSurface === 'function' && isBotsSurface()) {
+    emptyEyebrow.textContent = 'Bots';
+    emptyEyebrow.classList.remove('is-hidden');
+    greetingEl.textContent = 'Create a bot';
   } else if (!activeId) {
     emptyEyebrow.classList.add('is-hidden');
     const base = greetingForNow();
@@ -1297,7 +1333,9 @@ function syncProjectChrome() {
   } else {
     composerInput.placeholder = project
       ? 'Message in ' + project.name + '… Type @ to mention'
-      : 'How can I help you today? Type @ to mention';
+      : (typeof isBotsSurface === 'function' && isBotsSurface()
+        ? (activeId ? 'Message this room… Type @ to ping' : 'Create a bot or group to start')
+        : 'How can I help you today? Type @ to mention');
   }
 
   updateComposerHint();
@@ -1382,6 +1420,16 @@ function updateComposerHint() {
     showComposerHint(queueHint);
     return;
   }
+  const heldConvo = conversations.find((item) => item.id === activeId);
+  if (heldConvo && heldConvo.botsHeldBy && typeof getBot === 'function' && typeof isBotGroup === 'function' && isBotGroup(heldConvo)) {
+    const holder = getBot(heldConvo.botsHeldBy);
+    showComposerHint(
+      holder
+        ? 'Held by @' + holder.handle + ' — other bots wait until they resume, or you ping someone'
+        : 'Room is held — other bots wait until resume'
+    );
+    return;
+  }
   hideComposerHint();
 }
 
@@ -1395,11 +1443,13 @@ function bySidebarOrder(list = conversations) {
 }
 
 function uncategorizedConversations() {
-  return bySidebarOrder(conversations.filter((convo) => !convo.projectId && !convo.pinned));
+  const pool = typeof conversationsOnSurface === 'function' ? conversationsOnSurface() : conversations;
+  return bySidebarOrder(pool.filter((convo) => !convo.projectId && !convo.pinned));
 }
 
 function pinnedConversations() {
-  return conversations
+  const pool = typeof conversationsOnSurface === 'function' ? conversationsOnSurface() : conversations;
+  return pool
     .filter((convo) => convo.pinned && !convo.incognito)
     .sort((a, b) => (b.pinnedAt || b.updatedAt) - (a.pinnedAt || a.updatedAt));
 }
@@ -1531,7 +1581,15 @@ function createConvoItem(convo, { nested = false } = {}) {
   if (nested) item.classList.add('is-nested');
   if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
   const fullTitle = convo.title || (convo.incognito ? 'Ghost Chat' : 'New chat');
-  if (isConvoBusy(convo.id)) {
+  const botsConvoItem = typeof isBotsConvo === 'function' && isBotsConvo(convo);
+  const busy = isConvoBusy(convo.id);
+  if (botsConvoItem && typeof createConvoAvatarEl === 'function') {
+    const avatar = createConvoAvatarEl(convo, { busy });
+    if (avatar) {
+      applyPrivacyMosaic(avatar, 'convo-avatar:' + convo.id, { dense: true });
+      item.appendChild(avatar);
+    }
+  } else if (busy) {
     const spinner = document.createElement('span');
     spinner.className = 'convo-spinner';
     spinner.setAttribute('aria-hidden', 'true');
@@ -1551,8 +1609,28 @@ function createConvoItem(convo, { nested = false } = {}) {
   title.className = 'convo-title';
   title.textContent = fullTitle;
   applyPrivacyMosaic(title, 'conversation:' + convo.id);
-  title.title = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
-  item.title = title.title;
+  const identityTitle = convo.incognito ? fullTitle + ' (temporary session — not saved)' : fullTitle;
+  setIdentityTitle(title, identityTitle);
+  setIdentityTitle(item, identityTitle);
+  if (botsConvoItem && convo.botKind === 'dm' && convo.botId) {
+    const bot = typeof getBot === 'function' ? getBot(convo.botId) : null;
+    if (bot) {
+      const handle = document.createElement('span');
+      handle.className = 'convo-handle';
+      handle.textContent = '@' + bot.handle;
+      applyPrivacyMosaic(handle, 'bot-handle:' + bot.id);
+      title.appendChild(handle);
+    }
+  } else if (botsConvoItem && typeof isBotGroup === 'function' && isBotGroup(convo) && typeof participantBots === 'function') {
+    const members = participantBots(convo);
+    if (members.length) {
+      const preview = document.createElement('span');
+      preview.className = 'convo-handle';
+      preview.textContent = members.map((bot) => '@' + bot.handle).join(' · ');
+      applyPrivacyMosaic(preview, 'bot-handles:' + convo.id);
+      title.appendChild(preview);
+    }
+  }
   const more = document.createElement('button');
   more.type = 'button';
   more.className = 'convo-more';
@@ -1625,7 +1703,15 @@ function openConversationMenu(anchor, convo, row) {
     beginSidebarTitleEdit(convo, row);
   }));
 
-  const targets = projects.filter((project) => project.id !== convo.projectId);
+  const botsConvo = typeof isBotsConvo === 'function' && isBotsConvo(convo);
+  if (botsConvo && typeof isBotGroup === 'function' && isBotGroup(convo)) {
+    menu.appendChild(convoMenuButton('Edit members', folderIcon, () => {
+      closeConvoMenu();
+      openGroupDialog(convo);
+    }));
+  }
+
+  const targets = botsConvo ? [] : projects.filter((project) => project.id !== convo.projectId);
   if (convo.projectId || targets.length) {
     const label = document.createElement('div');
     label.className = 'convo-menu-label';
@@ -1651,9 +1737,13 @@ function openConversationMenu(anchor, convo, row) {
   separator.className = 'convo-menu-separator';
   separator.setAttribute('role', 'separator');
   menu.appendChild(separator);
-  menu.appendChild(convoMenuButton('Delete', trashIcon, () => {
+  menu.appendChild(convoMenuButton(botsConvo && convo.botKind === 'dm' ? 'Delete bot' : 'Delete', trashIcon, () => {
     closeConvoMenu();
-    deleteConversation(convo.id);
+    if (botsConvo && convo.botKind === 'dm' && convo.botId && typeof deleteBotAndSession === 'function') {
+      deleteBotAndSession(convo.botId);
+    } else {
+      deleteConversation(convo.id);
+    }
   }, { danger: true }));
 
   document.body.appendChild(menu);
@@ -2165,6 +2255,7 @@ function enhanceCiteFavicons(root) {
 function enhanceCodeBlocks(root) {
   if (!root) return;
   enhanceCiteFavicons(root);
+  if (typeof decorateMentionTextNodes === 'function') decorateMentionTextNodes(root);
   root.querySelectorAll('pre > code').forEach((codeEl) => {
     let block = codeEl.closest('.md-code-block');
     if (!block) {
@@ -2358,6 +2449,11 @@ const EDIT_ICON =
     '<path d="M12 20h9"></path>' +
     '<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>' +
   '</svg>';
+const REPLY_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="m9 17-5-5 5-5"></path>' +
+    '<path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>' +
+  '</svg>';
 
 let editingRow = null;
 
@@ -2501,12 +2597,14 @@ async function submitEditedMessage(row, rawText) {
   row.classList.remove('is-editing');
 
   // Drop this turn's reply and everything after, then rewrite the user message.
-  const priorAttachments = Array.isArray(convo.messages[index].attachments)
-    ? convo.messages[index].attachments
+  const priorMessage = convo.messages[index];
+  const priorAttachments = Array.isArray(priorMessage.attachments)
+    ? priorMessage.attachments
     : [];
   convo.messages = convo.messages.slice(0, index + 1);
   const editedMessage = { role: 'user', content: displayText };
   if (priorAttachments.length) editedMessage.attachments = priorAttachments;
+  copyReplyFields(priorMessage, editedMessage);
   convo.messages[index] = editedMessage;
   if (index === 0 && !convo.titleEdited) {
     // Provisional slug for the sidebar; real title is generated after the
@@ -2517,18 +2615,43 @@ async function submitEditedMessage(row, rawText) {
   saveConversations();
   renderSidebar();
   renderThread(convo);
-  const apiText = priorAttachments.length
-    ? buildUserApiContent(text, priorAttachments.map((att) => ({
-      ...att,
-      sendMode: att.sendMode || (att.kind === 'image' && att.dataUrl && !att.extractedText ? 'native' : 'text'),
-      apiPart: att.kind === 'image' && att.dataUrl && !att.extractedText
-        ? { type: 'image_url', image_url: { url: att.dataUrl } }
-        : null,
-      apiText: att.extractedText
-        ? ('Attachment: ' + (att.name || 'file') + '\n\n' + att.extractedText)
-        : '',
-    })))
-    : text;
+  const mappedAttachments = priorAttachments.map((att) => ({
+    ...att,
+    sendMode: att.sendMode || (att.kind === 'image' && att.dataUrl && !att.extractedText ? 'native' : 'text'),
+    apiPart: att.kind === 'image' && att.dataUrl && !att.extractedText
+      ? { type: 'image_url', image_url: { url: att.dataUrl } }
+      : null,
+    apiText: att.extractedText
+      ? ('Attachment: ' + (att.name || 'file') + '\n\n' + att.extractedText)
+      : '',
+  }));
+  const apiText = buildUserApiContent(
+    text,
+    mappedAttachments,
+    editedMessage.replyQuote,
+    editedMessage.replyToSpeakerHandle
+  );
+  const editedUser = convo.messages[index];
+  if (typeof isBotsConvo === 'function' && isBotsConvo(convo) && typeof runBotsOutbound === 'function') {
+    await runBotsOutbound(convo, {
+      id: newId('q'),
+      editText: rawText,
+      displayText,
+      apiText,
+      attachments: priorAttachments,
+      replyQuote: editedMessage.replyQuote || '',
+      replyToSpeakerId: editedMessage.replyToSpeakerId || '',
+      replyToSpeakerHandle: editedMessage.replyToSpeakerHandle || '',
+      turn: {
+        useAgent: turn.useAgent,
+        skills: turn.skills,
+        deepResearch: turn.deepResearch,
+        deepResearchOutput: turn.deepResearchOutput,
+        forceTools: turn.forceTools,
+      },
+    }, editedUser, convo.title);
+    return;
+  }
   await runAssistantTurn(convo, {
     useAgent: turn.useAgent,
     text: apiText,
@@ -2609,15 +2732,90 @@ function ensureMsgFooter(row) {
   return footer;
 }
 
+function syncMessageSpeaker(row, message) {
+  if (!row) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  const botsConvo = typeof isBotsConvo === 'function' && isBotsConvo(convo);
+  row.classList.toggle('is-bot-chat', !!botsConvo);
+  let label = '';
+  let speakerBot = null;
+  if (botsConvo) {
+    if (row.classList.contains('msg-role-user')) {
+      label = '@user';
+    } else if (message?.speakerId && typeof getBot === 'function') {
+      speakerBot = getBot(message.speakerId);
+      label = speakerBot ? ('@' + speakerBot.handle) : (message.speakerHandle ? '@' + message.speakerHandle : '');
+    } else if (message?.speakerHandle) {
+      label = '@' + message.speakerHandle;
+      speakerBot = typeof botByHandle === 'function' ? botByHandle(message.speakerHandle) : null;
+    } else if (convo?.botKind === 'dm' && convo.botId && typeof getBot === 'function') {
+      speakerBot = getBot(convo.botId);
+      if (speakerBot) label = '@' + speakerBot.handle;
+    }
+  }
+  if (botsConvo && row.classList.contains('msg-role-assistant') && typeof hashAvatarSeed === 'function') {
+    const seedBot = speakerBot || { handle: message?.speakerHandle || 'bot' };
+    const hue = BOT_AVATAR_HUES[hashAvatarSeed(botAvatarSeed(seedBot)) % BOT_AVATAR_HUES.length];
+    row.style.setProperty('--bot-bubble-hue', String(hue));
+  } else {
+    row.style.removeProperty('--bot-bubble-hue');
+  }
+  if (speakerBot) {
+    row.dataset.speakerId = speakerBot.id;
+    row.dataset.speakerHandle = speakerBot.handle || '';
+  } else if (message?.speakerId) {
+    row.dataset.speakerId = message.speakerId;
+    row.dataset.speakerHandle = String(message.speakerHandle || '').replace(/^@/, '');
+  } else {
+    delete row.dataset.speakerId;
+    delete row.dataset.speakerHandle;
+  }
+  let speaker = row.querySelector(':scope > .msg-speaker');
+  if (!label) {
+    speaker?.remove();
+    return;
+  }
+  if (!speaker) {
+    speaker = document.createElement('div');
+    speaker.className = 'msg-speaker';
+    const bubble = row.querySelector(':scope > .msg-bubble');
+    if (bubble) row.insertBefore(speaker, bubble);
+    else row.prepend(speaker);
+  } else {
+    speaker.replaceChildren();
+  }
+  if (speakerBot && typeof createBotAvatarEl === 'function' && row.classList.contains('msg-role-assistant')) {
+    const avatar = createBotAvatarEl(speakerBot, { className: 'msg-speaker-avatar' });
+    applyPrivacyMosaic(avatar, 'speaker-avatar:' + speakerBot.id, { dense: true });
+    speaker.appendChild(avatar);
+  }
+  const name = document.createElement('span');
+  name.className = 'msg-speaker-name';
+  name.textContent = label;
+  applyPrivacyMosaic(name, 'speaker:' + (speakerBot?.id || label));
+  speaker.appendChild(name);
+}
+
 function attachMessageMeta(row, message) {
   if (!row) return;
   const footer = ensureMsgFooter(row);
   let meta = footer.querySelector(':scope > .msg-meta');
-  if (!message || message.role !== 'assistant') {
+  const isAssistant = !!(
+    message
+    && (message.role === 'assistant' || row.classList.contains('msg-role-assistant'))
+  );
+  if (!isAssistant) {
     meta?.remove();
     return;
   }
-  const model = String(message.model || '').trim();
+  const model = String(message.model || '').trim()
+    || (row.classList.contains('msg-role-assistant')
+      ? String(
+        (typeof selectedRemoteModel === 'function' && selectedRemoteModel(latestState)?.model)
+        || selectedChatModel
+        || ''
+      ).trim()
+      : '');
   const speed = formatTokPerSec(message.tokensPerSec);
   if (!model && !speed) {
     meta?.remove();
@@ -2675,6 +2873,26 @@ function attachMessageActions(row) {
   });
   actions.appendChild(copyBtn);
 
+  if (row.classList.contains('msg-role-assistant') && !row.classList.contains('msg-queued')) {
+    const index = Number(row.dataset.msgIndex);
+    const convo = conversations.find((item) => item.id === activeId);
+    const message = Number.isInteger(index) ? convo?.messages?.[index] : null;
+    if (!message?.compact) {
+      const replyBtn = document.createElement('button');
+      replyBtn.type = 'button';
+      replyBtn.className = 'msg-action';
+      replyBtn.setAttribute('aria-label', 'Reply to this message');
+      replyBtn.title = 'Reply';
+      replyBtn.innerHTML = REPLY_ICON;
+      replyBtn.addEventListener('click', () => {
+        const quote = messageReplyExcerpt(row.dataset.raw || message?.content || '');
+        if (!quote) return;
+        setPendingReply(quote, resolveReplySpeaker(convo, row, message));
+      });
+      actions.appendChild(replyBtn);
+    }
+  }
+
   if (row.classList.contains('msg-role-user')) {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
@@ -2696,6 +2914,7 @@ function buildBubble(role, content, index, message, { animate = false } = {}) {
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
   row.appendChild(bubble);
+  syncMessageSpeaker(row, message || { role, content });
   row.dataset.raw = typeof content === 'string' ? content : String(message?.content || '');
   if (role === 'assistant') {
     bubble.innerHTML = renderAssistantMessage(message || { content }, { streaming: false });
@@ -2712,7 +2931,7 @@ function buildBubble(role, content, index, message, { animate = false } = {}) {
   }
   attachMessageActions(row);
   if (role === 'assistant') {
-    attachMessageMeta(row, message || { content });
+    attachMessageMeta(row, message || { role: 'assistant', content });
   }
   if (animate) queueMicrotask(() => motionEnter(row, { y: role === 'user' ? 10 : 14 }));
   return row;
@@ -2721,7 +2940,7 @@ function buildBubble(role, content, index, message, { animate = false } = {}) {
 function reattachLiveStream(convo) {
   if (!convo || activeId !== convo.id) return null;
   const stream = activeStreams.get(convo.id);
-  if (!stream) return null;
+  if (!stream || stream.hardStopped) return null;
   stream.dom = null;
   paintStreamIntoView(convo, stream, stream.partial || '', true);
   for (const entry of stream.pendingSteers || []) {
@@ -2740,9 +2959,19 @@ function reattachLiveStream(convo) {
 
 function renderThread(convo) {
   cancelMessageEdit({ resumeQueue: false });
+  if (typeof isBotsConvo === 'function' && isBotsConvo(convo) && typeof isSilentNoReply === 'function') {
+    const kept = (convo.messages || []).filter((message) => (
+      message?.role !== 'assistant' || !isSilentNoReply(message.content)
+    ));
+    if (kept.length !== convo.messages.length) {
+      convo.messages = kept;
+      saveStore();
+    }
+  }
   chatThread.innerHTML = '';
   // Drop any DOM handles — rows were destroyed; streams recreate on paint/select.
   for (const stream of activeStreams.values()) {
+    try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
     stream.dom = null;
   }
   convo.messages.forEach((message, index) => {
@@ -2795,7 +3024,7 @@ function renderSidebar() {
     name.className = 'sidebar-project-chip-name';
     name.textContent = project.name;
     applyPrivacyMosaic(name, 'project:' + project.id);
-    name.title = project.name;
+    setIdentityTitle(name, project.name);
     const settingsBtn = document.createElement('button');
     settingsBtn.type = 'button';
     settingsBtn.className = 'project-settings-btn';
@@ -2829,12 +3058,14 @@ function renderSidebar() {
     return;
   }
 
-  sidebarConvoLabel.textContent = 'Recents';
+  sidebarConvoLabel.textContent = (typeof isBotsSurface === 'function' && isBotsSurface()) ? 'Bots' : 'Recents';
   const recent = uncategorizedConversations();
   if (recent.length === 0) {
     const hint = document.createElement('p');
     hint.className = 'convo-empty-hint';
-    hint.textContent = projects.length ? 'No general chats yet.' : 'No conversations yet.';
+    hint.textContent = (typeof isBotsSurface === 'function' && isBotsSurface())
+      ? 'No bots yet — create one to start a permanent session.'
+      : (projects.length ? 'No general chats yet.' : 'No conversations yet.');
     list.appendChild(hint);
   } else {
     for (const convo of recent) {
@@ -2847,6 +3078,17 @@ function renderSidebar() {
 function selectConversation(id) {
   const convo = conversations.find((item) => item.id === id);
   if (!convo) return;
+  if (typeof convoSurfaceOf === 'function') {
+    const surface = convoSurfaceOf(convo);
+    if (appSurface !== surface) {
+      appSurface = surface;
+      document.getElementById('chatShell')?.setAttribute('data-surface', surface);
+      try {
+        localStorage.setItem(typeof APP_SURFACE_KEY === 'string' ? APP_SURFACE_KEY : 'tensorui.chat.appSurface', surface);
+      } catch { /* ignore */ }
+      if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(surface);
+    }
+  }
   const previousId = activeId;
   if (activeId) stickByConvo.set(activeId, stickToBottom);
   activeId = id;
@@ -2872,6 +3114,7 @@ function selectConversation(id) {
 
 /** Return to the draft state — no conversation object until a message is sent. */
 function startDraft({ incognito = false } = {}) {
+  if (typeof isBotsSurface === 'function' && isBotsSurface()) incognito = false;
   const previousId = activeId;
   cancelMessageEdit({ resumeQueue: false });
   clearPendingReplyQuote();

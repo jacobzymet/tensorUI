@@ -54,24 +54,41 @@ try:
     if not query:
         fail("TENSORUI_DDGS_ERROR", "query is empty")
 
-    ddgs = DDGS()
-    if kind == "news":
-        raw_results = ddgs.news(
-            query,
-            region=region,
-            safesearch=safesearch,
-            timelimit=timelimit,
-            max_results=max_results,
-        )
-    else:
-        raw_results = ddgs.text(
-            query,
-            region=region,
-            safesearch=safesearch,
-            timelimit=timelimit,
-            max_results=max_results,
-            backend=backend,
-        )
+    ddgs = DDGS(timeout=6)
+    # ddgs "auto" fans out to every engine and then waits on hung workers during
+    # executor shutdown — a single search can sit until TensorUI's 45s kill.
+    # Fail over a short list instead so typical queries return in a few seconds.
+    auto_backends = ("duckduckgo",) if kind == "news" else ("duckduckgo", "brave", "bing")
+    backends = auto_backends if backend == "auto" else (backend,)
+    raw_results = []
+    last_error = None
+    for engine in backends:
+        try:
+            if kind == "news":
+                raw_results = ddgs.news(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    timelimit=timelimit,
+                    max_results=max_results,
+                )
+            else:
+                raw_results = ddgs.text(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    timelimit=timelimit,
+                    max_results=max_results,
+                    backend=engine,
+                )
+            raw_results = raw_results or []
+            if raw_results:
+                break
+        except Exception as error:
+            last_error = error
+            raw_results = []
+    if not raw_results and last_error is not None:
+        fail("TENSORUI_DDGS_ERROR", str(last_error))
     results = []
     for item in raw_results or []:
         url = clean(item.get("href") or item.get("url"))

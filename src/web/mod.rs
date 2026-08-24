@@ -34,9 +34,10 @@ use crate::{
     store::{self, StorageMode},
     system,
 };
+pub(crate) use embed::APP_ICON_PNG;
 use embed::{
-    APP_ICON_PNG, CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS,
-    SETTINGS_HTML, UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
+    CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS, SETTINGS_HTML,
+    UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
 };
 
 const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
@@ -345,6 +346,8 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/", get(chat_page))
         .route("/projects", get(chat_page))
         .route("/ghost", get(chat_page))
+        .route("/bots", get(chat_page))
+        .route("/bots/c/{id}", get(chat_page))
         .route("/c/{id}", get(chat_page))
         .route("/p/{id}", get(chat_page))
         .route("/p/{id}/ghost", get(chat_page))
@@ -397,9 +400,19 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let desktop_quit = async {
+        loop {
+            if crate::desktop::quit_requested() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    };
+
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+        _ = desktop_quit => {},
     }
 }
 
@@ -1503,10 +1516,11 @@ struct InstanceInfo {
 }
 
 async fn focus(State(_app): State<SharedApp>) -> Result<Json<InstanceInfo>, ApiError> {
+    let focused = crate::desktop::request_focus();
     Ok(Json(InstanceInfo {
         app: INSTANCE_MARKER,
         version: env!("CARGO_PKG_VERSION"),
-        focused: false,
+        focused,
     }))
 }
 

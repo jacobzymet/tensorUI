@@ -134,6 +134,7 @@ fn empty_store() -> Value {
         "version": 2,
         "projects": [],
         "conversations": [],
+        "bots": [],
     })
 }
 
@@ -143,6 +144,7 @@ fn normalize_store(value: Value) -> Value {
             "version": 2,
             "projects": [],
             "conversations": conversations,
+            "bots": [],
         }),
         Value::Object(mut map) => {
             if !map.contains_key("projects") {
@@ -150,6 +152,9 @@ fn normalize_store(value: Value) -> Value {
             }
             if !map.contains_key("conversations") {
                 map.insert("conversations".into(), Value::Array(vec![]));
+            }
+            if !map.contains_key("bots") {
+                map.insert("bots".into(), Value::Array(vec![]));
             }
             if !map.contains_key("version") {
                 map.insert("version".into(), Value::from(2));
@@ -236,9 +241,13 @@ pub fn save_chats(
             .get("conversations")
             .map(|v| v.is_array())
             .unwrap_or(false)
+        || !normalized
+            .get("bots")
+            .map(|v| v.is_array())
+            .unwrap_or(false)
     {
         return Err(StoreError::Other(anyhow::anyhow!(
-            "store must include projects and conversations arrays"
+            "store must include projects, conversations, and bots arrays"
         )));
     }
     let on_disk = encode_for_disk(&normalized, key, crypto::AAD_CHATS)?;
@@ -322,6 +331,7 @@ mod tests {
         assert_eq!(loaded["version"], 2);
         assert!(loaded["projects"].as_array().unwrap().is_empty());
         assert_eq!(loaded["conversations"][0]["id"], "c1");
+        assert!(loaded["bots"].as_array().unwrap().is_empty());
     }
 
     #[test]

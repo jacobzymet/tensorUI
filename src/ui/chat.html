@@ -21,10 +21,33 @@
     </button>
     <aside class="chat-sidebar">
       <div class="sidebar-head">
-        <a class="wordmark" href="/" aria-label="TensorMI Harness Chat">
-          <span class="wordmark-brand">Tensor<span>MI</span></span>
-          <span class="wordmark-surface">Chat</span>
-        </a>
+        <div class="wordmark">
+          <a class="wordmark-brand" href="/" aria-label="TensorMI Harness">Tensor<span>MI</span></a>
+          <div class="wordmark-switch" id="wordmarkSwitch">
+            <button
+              type="button"
+              class="wordmark-surface"
+              id="btnWordmarkSurface"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="wordmarkMenu"
+              aria-label="Surface: Chat. Switch surface"
+            >
+              <span class="wordmark-surface-viewport">
+                <span class="wordmark-surface-label" id="wordmarkSurfaceLabel">Chat</span>
+              </span>
+              <svg class="wordmark-surface-caret" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2.25 4.4 6 8.15 9.75 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="wordmark-menu is-hidden" id="wordmarkMenu" role="menu" aria-label="Surfaces">
+              <div class="wordmark-menu-clip">
+                <button type="button" role="menuitemradio" class="is-active" aria-checked="true" data-surface="chat">Chat</button>
+                <button type="button" role="menuitemradio" aria-checked="false" data-surface="bots">Bots</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="sidebar-head-actions">
           <button type="button" class="btn btn-ghost btn-icon btn-privacy-mode" id="btnPrivacyMode" aria-label="Turn on privacy mode" aria-pressed="false" title="Turn on privacy mode">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c5.5 0 9.5 5.2 10 8-.2 1.1-1 2.7-2.3 4.1"/><path d="M6.2 6.2C4.2 7.7 2.6 10.1 2 12c.5 2.8 4.5 8 10 8 1.5 0 2.9-.4 4.1-1.1"/></svg>
@@ -36,7 +59,7 @@
       </div>
       <div class="sidebar-actions">
         <div class="sidebar-actions-row">
-          <div class="btn-new-chat-split" role="group" aria-label="New chat">
+          <div class="btn-new-chat-split" id="newChatSplit" role="group" aria-label="New chat">
             <button type="button" class="btn btn-primary btn-new-chat-main" id="btnNewChat">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               <span id="btnNewChatLabel">New chat</span>
@@ -45,13 +68,23 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
             </button>
           </div>
+          <div class="btn-new-chat-split" id="newBotSplit" role="group" aria-label="New bot or group">
+            <button type="button" class="btn btn-primary btn-new-chat-main" id="btnNewBot">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              <span>New bot</span>
+            </button>
+            <button type="button" class="btn btn-primary btn-new-chat-incognito" id="btnNewGroup" aria-label="New group" title="New group — bots talk to each other">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>New group</span>
+            </button>
+          </div>
           <button type="button" class="btn btn-outline btn-search-chats" id="btnSearchChats" aria-label="Search chats and projects" title="Search (Ctrl+K)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
         </div>
       </div>
       <div class="sidebar-nav" id="sidebarNav">
-        <div class="sidebar-section" aria-label="Workspace">
+        <div class="sidebar-section sidebar-workspace" id="sidebarWorkspace" aria-label="Workspace">
           <p class="sidebar-label">Workspace</p>
           <button type="button" class="sidebar-link" id="btnProjectsNav">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/><path d="M2 10v10a2 2 0 0 0 2 2h14"/></svg>
@@ -143,12 +176,19 @@
             <div class="chat-topbar-leading">
               <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
             </div>
-            <div class="chat-topbar-title" id="convoTitle"></div>
+            <div class="chat-topbar-center">
+              <div class="chat-topbar-title" id="convoTitle"></div>
+              <div class="topbar-bot-roster is-hidden" id="topbarBotRoster" aria-label="Room members"></div>
+            </div>
             <div class="chat-topbar-trailing">
+              <span class="topbar-hold-pill is-hidden" id="topbarBotsHold" title="Other bots will wait until this room is resumed">Held</span>
               <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
                 Temporary Session
               </span>
+              <button type="button" class="btn btn-ghost btn-icon topbar-group-edit is-hidden" id="btnTopbarGroupEdit" aria-label="Edit group members" title="Edit members">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </button>
             </div>
           </header>
           <div class="chat-viewport" id="chatViewport" tabindex="0">
@@ -679,7 +719,17 @@
 
           <section class="settings-pane" data-settings-pane="composer">
             <h2 class="settings-pane-title">Composer</h2>
-            <p class="settings-pane-lede">Keyboard behavior when writing a message.</p>
+            <p class="settings-pane-lede">Default model and keyboard behavior when writing a message.</p>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Default model</h3>
+              <div class="settings-row">
+                <label class="field-label" for="settingDefaultModel">Model</label>
+                <select class="field-input" id="settingDefaultModel" aria-describedby="settingDefaultModelHint">
+                  <option value="">No models available</option>
+                </select>
+              </div>
+              <p class="field-hint" id="settingDefaultModelHint">Saved as your default for new turns. You can also change it from the model menu under the composer.</p>
+            </div>
             <div class="settings-section">
               <label class="field-check">
                 <input type="checkbox" id="settingEnterSends" checked>
@@ -870,6 +920,63 @@
           <button type="button" class="btn btn-ghost project-dialog-danger is-hidden" id="btnProjectDelete">Delete project</button>
           <button type="button" class="btn btn-ghost" id="btnProjectCancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="btnProjectSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="botModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="botModalTitle">
+    <div class="dialog bot-dialog">
+      <button type="button" class="dialog-close" id="btnBotClose" aria-label="Close">×</button>
+      <div class="project-dialog-main">
+        <div class="settings-scroll">
+          <h2 class="settings-pane-title" id="botModalTitle">New bot</h2>
+          <p class="settings-pane-lede">Each bot has a permanent session. Its handle and description are visible to the model.</p>
+          <p class="field-hint is-hidden" id="botModalError"></p>
+          <div class="settings-section">
+            <div class="settings-row-stack">
+              <label class="field-label" for="botHandle">Handle</label>
+              <div class="field-prefix">
+                <span>@</span>
+                <input class="field-input" id="botHandle" type="text" maxlength="32" placeholder="financial" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="settings-row-stack">
+              <label class="field-label" for="botDescription">Description</label>
+              <textarea class="field-textarea" id="botDescription" placeholder="What this bot is for…"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-ghost" id="btnBotCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnBotSave">Create bot</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="groupModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
+    <div class="dialog bot-dialog">
+      <button type="button" class="dialog-close" id="btnGroupClose" aria-label="Close">×</button>
+      <div class="project-dialog-main">
+        <div class="settings-scroll">
+          <h2 class="settings-pane-title" id="groupModalTitle">New group</h2>
+          <p class="settings-pane-lede">Add at least two bots. Ping with @handle, @everyone, or @user.</p>
+          <p class="field-hint is-hidden" id="groupModalError"></p>
+          <div class="settings-section">
+            <div class="settings-row-stack">
+              <label class="field-label" for="groupName">Name</label>
+              <input class="field-input" id="groupName" type="text" maxlength="80" placeholder="e.g. Markets desk">
+            </div>
+            <div class="settings-row-stack">
+              <label class="field-label">Bots in this group</label>
+              <div class="bot-pick-list" id="groupBotPicks"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-ghost" id="btnGroupCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnGroupSave">Save group</button>
         </div>
       </div>
     </div>

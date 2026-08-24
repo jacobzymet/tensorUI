@@ -34,6 +34,14 @@ pub mod chat {
     pub const PROJECT_MEMORY_SCOPE_DEFAULT: &str =
         include_str!("../../prompts/chat/project-memory-scope-default.md");
     pub const PROJECT_CONTINUITY: &str = include_str!("../../prompts/chat/project-continuity.md");
+    pub const BOT_IDENTITY: &str = include_str!("../../prompts/chat/bot-identity.md");
+    pub const BOT_MEMORY: &str = include_str!("../../prompts/chat/bot-memory.md");
+    pub const BOT_GROUP: &str = include_str!("../../prompts/chat/bot-group.md");
+    pub const BOT_GROUP_MEMORY: &str = include_str!("../../prompts/chat/bot-group-memory.md");
+    pub const BOT_DM: &str = include_str!("../../prompts/chat/bot-dm.md");
+    pub const BOT_HOLD: &str = include_str!("../../prompts/chat/bot-hold.md");
+    pub const BOT_COMPACT: &str = include_str!("../../prompts/chat/bot-compact.md");
+    pub const BOT_COMPACT_GROUP: &str = include_str!("../../prompts/chat/bot-compact-group.md");
 }
 
 pub mod title {
@@ -122,6 +130,14 @@ pub fn frontend_js() -> &'static str {
                 chat::PROJECT_MEMORY_SCOPE_DEFAULT,
             ),
             ("chat.projectContinuity", chat::PROJECT_CONTINUITY),
+            ("chat.botIdentity", chat::BOT_IDENTITY),
+            ("chat.botMemory", chat::BOT_MEMORY),
+            ("chat.botGroup", chat::BOT_GROUP),
+            ("chat.botGroupMemory", chat::BOT_GROUP_MEMORY),
+            ("chat.botDm", chat::BOT_DM),
+            ("chat.botHold", chat::BOT_HOLD),
+            ("chat.botCompact", chat::BOT_COMPACT),
+            ("chat.botCompactGroup", chat::BOT_COMPACT_GROUP),
         ];
         let mut map = serde_json::Map::new();
         for (key, raw) in entries {
@@ -159,6 +175,9 @@ mod tests {
         let js = frontend_js();
         assert!(js.contains("window.TENSORUI_PROMPTS"));
         assert!(js.contains("chat.projectMemory"));
+        assert!(js.contains("chat.botIdentity"));
+        assert!(js.contains("chat.botDm"));
+        assert!(js.contains("chat.botHold"));
         assert!(js.contains("fillPrompt"));
         assert!(js.contains(r"/\{\{\s*([\w.]+)\s*\}\}/g"));
     }

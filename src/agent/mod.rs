@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use futures_util::StreamExt;
+use futures_util::{StreamExt, future::join_all};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
@@ -171,10 +171,11 @@ const MAX_PAGE_BYTES: u64 = 1_500_000;
 const DEFAULT_FETCH_URL_MAX_CHARS: usize = 8_000;
 const MIN_PAGE_FETCH_CHARS: usize = 1_000;
 const MAX_PAGE_FETCH_CHARS: usize = 200_000;
-const DDGS_TIMEOUT: Duration = Duration::from_secs(45);
+const DDGS_TIMEOUT: Duration = Duration::from_secs(12);
 /// Retry flaky DDGS calls before handing a soft failure back to the model.
-const DDGS_ATTEMPTS: usize = 3;
-const DDGS_RETRY_DELAY_MS: u64 = 450;
+const DDGS_ATTEMPTS: usize = 2;
+const DDGS_RETRY_DELAY_MS: u64 = 250;
+const PAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentRequest {
@@ -2295,7 +2296,7 @@ async fn fetch_single_url(
     Ok(format_page_window(url, &full_text, offset, max_chars))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SearchHit {
     title: String,
     url: String,
@@ -2507,10 +2508,23 @@ async fn ddgs_search_hits(
             .map_err(|error| format!("Could not send request to {}: {error}", program.display()))?;
         drop(stdin);
 
-        let output = tokio::time::timeout(DDGS_TIMEOUT, child.wait_with_output())
-            .await
-            .map_err(|_| "DDGS search timed out after 45 seconds.".to_string())?
-            .map_err(|error| format!("Search helper {} failed: {error}", program.display()))?;
+        let output = match timeout(DDGS_TIMEOUT, child.wait_with_output()).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(error)) => {
+                runtime_error = Some(format!(
+                    "Search helper {} failed: {error}",
+                    program.display()
+                ));
+                continue;
+            }
+            Err(_) => {
+                runtime_error = Some(format!(
+                    "DDGS search timed out after {} seconds.",
+                    DDGS_TIMEOUT.as_secs()
+                ));
+                continue;
+            }
+        };
 
         if output.status.success() {
             let response: DdgsSearchResponse = serde_json::from_slice(&output.stdout)
@@ -2847,10 +2861,11 @@ async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &Age
         return;
     };
     let depth = skills.web_search_depth;
-    let targets: Vec<&SearchHit> = hits
+    let targets: Vec<SearchHit> = hits
         .iter()
         .filter(|hit| scrapeable_url(&hit.url))
         .take(page_count)
+        .cloned()
         .collect();
     if targets.is_empty() {
         return;
@@ -2862,31 +2877,35 @@ async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &Age
         page_count
     ));
 
-    for (index, hit) in targets.iter().enumerate() {
-        match fetch_page_text(&hit.url, max_chars).await {
-            Ok(text) if !text.trim().is_empty() => {
+    let fetches = targets.iter().enumerate().map(|(index, hit)| {
+        let url = hit.url.clone();
+        let title = hit.title.clone();
+        async move {
+            let outcome = timeout(PAGE_FETCH_TIMEOUT, fetch_page_text(&url, max_chars)).await;
+            (index, title, url, outcome)
+        }
+    });
+    for (index, title, url, outcome) in join_all(fetches).await {
+        match outcome {
+            Ok(Ok(text)) if !text.trim().is_empty() => {
+                out.push_str(&format!("\n[{}] {title} ({url})\n{text}\n", index + 1,));
+            }
+            Ok(Ok(_)) => {
                 out.push_str(&format!(
-                    "\n[{}] {} ({})\n{}\n",
+                    "\n[{}] {title} ({url})\n(no extractable text)\n",
                     index + 1,
-                    hit.title,
-                    hit.url,
-                    text
                 ));
             }
-            Ok(_) => {
+            Ok(Err(error)) => {
                 out.push_str(&format!(
-                    "\n[{}] {} ({})\n(no extractable text)\n",
+                    "\n[{}] {title} ({url})\n(fetch failed: {error})\n",
                     index + 1,
-                    hit.title,
-                    hit.url
                 ));
             }
-            Err(error) => {
+            Err(_) => {
                 out.push_str(&format!(
-                    "\n[{}] {} ({})\n(fetch failed: {error})\n",
+                    "\n[{}] {title} ({url})\n(fetch timed out)\n",
                     index + 1,
-                    hit.title,
-                    hit.url
                 ));
             }
         }

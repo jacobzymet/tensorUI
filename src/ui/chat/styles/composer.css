@@ -77,8 +77,8 @@
 .composer-model-tab .chat-model-select-wrap {
   justify-self: end;
   align-self: start;
-  width: 9.25rem;
-  max-width: min(9.25rem, 62vw);
+  width: max-content;
+  max-width: min(14rem, 62vw);
   padding: 0.08rem 0.3rem;
   border: 0;
   background: transparent;
@@ -244,7 +244,7 @@
   overscroll-behavior: contain;
   padding: 0.25rem;
   border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-menu);
   background: var(--color-paper-3);
   box-shadow: var(--shadow-3);
   z-index: 45;
@@ -279,7 +279,7 @@
   color: var(--color-ink);
   text-align: left;
   padding: 0.42rem 0.55rem;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font: inherit;
 }
@@ -297,7 +297,7 @@
 .plus-menu-icon {
   width: 1.65rem;
   height: 1.65rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -536,6 +536,17 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   text-transform: uppercase;
   color: var(--color-accent);
   padding-top: 0.1rem;
+}
+.composer-reply-chip-label.has-handle {
+  text-transform: none;
+  letter-spacing: 0;
+  max-width: 8.5rem;
+  line-height: 1.25;
+}
+.msg-reply-quote-who {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 700;
 }
 .composer-reply-chip-text {
   grid-column: 2;
@@ -800,7 +811,7 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   min-width: 12rem;
   padding: 0.35rem;
   border: 1px solid color-mix(in oklch, var(--color-rule) 70%, transparent);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-menu);
   background: var(--color-paper-3);
   box-shadow: var(--shadow-3);
   z-index: 40;
@@ -824,7 +835,7 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-        color: var(--color-muted);
+  color: var(--color-muted);
 }
 .think-menu button {
   display: flex;

@@ -1,0 +1,1 @@
+This room is currently HELD by @{{handle}}. Other bots must not plan, ping each other, or continue the task. If you are not @{{handle}}, reply NO_REPLY unless @user addressed you by handle. If you are @{{handle}}, you may DM @user or resume with <bot_resume/>.

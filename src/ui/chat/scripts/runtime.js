@@ -127,12 +127,16 @@ function updateSendEnabled() {
   const hasText = composerInput.value.trim() !== '';
   const hasFiles = pendingAttachments.length > 0;
   const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
+  const botsDraft = typeof isBotsSurface === 'function' && isBotsSurface() && !activeId;
   const canCompose = !diskEncryptionLocked()
     && serverReady
+    && !botsDraft
     && (hasText || hasFiles || hasQuote);
   btnSend.disabled = !canCompose;
   if (btnBranch) {
-    btnBranch.disabled = !canCompose || !canBranchFromActiveConversation();
+    const botsConvo = typeof isBotsConvo === 'function'
+      && isBotsConvo(conversations.find((item) => item.id === activeId));
+    btnBranch.disabled = !canCompose || botsConvo || !canBranchFromActiveConversation();
   }
 }
 
@@ -150,15 +154,13 @@ function syncModelOriginPill(visible, providerName) {
   chatModelOriginPill.setAttribute('aria-hidden', 'false');
   chatModelOriginPill.textContent = name;
   applyPrivacyMosaic(chatModelOriginPill, 'model-origin-provider:' + name);
-  chatModelOriginPill.title = chatShell.classList.contains('privacy-mode') ? '' : name;
+  setIdentityTitle(chatModelOriginPill, name);
 }
 
 function modelOptionTitle(label, provider) {
   const model = String(label || '');
   const origin = String(provider || '').trim();
-  return origin && !chatShell.classList.contains('privacy-mode')
-    ? model + ' · ' + origin
-    : model;
+  return origin ? model + ' · ' + origin : model;
 }
 
 function hostLooksLocal(host) {
@@ -371,14 +373,23 @@ function renderModelOptionHtml(option, index, { showProvider, terms }) {
       + escapeModelAttr(chatShell.classList.contains('privacy-mode') ? '' : option.provider) + '">'
       + highlightModelText(option.provider, terms) + '</span>'
     : '';
+  const defaultBadge = isSelected
+    ? '<span class="chat-model-default-pill" title="Default model">Default</span>'
+    : '';
   return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
     + '" role="option" id="chat-model-option-' + index + '"'
     + ' data-value="' + escapeModelAttr(option.value) + '"'
-    + ' title="' + escapeModelAttr(modelOptionTitle(option.label, option.provider)) + '"'
+    + ' title="' + escapeModelAttr(
+      (isSelected ? 'Default · ' : 'Set as default · ')
+      + modelOptionTitle(option.label, option.provider)
+    ) + '"'
     + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
     + '<button type="button" class="chat-model-option-main" data-model-pick="'
     + escapeModelAttr(option.value) + '">'
+    + '<span class="chat-model-option-lead">'
     + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
+    + defaultBadge
+    + '</span>'
     + badge
     + '</button>'
     + '<button type="button" class="chat-model-pin' + (pinned ? ' is-pinned' : '') + '"'
@@ -428,9 +439,15 @@ function renderModelMenuList() {
   chatModelList.innerHTML = html;
   chatModelList.querySelectorAll('.chat-model-origin-pill').forEach((badge) => {
     applyPrivacyMosaic(badge, 'model-menu-provider:' + badge.textContent);
+    setIdentityTitle(badge, badge.textContent);
   });
   chatModelList.querySelectorAll('.chat-model-group-name').forEach((label) => {
     applyPrivacyMosaic(label, 'model-menu-provider-group:' + label.textContent);
+  });
+  chatModelList.querySelectorAll('.chat-model-option').forEach((optionEl) => {
+    const option = modelMenuOptions.find((item) => item.value === optionEl.dataset.value);
+    const prefix = optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ';
+    setIdentityTitle(optionEl, option ? prefix + modelOptionTitle(option.label, option.provider) : '');
   });
 
   const empty = !modelMenuMatches.length;
@@ -438,7 +455,7 @@ function renderModelMenuList() {
   chatModelList.classList.toggle('is-hidden', empty);
   if (empty) {
     if (modelMenuTab === 'recents' && !terms.length) {
-      chatModelEmpty.textContent = 'Models you pick will show up here.';
+      chatModelEmpty.textContent = 'Pick a model from Local or Cloud to set your default.';
     } else if (modelMenuTab === 'pins' && !terms.length) {
       chatModelEmpty.textContent = 'Pin models from Recents, Local, or Cloud to keep them here.';
     } else if (modelMenuTab === 'local' && !terms.length) {
@@ -592,16 +609,19 @@ function chooseModelOption(value) {
     persistModelPickerState();
     const selected = modelMenuOptions.find((o) => o.value === selectedChatModel);
     chatModelSelect.textContent = selected ? selected.label : 'Model';
-    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
+    setIdentityTitle(chatModelSelect, selected ? modelOptionTitle(selected.label, selected.provider) : '');
     syncModelOriginPill(true, selected && selected.provider);
-    chatModelList.querySelectorAll('.chat-model-option').forEach((btn) => {
-      const isSelected = btn.getAttribute('data-value') === selectedChatModel;
-      btn.classList.toggle('is-selected', isSelected);
-      btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-    });
+  } else {
+    persistModelPickerState();
   }
   closeModelMenu({ restoreFocus: true });
   if (latestState) updateServerChip(latestState);
+  if (typeof fillDefaultModelSetting === 'function'
+    && settingsModal
+    && !settingsModal.classList.contains('is-hidden')) {
+    fillDefaultModelSetting();
+    if (typeof syncSettingsSaveButton === 'function') syncSettingsSaveButton();
+  }
 }
 
 function refreshStarfieldClearZone() {
@@ -773,13 +793,21 @@ function syncModelSelector(data) {
     chatModelSelect.textContent = selected
       ? selected.label
       : (modelIdLabel(selectedChatModel) || 'Model');
-    chatModelSelect.title = selected
-      ? modelOptionTitle(selected.label, selected.provider)
-      : (selectedChatModel ? modelIdLabel(selectedChatModel) : '');
+    setIdentityTitle(
+      chatModelSelect,
+      selected
+        ? modelOptionTitle(selected.label, selected.provider)
+        : (selectedChatModel ? modelIdLabel(selectedChatModel) : '')
+    );
   }
   selectedRemoteModelId = selectedChatModel;
   syncModelOriginPill(true, selected && selected.provider);
   if (menuOpen) positionModelMenu();
+  if (typeof fillDefaultModelSetting === 'function'
+    && settingsModal
+    && !settingsModal.classList.contains('is-hidden')) {
+    fillDefaultModelSetting();
+  }
 }
 
 function selectedRemoteModel(data) {
@@ -845,7 +873,7 @@ function updateServerChip(data) {
     : serverDetailTitle;
   if (serverProviderName) {
     serverProviderName.textContent = network.remote_saved ? providerLabel : 'No provider';
-    serverProviderName.title = network.remote_saved ? providerLabel : '';
+    setIdentityTitle(serverProviderName, network.remote_saved ? providerLabel : '');
   }
 
   const project = inProjectChat() ? getProject(activeProjectId) : null;
@@ -938,6 +966,12 @@ async function sendMessage({ branch = false } = {}) {
   const typed = composerInput.value.trim();
   const queuedFiles = pendingAttachments.slice();
   const replyQuote = typeof pendingReplyQuote === 'string' ? pendingReplyQuote.trim() : '';
+  const replyTarget = pendingReplyTarget && pendingReplyTarget.speakerId
+    ? {
+      speakerId: pendingReplyTarget.speakerId,
+      speakerHandle: pendingReplyTarget.speakerHandle || '',
+    }
+    : null;
   if ((!typed && !queuedFiles.length && !replyQuote) || !serverReady) return;
   if (!requireUnlockedData()) return;
 
@@ -984,7 +1018,7 @@ async function sendMessage({ branch = false } = {}) {
   const turn = resolveTurnSkills(mentionIds);
   const displayText = displayTextWithMentions(text, mentioned.mentions);
   const storedAttachments = storedAttachmentsFromPrepared(prepared);
-  const apiText = buildUserApiContent(text, prepared, replyQuote);
+  const apiText = buildUserApiContent(text, prepared, replyQuote, replyTarget?.speakerHandle);
 
   let convo = branch
     ? null
@@ -1019,6 +1053,11 @@ async function sendMessage({ branch = false } = {}) {
     renderSidebar();
     syncComposerStreamUi();
   } else if (!convo) {
+    if (typeof isBotsSurface === 'function' && isBotsSurface()) {
+      showComposerHint('Create a bot or group first.');
+      focusComposer();
+      return;
+    }
     const id = newId('c');
     convo = {
       id,
@@ -1052,6 +1091,8 @@ async function sendMessage({ branch = false } = {}) {
     apiText,
     attachments: storedAttachments,
     replyQuote: replyQuote || '',
+    replyToSpeakerId: replyTarget?.speakerId || '',
+    replyToSpeakerHandle: replyTarget?.speakerHandle || '',
     turn: {
       useAgent: turn.useAgent,
       skills: turn.skills,
@@ -1063,6 +1104,32 @@ async function sendMessage({ branch = false } = {}) {
 
   // Branch always starts a fresh turn on the new chat (never queue on the parent).
   if (!branch && isConvoBusy(convo.id)) {
+    // Live agent: inject guidance into the current turn instead of waiting.
+    if (canSteerLiveStream()) {
+      const text = steerTextFromItem(outbound);
+      if (text) {
+        const stream = activeStreams.get(convo.id);
+        if (stream) {
+          if (!stream.pendingSteers) stream.pendingSteers = [];
+          const entry = { item: outbound, text, posted: false, applied: false };
+          stream.pendingSteers.push(entry);
+          renderPendingSteerBubble(convo.id, entry);
+          void flushPendingSteers(stream);
+          focusComposer();
+          return;
+        }
+      }
+    }
+    // Bots hop: soft-interrupt / inject so the room can be steered mid-thought.
+    if (
+      typeof isBotsConvo === 'function'
+      && isBotsConvo(convo)
+      && typeof injectBotsOutbound === 'function'
+      && injectBotsOutbound(convo, outbound)
+    ) {
+      focusComposer();
+      return;
+    }
     enqueueOutbound(convo, outbound);
     focusComposer();
     return;
@@ -1082,6 +1149,7 @@ function focusComposer() {
 }
 
 function ensureStreamDom(convo, stream) {
+  if (stream?.hardStopped) return null;
   if (activeId !== convo.id) return null;
   if (stream.dom && stream.dom.row.isConnected) return stream.dom;
 
@@ -1098,7 +1166,8 @@ function ensureStreamDom(convo, stream) {
   orbCanvas.className = 'orb-sm';
   const thinkingLabel = document.createElement('span');
   thinkingLabel.className = 'thinking-label';
-  thinkingLabel.textContent = 'Processing…';
+  thinkingLabel.dataset.base = 'Processing…';
+  thinkingLabel.textContent = streamStatusLabel(stream, 'Processing…');
   statusEl.appendChild(orbCanvas);
   statusEl.appendChild(thinkingLabel);
 
@@ -1111,6 +1180,17 @@ function ensureStreamDom(convo, stream) {
   bubble.appendChild(traceEl);
   bubble.appendChild(answerEl);
   assistantRow.appendChild(bubble);
+  const speakerBot = streamSpeakerBot(stream);
+  if (speakerBot) {
+    syncMessageSpeaker(assistantRow, {
+      role: 'assistant',
+      speakerId: speakerBot.id,
+      speakerHandle: speakerBot.handle,
+    });
+  } else if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) {
+    // DM fallback when speaker is known from the room, not the stream yet.
+    syncMessageSpeaker(assistantRow, { role: 'assistant' });
+  }
   attachMessageActions(assistantRow);
   chatThread.appendChild(assistantRow);
   queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
@@ -1205,9 +1285,16 @@ function renderStreamingAnswerHtml(text) {
 }
 
 function paintStreamIntoView(convo, stream, replyText, streaming) {
+  if (stream?.hardStopped) return;
   stream.partial = replyText;
   const extracted = applyMemoryUpdateProtocol(replyText, { streaming });
   const { cleaned } = extracted;
+  if (typeof isSilentNoReply === 'function' && isSilentNoReply(cleaned)) {
+    if (activeId === convo.id && stream.dom?.answerEl) {
+      if (stream.dom.answerEl.innerHTML) stream.dom.answerEl.innerHTML = '';
+    }
+    return;
+  }
   if (activeId !== convo.id) {
     // Background stream — keep state only; sidebar shows the live marker.
     return;
@@ -1319,20 +1406,14 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
     if (toolLive) {
       // Label is set by the tool_call agent event.
     } else if (clarifyLive) {
-      if (thinkingLabel.textContent !== 'Waiting for your answers…') {
-        thinkingLabel.textContent = 'Waiting for your answers…';
-      }
+      setStreamThinkingLabel(stream, 'Waiting for your answers…');
     } else if (thinkingOpen) {
-      if (thinkingLabel.textContent !== 'Reasoning…') {
-        thinkingLabel.textContent = 'Reasoning…';
-      }
+      setStreamThinkingLabel(stream, 'Reasoning…');
     } else if (agentStreaming) {
-      const label = String(thinkingLabel.textContent || '').trim();
+      const base = String(thinkingLabel.dataset.base || '').trim();
       // After tools, never leave a blank/stale chip — fall back to Processing.
-      if (!label || label === 'Reading results') {
-        if (thinkingLabel.textContent !== 'Processing…') {
-          thinkingLabel.textContent = 'Processing…';
-        }
+      if (!base || base === 'Reading results') {
+        setStreamThinkingLabel(stream, 'Processing…');
       }
     }
   } else if (hasVisibleAnswer || (!streaming && (cleaned || hasTimeline))) {
@@ -1369,8 +1450,11 @@ async function runAssistantTurn(convo, {
   dispatchedMessage = null,
   queueItem = null,
   previousTitle = '',
+  speakerBotId = null,
+  skipQueue = false,
 }) {
   if (!serverReady || activeStreams.has(convo.id)) return;
+  if (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id)) return;
   resetTraceAutoOpenState();
 
   const turnSkills = skills || {
@@ -1425,22 +1509,36 @@ async function runAssistantTurn(convo, {
     deepResearchOutput,
     turnSkills,
     turnForceTools,
+    speakerBotId: speakerBotId || null,
   });
+  stream.speakerBotId = speakerBotId || null;
+  stream.skipQueue = !!skipQueue;
+  syncStreamSpeakerChrome(convo, stream);
 
-  const apiMessages = convo.messages.map((message) => {
-    if (message.role !== 'user') {
-      return { role: message.role, content: message.content };
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
+  let apiMessages;
+  if (speakerBot && typeof botApiMessages === 'function') {
+    apiMessages = botApiMessages(convo, speakerBot, dispatchedMessage ? text : null);
+  } else {
+    apiMessages = convo.messages.map((message) => {
+      if (message.role !== 'user') {
+        return { role: message.role, content: message.content };
+      }
+      return {
+        role: 'user',
+        content: userMessageApiContent(message),
+      };
+    });
+    if (apiMessages.length > 0) {
+      const last = apiMessages[apiMessages.length - 1];
+      if (last.role === 'user') last.content = text;
     }
-    return {
-      role: 'user',
-      content: userMessageApiContent(message),
-    };
-  });
-  if (apiMessages.length > 0) {
-    const last = apiMessages[apiMessages.length - 1];
-    if (last.role === 'user') last.content = text;
   }
-  const systemPrompt = buildSystemPrompt(convo.projectId, { excludeConvoId: convo.id });
+  const systemPrompt = buildSystemPrompt(convo.projectId, {
+    excludeConvoId: convo.id,
+    convo,
+    speakerBot,
+  });
   if (systemPrompt) {
     apiMessages.unshift({ role: 'system', content: systemPrompt });
   }
@@ -1518,6 +1616,16 @@ function dropLiveSubscriber(convoId, stream) {
   syncComposerStreamUi();
 }
 
+function finishLiveStream(convoId, stream) {
+  if (!stream || activeStreams.get(convoId) !== stream) return false;
+  try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
+  activeStreams.delete(convoId);
+  reclaimUnappliedSteers(convoId, stream);
+  renderSidebar();
+  syncComposerStreamUi();
+  return true;
+}
+
 function commitLiveAssistant(convo, message, turnId) {
   if (turnId) message.liveTurnId = turnId;
   const existing = turnId
@@ -1559,14 +1667,12 @@ async function resumeLiveTurns(list) {
   for (const info of list) {
     const id = info && String(info.conversation_id || '').trim();
     if (!id || activeStreams.has(id)) continue;
+    if (typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) {
+      continue;
+    }
     let convo = conversations.find((item) => item.id === id);
     if (!convo) convo = await syncConvoFromStore(id);
     if (!convo) continue;
-    const viewing = activeId === convo.id;
-    if (viewing) {
-      const synced = await syncConvoFromStore(id);
-      if (synced) convo = synced;
-    }
     if (
       info.finished
       && info.turn_id
@@ -1576,13 +1682,21 @@ async function resumeLiveTurns(list) {
     ) {
       continue;
     }
-    if (viewing) showThread(convo);
+    const viewing = activeId === convo.id;
+    if (!viewing) {
+      const synced = await syncConvoFromStore(id);
+      if (synced) convo = synced;
+    }
+    if (viewing && emptyState && !emptyState.classList.contains('is-hidden')) {
+      showThread(convo);
+    }
     void attachLiveTurn(convo, info);
   }
 }
 
 async function attachLiveTurn(convo, info) {
   if (!convo || activeStreams.has(convo.id) || !serverReady) return;
+  if (typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) return;
   beginLiveStream(convo, {
     useAgent: !!info?.agent,
     deepResearch: !!info?.deep_research,
@@ -1601,9 +1715,7 @@ async function attachLiveTurn(convo, info) {
     });
     if (!response.ok) {
       if (response.status === 404) {
-        activeStreams.delete(convo.id);
-        renderSidebar();
-        syncComposerStreamUi();
+        finishLiveStream(convo.id, stream);
         return;
       }
       const problem = await response.json().catch(() => null);
@@ -1628,6 +1740,7 @@ function beginLiveStream(convo, {
   catchingUp = false,
   turnId = null,
   turnModel = '',
+  speakerBotId = null,
 } = {}) {
   if (activeStreams.has(convo.id)) return activeStreams.get(convo.id);
   const stream = {
@@ -1647,8 +1760,13 @@ function beginLiveStream(convo, {
     catchingUp: !!catchingUp,
     turnId: turnId || null,
     turnModel: String(turnModel || ''),
+    speakerBotId: speakerBotId || null,
     cancelled: false,
+    hardStopped: false,
   };
+  if (stream.turnId && typeof rememberHandledLiveTurn === 'function') {
+    rememberHandledLiveTurn(stream.turnId);
+  }
   activeStreams.set(convo.id, stream);
   renderSidebar();
   syncComposerStreamUi();
@@ -1657,6 +1775,50 @@ function beginLiveStream(convo, {
     scrollToBottom({ force: true });
   }
   return stream;
+}
+
+function streamSpeakerBot(stream) {
+  if (!stream?.speakerBotId || typeof getBot !== 'function') return null;
+  return getBot(stream.speakerBotId);
+}
+
+function streamStatusLabel(stream, base) {
+  const label = String(base || 'Processing…').trim() || 'Processing…';
+  const bot = streamSpeakerBot(stream);
+  return bot ? ('@' + bot.handle + ' · ' + label) : label;
+}
+
+function setStreamThinkingLabel(stream, base) {
+  if (!stream?.dom?.thinkingLabel) return;
+  const baseLabel = String(base || 'Processing…').trim() || 'Processing…';
+  stream.dom.thinkingLabel.dataset.base = baseLabel;
+  const next = streamStatusLabel(stream, baseLabel);
+  if (stream.dom.thinkingLabel.textContent !== next) {
+    stream.dom.thinkingLabel.textContent = next;
+  }
+}
+
+function syncStreamSpeakerChrome(convo, stream) {
+  if (!stream?.dom?.row) return;
+  const bot = streamSpeakerBot(stream);
+  if (bot) {
+    syncMessageSpeaker(stream.dom.row, {
+      role: 'assistant',
+      speakerId: bot.id,
+      speakerHandle: bot.handle,
+    });
+    setStreamThinkingLabel(stream, stream.dom.thinkingLabel?.dataset?.base || 'Processing…');
+  } else if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) {
+    syncMessageSpeaker(stream.dom.row, { role: 'assistant' });
+  }
+}
+
+function discardLiveStreamRow(stream) {
+  const row = stream?.dom?.row;
+  if (!row) return;
+  try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
+  if (row.isConnected) row.remove();
+  stream.dom = null;
 }
 
 async function driveAssistantSse(convo, stream, response) {
@@ -1681,9 +1843,7 @@ async function driveAssistantSse(convo, stream, response) {
           : (replyText && replyText.trim())
             ? 'Writing…'
             : 'Processing…';
-      if (stream.dom.thinkingLabel.textContent !== nextLabel) {
-        stream.dom.thinkingLabel.textContent = nextLabel;
-      }
+      setStreamThinkingLabel(stream, nextLabel);
     }
     paintStreamIntoView(convo, stream, replyText, streaming);
   });
@@ -1727,7 +1887,7 @@ async function driveAssistantSse(convo, stream, response) {
         live: true,
         startedAt: Date.now(),
       });
-      if (stream.dom) stream.dom.thinkingLabel.textContent = skillLabel(payload.name, args) + '…';
+      if (stream.dom) setStreamThinkingLabel(stream, skillLabel(payload.name, args) + '…');
     } else if (payload.phase === 'tool_result') {
       const tools = stream.timeline.filter((part) => part.type === 'tool');
       const last = tools[tools.length - 1];
@@ -1760,9 +1920,10 @@ async function driveAssistantSse(convo, stream, response) {
         scheduleJustSettledClear(stream.timeline[stream.timeline.length - 1]);
       }
       if (stream.dom) {
-        stream.dom.thinkingLabel.textContent = note
-          ? skillLabel(payload.name, last) + ' · ' + note
-          : 'Processing…';
+        setStreamThinkingLabel(
+          stream,
+          note ? (skillLabel(payload.name, last) + ' · ' + note) : 'Processing…'
+        );
       }
     } else if (payload.phase === 'clarify') {
       commitStreamBuffer(stream, typer);
@@ -1779,7 +1940,7 @@ async function driveAssistantSse(convo, stream, response) {
       };
       stream.timeline.push(clarifyPart);
       if (stream.dom) {
-        stream.dom.thinkingLabel.textContent = 'Waiting for your answers…';
+        setStreamThinkingLabel(stream, 'Waiting for your answers…');
         mountClarifyForm(stream, clarifyPart);
       }
     } else if (payload.phase === 'clarify_done') {
@@ -1791,7 +1952,7 @@ async function driveAssistantSse(convo, stream, response) {
         part.summary = String(payload.summary || '').trim();
         mountClarifyForm(stream, part);
       }
-      if (stream.dom) stream.dom.thinkingLabel.textContent = 'Researching…';
+      if (stream.dom) setStreamThinkingLabel(stream, 'Researching…');
     } else if (payload.phase === 'steer_ready' && payload.id) {
       stream.steerId = String(payload.id);
       void flushPendingSteers(stream);
@@ -1815,15 +1976,15 @@ async function driveAssistantSse(convo, stream, response) {
       const entry = entryIdx >= 0 ? pending.splice(entryIdx, 1)[0] : null;
       if (entry) entry.applied = true;
       applySteeredEntry(convo, stream, text, entry);
-      if (stream.dom) stream.dom.thinkingLabel.textContent = 'Steering…';
+      if (stream.dom) setStreamThinkingLabel(stream, 'Steering…');
     } else if (payload.phase === 'status' && payload.message) {
-      if (stream.dom) stream.dom.thinkingLabel.textContent = String(payload.message);
+      if (stream.dom) setStreamThinkingLabel(stream, String(payload.message));
     } else if (payload.phase === 'notice' && payload.message) {
       const text = String(payload.message).trim();
       if (text && !stream.timeline.some((part) => part.type === 'notice' && part.content === text)) {
         stream.timeline.push({ type: 'notice', content: text });
       }
-      if (stream.dom) stream.dom.thinkingLabel.textContent = text || stream.dom.thinkingLabel.textContent;
+      if (stream.dom && text) setStreamThinkingLabel(stream, text);
     }
     paintStreamIntoView(convo, stream, typer.shown, true);
   };
@@ -1847,7 +2008,12 @@ async function driveAssistantSse(convo, stream, response) {
           if (parsed.event === 'meta') {
             try {
               const meta = JSON.parse(parsed.data);
-              if (meta.turn_id) stream.turnId = String(meta.turn_id);
+              if (meta.turn_id) {
+                stream.turnId = String(meta.turn_id);
+                if (typeof rememberHandledLiveTurn === 'function') {
+                  rememberHandledLiveTurn(stream.turnId);
+                }
+              }
               if (typeof meta.agent === 'boolean') stream.useAgent = meta.agent;
               if (typeof meta.deep_research === 'boolean') stream.deepResearch = meta.deep_research;
               if (meta.deep_research_output === 'brief' || meta.deep_research_output === 'long') {
@@ -1917,19 +2083,72 @@ async function driveAssistantSse(convo, stream, response) {
     }
   }
 
+  let queueAfter = !stream.skipQueue;
+  try {
   typer.flush();
-  const endedAt = Date.now();
-  const finalStats = finalizeTurnStats(usageStats, firstTokenAt, endedAt);
   if (!conversations.some((item) => item.id === convo.id)) {
-    if (stream.dom?.thinkingOrb) stream.dom.thinkingOrb.stop();
-    activeStreams.delete(convo.id);
-    reclaimUnappliedSteers(convo.id, stream);
-    renderSidebar();
-    syncComposerStreamUi();
     return;
   }
+
+  // Stop mid-turn: keep any useful partial reply; never spam empty "No response." rows.
+  if (stream.cancelled || (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id))) {
+    queueAfter = false;
+    stream.cancelled = true;
+    const cancelledExtracted = collectTurnMemoryExtraction(stream, typer.target);
+    const cancelledText = String(cancelledExtracted.cleaned || '').trim();
+    const cancelledVisible = streamingAnswerText(cancelledText).trim();
+    const silentNoReply = typeof isSilentNoReply === 'function'
+      && (isSilentNoReply(cancelledVisible) || isSilentNoReply(cancelledText));
+    const speakerBotId = stream.speakerBotId || null;
+    const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
+    // Never persist the placeholder error as a real message.
+    if (cancelledVisible && cancelledVisible !== 'No response.' && !silentNoReply) {
+      const message = {
+        role: 'assistant',
+        content: cancelledText,
+        model: stream.turnModel
+          || fallbackTurnModel
+          || String(selectedChatModel || '').trim()
+          || 'model',
+      };
+      if (speakerBot) {
+        message.speakerId = speakerBot.id;
+        message.speakerHandle = speakerBot.handle;
+      }
+      const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
+      const msgIndex = convo.messages.indexOf(committedMessage);
+      const viewing = activeId === convo.id;
+      // Do not recreate a discarded live row just to settle a cancel.
+      let dom = stream.dom && stream.dom.row && stream.dom.row.isConnected
+        ? stream.dom
+        : null;
+      if (!dom && viewing && !stream.hardStopped) {
+        // Partial text exists but UI was torn down — rebuild once to settle.
+        dom = ensureStreamDom(convo, stream);
+      }
+      if (dom && dom.row.isConnected) {
+        try { dom.thinkingOrb?.stop(); } catch { /* ignore */ }
+        dom.statusEl.classList.add('is-hidden');
+        delete dom.row.dataset.streamId;
+        dom.row.dataset.msgIndex = String(msgIndex);
+        dom.row.dataset.raw = committedMessage.content || '';
+        syncMessageSpeaker(dom.row, committedMessage);
+        settleAssistantRow(dom.row, committedMessage, { animateCollapse: false });
+      }
+      convo.updatedAt = Date.now();
+      saveConversations({ immediate: true });
+    } else {
+      discardLiveStreamRow(stream);
+    }
+    return;
+  }
+
+  const endedAt = Date.now();
+  const finalStats = finalizeTurnStats(usageStats, firstTokenAt, endedAt);
+  const speakerBotId = stream.speakerBotId || null;
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
   const extracted = collectTurnMemoryExtraction(stream, typer.target);
-  const memoryChanges = applyExtractedMemories(convo, extracted);
+  const memoryChanges = applyExtractedMemories(convo, extracted, speakerBotId);
   const memoryNotices = memoryNoticeLabels(memoryChanges);
   // Memory chips live on the message; do not also push tone:ok notices into the
   // timeline (those were deferred to the bottom and duplicated the chips).
@@ -1938,9 +2157,25 @@ async function driveAssistantSse(convo, stream, response) {
     assistantText = memoryOnlyAssistantFallback(extracted);
   }
   const visibleAnswer = streamingAnswerText(assistantText).trim();
+  const silentNoReply = typeof isSilentNoReply === 'function'
+    && (isSilentNoReply(visibleAnswer) || isSilentNoReply(assistantText));
+  if (silentNoReply) {
+    discardLiveStreamRow(stream);
+    return;
+  }
   // Think-only finals used to persist a blank desktop bubble while Activity looked fine.
   if (!visibleAnswer && !stream.errorMessage && stream.timeline.length) {
     stream.errorMessage = 'No user-visible answer after tools. Try again.';
+  }
+
+  // If Stop won the race after we left the cancel branch, still refuse placeholder spam.
+  if (
+    stream.cancelled
+    || (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id))
+  ) {
+    queueAfter = false;
+    discardLiveStreamRow(stream);
+    return;
   }
 
   stream.timeline.forEach((part) => {
@@ -2008,13 +2243,13 @@ async function driveAssistantSse(convo, stream, response) {
         );
       }
     } else if (!visibleAnswer) {
+      if (!stream.errorMessage) stream.errorMessage = 'No response.';
+      const errHtml = '<span class="msg-error">' + escapeHtml(stream.errorMessage) + '</span>';
       if (isDesktopTraceLayout()) {
-        dom.answerEl.innerHTML = '<span class="msg-error">No response.</span>';
+        dom.answerEl.innerHTML = errHtml;
       } else {
         const committed = renderCommittedParts(stream.timeline);
-        dom.answerEl.innerHTML = committed
-          ? committed + '<span class="msg-error">No response.</span>'
-          : '<span class="msg-error">No response.</span>';
+        dom.answerEl.innerHTML = committed ? committed + errHtml : errHtml;
       }
     } else {
       paintStreamIntoView(convo, stream, assistantText, false);
@@ -2034,8 +2269,16 @@ async function driveAssistantSse(convo, stream, response) {
     const message = {
       role: 'assistant',
       content: visibleAnswer ? assistantText : '',
-      model: stream.turnModel || finalStats?.upstreamModel || fallbackTurnModel || '',
+      model: stream.turnModel
+        || finalStats?.upstreamModel
+        || fallbackTurnModel
+        || String(selectedChatModel || '').trim()
+        || 'model',
     };
+    if (speakerBot) {
+      message.speakerId = speakerBot.id;
+      message.speakerHandle = speakerBot.handle;
+    }
     if (persistedParts) message.parts = persistedParts;
     if (memoryNotices.length) message.memoryNotices = memoryNotices;
     if (stream.errorMessage && !visibleAnswer) {
@@ -2046,11 +2289,15 @@ async function driveAssistantSse(convo, stream, response) {
     if (finalStats?.completionTokens != null) message.completionTokens = finalStats.completionTokens;
     if (finalStats?.promptTokens != null) message.promptTokens = finalStats.promptTokens;
     const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
+    if (typeof applyBotActions === 'function' && speakerBot) {
+      applyBotActions(convo, speakerBot, extracted.botActions);
+    }
     const msgIndex = convo.messages.indexOf(committedMessage);
     if (dom && dom.row.isConnected) {
       dom.row.dataset.msgIndex = String(msgIndex);
-      dom.row.dataset.raw = message.content || '';
-      settleAssistantRow(dom.row, message, { animateCollapse: true });
+      dom.row.dataset.raw = committedMessage.content || '';
+      syncMessageSpeaker(dom.row, committedMessage);
+      settleAssistantRow(dom.row, committedMessage, { animateCollapse: true });
     }
     convo.updatedAt = Date.now();
     if (convo.projectId) {
@@ -2063,14 +2310,12 @@ async function driveAssistantSse(convo, stream, response) {
         animate: true,
         ensureOpen: false,
       });
-      if (messageHasActivity(message)) maybeAutoOpenTraceSidebar(convo.id);
+      if (messageHasActivity(committedMessage)) maybeAutoOpenTraceSidebar(convo.id);
     }
+  } else {
+    discardLiveStreamRow(stream);
   }
 
-  activeStreams.delete(convo.id);
-  reclaimUnappliedSteers(convo.id, stream);
-  renderSidebar();
-  syncComposerStreamUi();
   // After the first reply finishes — local servers often reject concurrent
   // title + chat requests, so we wait until the stream is done.
   if (needsGeneratedTitle(convo)) {
@@ -2083,7 +2328,23 @@ async function driveAssistantSse(convo, stream, response) {
     }
     composerInput.focus();
   }
-  maybeSendNextQueued(convo.id);
+  if (queueAfter) {
+    queueAfter = false;
+    maybeSendNextQueued(convo.id);
+  }
+  } catch (error) {
+    console.warn('Assistant turn finalize failed:', error?.message || error);
+    if (!stream.errorMessage) {
+      stream.errorMessage = error?.message || 'The request failed.';
+    }
+  } finally {
+    if (finishLiveStream(convo.id, stream) && queueAfter) {
+      maybeSendNextQueued(convo.id);
+    }
+    if (!stream.skipQueue && typeof flushBotNavigation === 'function') {
+      flushBotNavigation();
+    }
+  }
 }
 
 chatThread.addEventListener('click', (event) => {
@@ -2234,8 +2495,14 @@ btnSelectionReply?.addEventListener('click', (event) => {
   event.preventDefault();
   event.stopPropagation();
   const quote = assistantSelectionQuote();
-  if (quote) setPendingReplyQuote(quote.text);
-  else hideSelectionReplyBar();
+  if (quote) {
+    const index = Number(quote.row?.dataset.msgIndex);
+    const convo = conversations.find((item) => item.id === activeId);
+    const message = Number.isInteger(index) ? convo?.messages?.[index] : null;
+    setPendingReply(quote.text, resolveReplySpeaker(convo, quote.row, message));
+  } else {
+    hideSelectionReplyBar();
+  }
 });
 document.addEventListener('selectionchange', () => {
   // Defer so mouseup can finish updating the range first.
@@ -2251,7 +2518,17 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') hideSelectionReplyBar();
 });
 btnStop.addEventListener('click', () => {
-  if (activeId) abortStream(activeId);
+  if (!activeId) return;
+  abortStream(activeId);
+  syncComposerStreamUi();
+  renderSidebar();
+  const convo = conversations.find((item) => item.id === activeId);
+  // Drop any live "Processing…" / empty error bubble that finalize hasn't cleared yet.
+  if (convo && activeId === convo.id) {
+    chatThread.querySelectorAll('.msg-role-assistant[data-stream-id]').forEach((row) => {
+      row.remove();
+    });
+  }
 });
 btnPlus?.addEventListener('click', (event) => {
   event.stopPropagation();
@@ -2315,6 +2592,141 @@ composerInput.addEventListener('paste', (event) => {
   void addFilesToPending(files);
 });
 document.getElementById('settingAttachmentTextFallback').addEventListener('change', syncAttachmentFallbackControls);
+
+const APP_SURFACES = {
+  chat: 'Chat',
+  bots: 'Bots',
+};
+let wordmarkMenuCloseTimer = 0;
+let wordmarkLabelTimer = 0;
+
+function wordmarkMenuIsOpen() {
+  const wrap = document.getElementById('wordmarkSwitch');
+  const menu = document.getElementById('wordmarkMenu');
+  return !!(wrap && menu && wrap.classList.contains('is-open') && !menu.classList.contains('is-hidden'));
+}
+
+function setWordmarkMenuOpen(open) {
+  const wrap = document.getElementById('wordmarkSwitch');
+  const menu = document.getElementById('wordmarkMenu');
+  const btn = document.getElementById('btnWordmarkSurface');
+  if (!wrap || !menu || !btn) return;
+  if (wordmarkMenuCloseTimer) {
+    window.clearTimeout(wordmarkMenuCloseTimer);
+    wordmarkMenuCloseTimer = 0;
+  }
+  if (open) {
+    setThinkMenuOpen(false);
+    setPlusMenuOpen(false);
+    closeConvoMenu();
+    menu.classList.remove('is-hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    void menu.offsetWidth;
+    requestAnimationFrame(() => wrap.classList.add('is-open'));
+    return;
+  }
+  wrap.classList.remove('is-open');
+  btn.setAttribute('aria-expanded', 'false');
+  const finish = () => {
+    menu.classList.add('is-hidden');
+    wordmarkMenuCloseTimer = 0;
+  };
+  if (prefersReducedMotion()) {
+    finish();
+    return;
+  }
+  wordmarkMenuCloseTimer = window.setTimeout(finish, 220);
+}
+
+function paintWordmarkSurface(id) {
+  const next = APP_SURFACES[id] ? id : 'chat';
+  const label = APP_SURFACES[next];
+  const btn = document.getElementById('btnWordmarkSurface');
+  const labelEl = document.getElementById('wordmarkSurfaceLabel');
+  const menu = document.getElementById('wordmarkMenu');
+  const changed = appSurface !== next;
+  appSurface = next;
+  document.getElementById('chatShell')?.setAttribute('data-surface', next);
+  document.title = 'TensorMI Harness | ' + label;
+  if (btn) btn.setAttribute('aria-label', 'Surface: ' + label + '. Switch surface');
+  menu?.querySelectorAll('[data-surface]').forEach((item) => {
+    const on = item.dataset.surface === next;
+    item.classList.toggle('is-active', on);
+    item.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  if (!labelEl || labelEl.textContent === label) return;
+  if (!changed || prefersReducedMotion()) {
+    labelEl.classList.remove('is-exit', 'is-enter');
+    labelEl.textContent = label;
+    return;
+  }
+  if (wordmarkLabelTimer) window.clearTimeout(wordmarkLabelTimer);
+  labelEl.classList.remove('is-enter');
+  labelEl.classList.add('is-exit');
+  wordmarkLabelTimer = window.setTimeout(() => {
+    labelEl.textContent = label;
+    labelEl.classList.add('is-enter');
+    labelEl.classList.remove('is-exit');
+    void labelEl.offsetWidth;
+    labelEl.classList.remove('is-enter');
+    wordmarkLabelTimer = 0;
+  }, 160);
+}
+
+function wordmarkMenuItems() {
+  const menu = document.getElementById('wordmarkMenu');
+  return menu ? [...menu.querySelectorAll('[data-surface]')] : [];
+}
+
+function focusWordmarkMenuItem(index) {
+  const items = wordmarkMenuItems();
+  if (!items.length) return;
+  const next = (index + items.length) % items.length;
+  items[next]?.focus();
+}
+
+document.getElementById('btnWordmarkSurface')?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setWordmarkMenuOpen(!wordmarkMenuIsOpen());
+});
+document.getElementById('btnWordmarkSurface')?.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  event.preventDefault();
+  setWordmarkMenuOpen(true);
+  const items = wordmarkMenuItems();
+  focusWordmarkMenuItem(event.key === 'ArrowUp' ? items.length - 1 : 0);
+});
+document.getElementById('wordmarkMenu')?.addEventListener('click', (event) => {
+  const item = event.target.closest('[data-surface]');
+  if (!item) return;
+  if (typeof applyAppSurface === 'function') applyAppSurface(item.dataset.surface);
+  else paintWordmarkSurface(item.dataset.surface);
+  setWordmarkMenuOpen(false);
+  document.getElementById('btnWordmarkSurface')?.focus();
+});
+document.getElementById('wordmarkMenu')?.addEventListener('keydown', (event) => {
+  const items = wordmarkMenuItems();
+  const index = items.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    focusWordmarkMenuItem(index + 1);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    focusWordmarkMenuItem(index < 0 ? items.length - 1 : index - 1);
+  } else if (event.key === 'Home') {
+    event.preventDefault();
+    focusWordmarkMenuItem(0);
+  } else if (event.key === 'End') {
+    event.preventDefault();
+    focusWordmarkMenuItem(items.length - 1);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    setWordmarkMenuOpen(false);
+    document.getElementById('btnWordmarkSurface')?.focus();
+  }
+});
+paintWordmarkSurface(appSurface);
+
 document.getElementById('btnThink').addEventListener('click', (event) => {
   event.stopPropagation();
   setThinkMenuOpen(!thinkMenuIsOpen());
@@ -2328,6 +2740,7 @@ document.getElementById('thinkMenu').addEventListener('click', (event) => {
 document.addEventListener('click', (event) => {
   const thinkWrap = document.getElementById('composerThinkWrap');
   const plusWrap = document.getElementById('composerPlusWrap');
+  const wordmarkWrap = document.getElementById('wordmarkSwitch');
   if (thinkWrap && !thinkWrap.contains(event.target) && thinkMenuIsOpen()) {
     setThinkMenuOpen(false);
   }
@@ -2335,6 +2748,9 @@ document.addEventListener('click', (event) => {
     || (plusMenu && plusMenu.contains(event.target));
   if (!clickedPlus && plusMenuIsOpen()) {
     setPlusMenuOpen(false);
+  }
+  if (wordmarkWrap && !wordmarkWrap.contains(event.target) && wordmarkMenuIsOpen()) {
+    setWordmarkMenuOpen(false);
   }
 });
 document.getElementById('settingThinkingEffort').addEventListener('change', (event) => {
@@ -2440,6 +2856,7 @@ function setSidebarOpen(open) {
 
 function syncPrivacyModeUi(enabled) {
   chatShell.classList.toggle('privacy-mode', enabled);
+  syncIdentityTitles(enabled);
   if (serverChip) {
     serverChip.title = enabled
       ? 'Server connection status'
@@ -2447,16 +2864,20 @@ function syncPrivacyModeUi(enabled) {
   }
   const selected = modelMenuOptions.find((option) => option.value === selectedChatModel);
   if (chatModelSelect) {
-    chatModelSelect.title = selected ? modelOptionTitle(selected.label, selected.provider) : '';
+    setIdentityTitle(
+      chatModelSelect,
+      selected ? modelOptionTitle(selected.label, selected.provider) : ''
+    );
   }
   if (chatModelOriginPill) {
-    chatModelOriginPill.title = enabled ? '' : chatModelOriginPill.textContent;
+    setIdentityTitle(chatModelOriginPill, chatModelOriginPill.textContent);
   }
   chatModelList?.querySelectorAll('.chat-model-option').forEach((optionEl) => {
     const option = modelMenuOptions.find((item) => item.value === optionEl.dataset.value);
-    optionEl.title = option ? modelOptionTitle(option.label, option.provider) : '';
+    const prefix = optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ';
+    setIdentityTitle(optionEl, option ? prefix + modelOptionTitle(option.label, option.provider) : '');
     const badge = optionEl.querySelector('.chat-model-origin-pill');
-    if (badge) badge.title = enabled ? '' : badge.textContent;
+    if (badge) setIdentityTitle(badge, badge.textContent);
   });
   chatModelList?.querySelectorAll('.chat-model-group-name').forEach((label) => {
     applyPrivacyMosaic(label, 'model-menu-provider-group:' + label.textContent);
@@ -2543,7 +2964,9 @@ function openSearchModal() {
 function renderSearchResults(query) {
   if (!searchModalResults) return;
   const q = String(query || '').trim().toLowerCase();
-  const matchedProjects = projects.filter((project) => {
+  const matchedProjects = (typeof isBotsSurface === 'function' && isBotsSurface())
+    ? []
+    : projects.filter((project) => {
     if (!q) return true;
     const hay = [project.name, project.instructions, project.memory]
       .filter(Boolean)
@@ -2551,7 +2974,8 @@ function renderSearchResults(query) {
       .toLowerCase();
     return hay.includes(q);
   });
-  const matchedConvos = bySidebarOrder(conversations).filter((convo) => {
+  const pool = typeof conversationsOnSurface === 'function' ? conversationsOnSurface() : conversations;
+  const matchedConvos = bySidebarOrder(pool).filter((convo) => {
     if (!q) return true;
     const projectName = getProject(convo.projectId)?.name || '';
     const hay = [
@@ -3056,6 +3480,11 @@ document.addEventListener('keydown', (event) => {
     }
     if (!chatModelMenu.classList.contains('is-hidden')) {
       closeModelMenu({ restoreFocus: true });
+      return;
+    }
+    if (wordmarkMenuIsOpen()) {
+      setWordmarkMenuOpen(false);
+      document.getElementById('btnWordmarkSurface')?.focus();
       return;
     }
     closeConvoMenu();

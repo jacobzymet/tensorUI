@@ -1,0 +1,222 @@
+/* Bots surface chrome + speaker labels */
+.chat-shell[data-surface="bots"] .sidebar-workspace,
+.chat-shell[data-surface="bots"] #btnNewIncognitoChat,
+.chat-shell[data-surface="bots"] #newChatSplit {
+  display: none !important;
+}
+.chat-shell[data-surface="chat"] #newBotSplit { display: none !important; }
+#newBotSplit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#newBotSplit > .btn-new-chat-incognito {
+  justify-content: flex-start;
+  gap: 0.35rem;
+  padding: 0 0.7rem 0 0.65rem;
+  white-space: nowrap;
+}
+#newBotSplit > .btn-new-chat-incognito svg {
+  flex: 0 0 auto;
+  transform: none;
+}
+#newBotSplit > .btn-new-chat-main {
+  padding-right: 0.45rem;
+}
+.bot-dialog .field-prefix {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border: 1px solid var(--color-rule-2);
+  background: var(--color-paper);
+  border-radius: var(--radius-input);
+  padding: 0 0.85rem;
+  min-height: var(--control-h);
+  transition: border-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out);
+}
+.bot-dialog .field-prefix:hover { border-color: var(--color-muted); }
+.bot-dialog .field-prefix:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: var(--ring);
+}
+.bot-dialog .field-prefix > span { color: var(--color-muted); font-weight: 650; }
+.bot-dialog .field-prefix input {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  outline: none;
+  box-shadow: none;
+  border-radius: 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.35rem 0;
+}
+.bot-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 14rem;
+  overflow: auto;
+}
+.bot-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-2);
+  cursor: pointer;
+}
+.bot-pick-handle { display: block; font-weight: 650; color: var(--color-ink); }
+.bot-pick-desc { display: block; color: var(--color-muted); font-size: var(--text-sm); }
+.bot-pick-empty { color: var(--color-muted); font-size: var(--text-sm); }
+.msg-speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--color-muted);
+  margin: 0 0 0.28rem 0.12rem;
+}
+.msg-role-user .msg-speaker {
+  text-align: right;
+  align-self: flex-end;
+  margin-right: 0.12rem;
+  margin-left: 0;
+}
+.msg-speaker-avatar {
+  flex: 0 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-rule) 70%, transparent);
+}
+.msg-speaker-avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.msg-speaker-name { min-width: 0; }
+
+/* Bot replies read as spoken capsules (mirror of user bubbles, left-sided). */
+.msg.is-bot-chat.msg-role-assistant {
+  align-items: flex-start;
+}
+.msg.is-bot-chat.msg-role-assistant > .msg-bubble {
+  max-width: 85%;
+  width: auto;
+  padding: 0.85rem 1.2rem;
+  border: 1px solid color-mix(in oklch, var(--color-rule) 78%, transparent);
+  border-radius: var(--radius-3xl);
+  border-bottom-left-radius: var(--radius-sm);
+  color: var(--color-ink);
+  background-image: linear-gradient(
+    160deg,
+    color-mix(in oklch, oklch(0.7 0.1 var(--bot-bubble-hue, 205)) 20%, var(--color-paper-2)),
+    color-mix(in oklch, oklch(0.7 0.1 var(--bot-bubble-hue, 205)) 9%, var(--color-paper-2))
+  );
+  box-shadow: var(--shadow-2);
+}
+.msg.is-bot-chat.msg-role-assistant > .msg-footer {
+  width: auto;
+  max-width: 85%;
+  align-self: flex-start;
+}
+.chat-main[data-background-tone] .msg.is-bot-chat.msg-role-assistant .msg-bubble,
+.chat-main[data-background-tone] .msg.is-bot-chat.msg-role-assistant .msg-bubble :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-ink);
+}
+
+.convo-item .convo-handle {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  margin-top: 0.08rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  position: relative;
+  clip-path: inset(0);
+}
+.convo-avatar {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-rule) 70%, transparent);
+}
+.convo-avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.convo-avatar.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
+  border-top-color: var(--color-accent);
+  animation: convo-spin 0.7s linear infinite;
+}
+.convo-avatar-stack {
+  width: 1.55rem;
+  height: 1.35rem;
+  overflow: visible;
+  box-shadow: none;
+  border-radius: 0;
+}
+.convo-avatar-stack .convo-avatar-piece {
+  position: absolute;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 1.5px var(--color-paper);
+}
+.convo-avatar-stack .convo-avatar-piece:first-child {
+  left: 0;
+  top: 0.15rem;
+  z-index: 1;
+}
+.convo-avatar-stack .convo-avatar-piece:last-child:not(:only-child) {
+  right: 0;
+  top: 0;
+  z-index: 2;
+}
+.convo-avatar-stack .convo-avatar-piece svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.bot-pick-avatar {
+  flex: 0 0 auto;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 50%;
+  overflow: hidden;
+  margin-top: 0.1rem;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-rule) 70%, transparent);
+}
+.bot-pick-avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.bot-pick { align-items: center; }
+.msg.is-bot-chat .mention {
+  background: color-mix(in oklch, var(--color-accent) 28%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-accent) 40%, var(--color-rule));
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.mention[data-mention] { color: var(--color-ink); font-weight: 600; }

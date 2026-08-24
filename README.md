@@ -19,8 +19,9 @@ TensorMI Harness does **not** run an inference server. You point it at a base UR
 
 - [Rust](https://www.rust-lang.org/tools/install) (for building from source)
 - [Python 3.10+](https://www.python.org/downloads/) with `ddgs` (only for web search when running from a source checkout; release archives include a standalone helper)
-- A modern web browser
 - An OpenAI-compatible or Anthropic Messages–compatible API endpoint
+
+On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`).
 
 ## Run
 
@@ -41,8 +42,16 @@ python3 -m venv .venv
 ```
 
 ```
-cargo run -- --open
+cargo run
 ```
+
+This starts the local control plane and opens **TensorMI Harness** in a native desktop window (not a browser tab).
+
+| Flag | Behavior |
+| --- | --- |
+| _(default)_ | Desktop app window |
+| `--browser` | Open in the default browser instead |
+| `--headless` | Server only (no window) |
 
 Default URL: `http://tensormi.localhost:3930`
 

@@ -179,7 +179,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   min-height: 4.5rem;
   max-height: 14rem;
   border: 1px solid var(--color-rule-2);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: var(--color-paper);
   color: var(--color-ink);
   font: inherit;
@@ -394,7 +394,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   overflow: hidden;
   background: var(--color-paper-3);
   border: 1px solid color-mix(in oklch, var(--color-rule) 65%, transparent);
-  border-radius: var(--radius-3xl);
+  border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-4);
 }
 .dialog-close {
@@ -420,7 +420,8 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   color: var(--color-ink);
   background: var(--surface-active);
 }
-.dialog.project-dialog {
+.dialog.project-dialog,
+.dialog.bot-dialog {
   position: relative;
   width: min(40rem, calc(100vw - 2rem));
   height: min(36rem, calc(100vh - 2rem));
@@ -430,8 +431,12 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   overflow: hidden;
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-4);
+}
+.dialog.bot-dialog {
+  height: auto;
+  max-height: min(36rem, calc(100vh - 2rem));
 }
 .project-dialog-main {
   display: flex;
@@ -441,11 +446,13 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   flex: 1 1 auto;
   background: var(--color-paper);
 }
-.project-dialog .settings-scroll {
+.project-dialog .settings-scroll,
+.bot-dialog .settings-scroll {
   flex: 1 1 auto;
   padding: 1.35rem 3rem 1.25rem 1.75rem;
 }
-.project-dialog .dialog-actions {
+.project-dialog .dialog-actions,
+.bot-dialog .dialog-actions {
   justify-content: flex-end;
 }
 .project-dialog-danger {
@@ -461,6 +468,9 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   .dialog.project-dialog {
     height: min(90vh, 40rem);
   }
+  .dialog.bot-dialog {
+    max-height: min(90vh, 40rem);
+  }
 }
 .dialog.unlock-dialog {
   position: relative;
@@ -471,7 +481,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   gap: 0.85rem;
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-4);
 }
 .unlock-dialog .settings-pane-title { margin-bottom: 0; }
@@ -526,7 +536,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   overflow: hidden;
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-4);
 }
 .search-dialog-head {
@@ -574,7 +584,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   margin: 0.35rem 0.35rem 0.15rem;
   font-size: var(--text-xs);
   letter-spacing: 0.06em;
-        color: var(--color-muted);
+  color: var(--color-muted);
   font-family: var(--font-mono);
 }
 .search-dialog-item {
@@ -583,7 +593,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   background: transparent;
   color: var(--color-ink);
   text-align: left;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   padding: 0.6rem 0.85rem;
   cursor: pointer;
   display: grid;
@@ -626,7 +636,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.09em;
-        color: var(--color-muted);
+  color: var(--color-muted);
   font-family: var(--font-mono);
 }
 .settings-nav-group:first-child { margin-top: 0.15rem; }

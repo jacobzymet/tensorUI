@@ -204,11 +204,11 @@
   color: var(--color-accent);
 }
 .agent-step-head + .agent-step-note,
-.agent-step-head + .agent-step-detail,
-.agent-step-head + .agent-step-await {
+.agent-step-head + .agent-step-detail {
   margin-top: 0.38rem;
 }
 .agent-step-await {
+  margin-top: 0.65rem;
   height: 2px;
   border-radius: 1px;
   overflow: hidden;
@@ -453,7 +453,7 @@
   z-index: 20;
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-menu);
   box-shadow: var(--shadow-3);
   padding: 0.35rem;
   max-height: 13rem;
@@ -465,7 +465,7 @@
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-        color: var(--color-muted);
+  color: var(--color-muted);
 }
 .mention-option {
   width: 100%;
@@ -477,7 +477,7 @@
   border: 0;
   background: transparent;
   color: var(--color-ink);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   padding: 0.5rem 0.8rem;
   cursor: pointer;
   font: inherit;

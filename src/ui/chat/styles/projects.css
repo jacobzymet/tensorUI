@@ -269,11 +269,11 @@
      provider badge here only — every row in the open menu still shows it. */
   .chat-model-select-wrap > .chat-model-origin-pill { display: none !important; }
   .chat-model-select-wrap {
-    width: min(9.25rem, 74vw);
+    width: max-content;
     min-width: 0;
-    max-width: 74vw;
+    max-width: min(12rem, 74vw);
   }
-  .chat-model-select { max-width: none; }
+  .chat-model-select { max-width: min(10.5rem, 68vw); }
   /* Buy back space so + / Think stay on one row a bit longer. */
   .composer-tools { gap: 0.25rem; }
   .composer-tools .btn-think { padding: 0 0.55rem; }
