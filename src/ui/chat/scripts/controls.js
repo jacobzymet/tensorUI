@@ -94,8 +94,6 @@ function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
     rememberHandledLiveTurn(stream.turnId);
     if (cancelServer && !soft) noteLiveTurnUserCancel(convoId, stream.turnId);
     try { stream.controller.abort(); } catch { /* ignore */ }
-    // Tear down the live bubble immediately so finalize cannot paint "No response."
-    // Soft injects keep a partial reply when one exists (finalize path).
     if (cancelServer && !soft) {
       if (typeof discardLiveStreamRow === 'function') discardLiveStreamRow(stream);
       else {
@@ -103,6 +101,7 @@ function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
         stream.dom?.row?.remove();
         stream.dom = null;
       }
+      if (activeStreams.get(convoId) === stream) activeStreams.delete(convoId);
     }
   } else if (cancelServer && !soft) {
     noteLiveTurnUserCancel(convoId, null);
@@ -682,6 +681,7 @@ function saveQueuedMessageEdit(row, rawText) {
 
 function dispatchOutboundTurn(convo, item) {
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   const previousTitle = convo.title;
   const userMessage = {
     role: 'user',

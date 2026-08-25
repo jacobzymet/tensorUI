@@ -1,2 +1,0 @@
-# Python companion used only by the web_search agent capability.
-ddgs==9.14.4

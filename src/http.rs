@@ -137,6 +137,51 @@ pub fn public_client() -> Client {
         .clone()
 }
 
+static SEARCH_CLIENT: OnceLock<Client> = OnceLock::new();
+static BING_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn with_search_tls(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    #[cfg(target_os = "macos")]
+    {
+        builder.use_native_tls()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder
+    }
+}
+
+pub fn search_client() -> Client {
+    SEARCH_CLIENT
+        .get_or_init(|| {
+            with_search_tls(
+                Client::builder()
+                    .connect_timeout(Duration::from_secs(2))
+                    .timeout(Duration::from_secs(8))
+                    .user_agent(BROWSER_UA)
+                    .cookie_store(true),
+            )
+            .build()
+            .expect("reqwest search client")
+        })
+        .clone()
+}
+
+pub fn bing_client() -> Client {
+    BING_CLIENT
+        .get_or_init(|| {
+            with_search_tls(
+                Client::builder()
+                    .connect_timeout(Duration::from_secs(2))
+                    .timeout(Duration::from_secs(8))
+                    .user_agent(BROWSER_UA),
+            )
+            .build()
+            .expect("reqwest bing client")
+        })
+        .clone()
+}
+
 /// Blocking client for one-off local focus pings.
 pub fn app_blocking_client(timeout: Duration) -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()

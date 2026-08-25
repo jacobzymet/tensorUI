@@ -1,1 +1,1 @@
-Search the public web via DuckDuckGo and read result pages. Use when the user wants you to look something up and has not given a specific URL.
+Search the public web. Pass {"query": "..."}. Returns ranked titles, URLs, and snippets. Keep useful quoted phrases. Use fetch_url to read a specific page.

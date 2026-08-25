@@ -8,6 +8,7 @@ pub const ORB_JS: &str = include_str!("../ui/orb.js");
 pub const HIGHLIGHT_JS: &str = include_str!("../ui/vendor/highlight.min.js");
 pub const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 pub const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
+pub const OPTIONAL_FONTS_JS: &str = include_str!("../ui/optional-fonts.js");
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/browser-favicon.png");
 pub const UI_MARK_DARK_PNG: &[u8] = include_bytes!("../../assets/icon-darkmode.png");
 pub const UI_MARK_LIGHT_PNG: &[u8] = include_bytes!("../../assets/icon-lightmode.png");
@@ -15,6 +16,17 @@ pub const UI_MARK_LIGHT_PNG: &[u8] = include_bytes!("../../assets/icon-lightmode
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_ui_does_not_block_paint_on_google_fonts() {
+        for html in [CHAT_HTML, SETTINGS_HTML] {
+            assert!(!html.contains("fonts.googleapis.com"));
+            assert!(!html.contains("fonts.gstatic.com"));
+            assert!(html.contains("/optional-fonts.js"));
+        }
+        assert!(OPTIONAL_FONTS_JS.contains("fonts.googleapis.com"));
+        assert!(OPTIONAL_FONTS_JS.contains("media = 'print'"));
+    }
 
     #[test]
     fn chat_ui_does_not_write_application_state_to_local_storage() {

@@ -348,6 +348,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
 .think-stream .md-code-block,
 .think-body .md-code-block { margin: 0 0 0.55rem; }
 @keyframes agent-step-spin {
+  from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 

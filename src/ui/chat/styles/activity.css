@@ -72,7 +72,6 @@
   border-radius: 50%;
   border: 1.5px solid color-mix(in oklch, var(--color-accent) 22%, transparent);
   border-top-color: var(--color-accent);
-  animation: agent-step-spin 0.75s linear infinite;
   box-sizing: border-box;
 }
 .agent-step.is-live .agent-step-dot {
@@ -82,6 +81,7 @@
 }
 .agent-step.is-live .agent-step-spinner {
   display: block;
+  animation: agent-step-spin 0.75s linear infinite;
 }
 .agent-step.is-live .agent-step-check {
   display: none;
@@ -121,8 +121,11 @@
   border-color: color-mix(in oklch, var(--color-accent) 38%, var(--color-rule));
   background: color-mix(in oklch, var(--color-accent) 8%, var(--color-paper-2));
 }
-.agent-step.is-live .agent-step-card::after {
-  content: "";
+.agent-step-scan {
+  display: none;
+}
+.agent-step.is-live .agent-step-scan {
+  display: block;
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -132,8 +135,9 @@
     color-mix(in oklch, var(--color-accent) 14%, transparent) 48%,
     transparent 72%
   );
-  transform: translateX(-120%);
+  transform: translate3d(-120%, 0, 0);
   animation: agent-card-scan 2.4s var(--ease-in-out) infinite;
+  will-change: transform;
 }
 .agent-step-head {
   display: flex;
@@ -186,12 +190,8 @@
   color: var(--color-muted);
   font-variant-numeric: tabular-nums;
 }
-.agent-step-status.thinking-label {
-  font-size: var(--text-xs);
-  font-weight: 550;
-  letter-spacing: -0.01em;
-  padding: 0;
-  line-height: 1.2;
+.agent-step-status {
+  color: var(--color-accent);
 }
 .agent-step-elapsed {
   font-family: var(--font-mono);
@@ -220,7 +220,9 @@
   height: 100%;
   border-radius: inherit;
   background: var(--color-accent);
+  transform: translate3d(-130%, 0, 0);
   animation: agent-await-slide 1.15s var(--ease-in-out) infinite;
+  will-change: transform;
 }
 .agent-step.is-just-done .agent-step-card {
   animation: agent-tool-settle 420ms var(--ease-settle) both;
@@ -325,12 +327,12 @@
 .agent-step-result[open] > summary .think-chevron { transform: rotate(180deg); }
 
 @keyframes agent-card-scan {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(120%); }
+  0% { transform: translate3d(-120%, 0, 0); }
+  100% { transform: translate3d(120%, 0, 0); }
 }
 @keyframes agent-await-slide {
-  0% { transform: translateX(-130%); }
-  100% { transform: translateX(340%); }
+  0% { transform: translate3d(-130%, 0, 0); }
+  100% { transform: translate3d(340%, 0, 0); }
 }
 @keyframes agent-tool-settle {
   0% {
@@ -352,15 +354,20 @@
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .agent-step.is-live .agent-step-card::after,
+  .agent-step.is-live .agent-step-scan,
   .agent-step-await-bar,
   .agent-step.is-just-done .agent-step-card,
   .agent-step.is-just-done .agent-step-check,
   .agent-step.is-just-done .agent-step-result {
     animation: none;
   }
-  .agent-step.is-live .agent-step-card::after {
-    content: none;
+  .agent-step.is-live .agent-step-scan {
+    display: none;
+  }
+  .agent-step.is-live .agent-step-spinner {
+    display: block;
+    animation: none;
+    border-color: var(--color-accent);
   }
   .agent-step-await-bar {
     width: 100%;

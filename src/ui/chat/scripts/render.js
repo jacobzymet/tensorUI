@@ -675,6 +675,11 @@ function setTraceSidebarOpen(open, { fromUser = false } = {}) {
     if (open) traceAutoOpenedForStream = activeId;
   }
   chatShell.classList.toggle('trace-collapsed', !open);
+  if (open) {
+    window.requestAnimationFrame(() => {
+      if (traceSidebarBody) kickLiveToolMotion(traceSidebarBody);
+    });
+  }
   if (btnToggleTrace) {
     btnToggleTrace.setAttribute('aria-expanded', open ? 'true' : 'false');
     btnToggleTrace.setAttribute('aria-label', open ? 'Hide activity sidebar' : 'Show activity sidebar');
@@ -825,6 +830,95 @@ function scheduleJustSettledClear(part) {
   }, 450);
 }
 
+const liveMotionRetryByRoot = new WeakMap();
+
+function liveToolElVisible(el) {
+  if (!el || !el.isConnected) return false;
+  const sidebar = el.closest('.trace-sidebar');
+  if (sidebar) {
+    if (typeof chatShell !== 'undefined' && chatShell?.classList.contains('trace-collapsed')) return false;
+    const pane = sidebar.getBoundingClientRect();
+    if (pane.width < 8) return false;
+    const opacity = Number.parseFloat(window.getComputedStyle(sidebar).opacity);
+    if (Number.isFinite(opacity) && opacity < 0.2) return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 1 && rect.height > 0.5;
+}
+
+function kickLiveToolMotion(root) {
+  if (!root || prefersReducedMotion()) return;
+  const jobs = [
+    [
+      '.agent-step.is-live .agent-step-spinner',
+      [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
+      { duration: 750, easing: 'linear' },
+    ],
+    [
+      '.agent-step.is-live .agent-step-scan',
+      [{ transform: 'translate3d(-120%, 0, 0)' }, { transform: 'translate3d(120%, 0, 0)' }],
+      { duration: 2400, easing: 'ease-in-out' },
+    ],
+    [
+      '.agent-step.is-live .agent-step-await-bar',
+      [{ transform: 'translate3d(-130%, 0, 0)' }, { transform: 'translate3d(340%, 0, 0)' }],
+      { duration: 1150, easing: 'ease-in-out' },
+    ],
+  ];
+  const apply = () => {
+    if (!root.isConnected) return false;
+    let waitingForLayout = false;
+    jobs.forEach(([selector, frames, timing]) => {
+      root.querySelectorAll(selector).forEach((el) => {
+        if (!liveToolElVisible(el)) {
+          waitingForLayout = true;
+          return;
+        }
+        const step = el.closest('.agent-step');
+        const gen = String((step && step.dataset.toolStarted) || 'live');
+        const running = typeof el.getAnimations === 'function'
+          && el.getAnimations().some((anim) => anim.playState === 'running' && anim.currentTime > 0);
+        if (el.dataset.motionGen === gen && el.dataset.motionOn === '1' && running) return;
+        if (typeof el.getAnimations === 'function') {
+          el.getAnimations().forEach((anim) => anim.cancel());
+        }
+        el.style.animation = 'none';
+        void el.offsetWidth;
+        el.dataset.motionGen = gen;
+        el.dataset.motionOn = '1';
+        if (typeof el.animate === 'function') {
+          el.animate(frames, {
+            duration: timing.duration,
+            easing: timing.easing,
+            iterations: Infinity,
+            composite: 'replace',
+          });
+        } else {
+          el.style.animation = '';
+        }
+      });
+    });
+    return waitingForLayout;
+  };
+  const scheduleRetry = () => {
+    const tries = (liveMotionRetryByRoot.get(root) || 0) + 1;
+    if (tries > 24) {
+      liveMotionRetryByRoot.delete(root);
+      return;
+    }
+    liveMotionRetryByRoot.set(root, tries);
+    window.setTimeout(() => kickLiveToolMotion(root), 70);
+  };
+  if (apply()) {
+    scheduleRetry();
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    if (apply()) scheduleRetry();
+    else liveMotionRetryByRoot.delete(root);
+  });
+}
+
 function afterTraceTimelinePaint({ live = false, rebuilt = false } = {}) {
   if (!traceSidebarBody) return;
   if (live) {
@@ -837,6 +931,7 @@ function afterTraceTimelinePaint({ live = false, rebuilt = false } = {}) {
     const steps = traceSidebarBody.querySelectorAll(':scope > .agent-step');
     if (rebuilt && steps.length > prev) {
       for (let i = prev; i < steps.length; i += 1) {
+        if (steps[i].classList.contains('is-live')) continue;
         motionEnter(steps[i], {
           y: 10,
           duration: 240,
@@ -846,6 +941,7 @@ function afterTraceTimelinePaint({ live = false, rebuilt = false } = {}) {
     }
     traceSidebarBody.dataset.liveStepCount = String(steps.length);
     syncLiveToolClocks(traceSidebarBody);
+    kickLiveToolMotion(traceSidebarBody);
   } else {
     delete traceSidebarBody.dataset.liveStepCount;
     delete traceSidebarBody.dataset.paintKey;
@@ -1072,7 +1168,7 @@ function agentStepHtml({
   const elapsedMs = toolDurationMs({ live, startedAt, durationMs, endedAt });
   const elapsed = elapsedMs > 0 || live ? formatToolElapsed(elapsedMs) : '';
   const status = live
-    ? '<span class="agent-step-status thinking-label">' + escapeHtml(skillLiveVerb(name, { kind })) + '</span>'
+    ? '<span class="agent-step-status">' + escapeHtml(skillLiveVerb(name, { kind })) + '</span>'
     : '';
   const meta = (status || elapsed)
     ? '<span class="agent-step-meta">' + status +
@@ -1081,6 +1177,7 @@ function agentStepHtml({
     : '';
   return wrapTimelineStep(
     '<div class="agent-step-card"' + (live ? ' aria-busy="true"' : '') + '>' +
+      (live ? '<span class="agent-step-scan" aria-hidden="true"></span>' : '') +
       '<div class="agent-step-head">' +
         '<span class="agent-step-icon" aria-hidden="true">' + skillToolIcon(name, { kind }) + '</span>' +
         '<div class="agent-step-kind">' + escapeHtml(kindLabel) + '</div>' +
@@ -1363,6 +1460,7 @@ function syncProjectChrome() {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
   }
+  if (typeof renderTraceMembers === 'function') renderTraceMembers();
 }
 
 function isIncognitoContext() {
@@ -1671,8 +1769,12 @@ function convoMenuButton(label, icon, onClick, { danger = false } = {}) {
   if (danger) button.classList.add('is-danger');
   button.innerHTML = icon + '<span>' + escapeHtml(label) + '</span>';
   button.addEventListener('click', (event) => {
+    event.preventDefault();
     event.stopPropagation();
     onClick();
+  });
+  button.addEventListener('pointerdown', (event) => {
+    event.stopPropagation();
   });
   return button;
 }
@@ -1741,13 +1843,15 @@ function openConversationMenu(anchor, convo, row) {
   menu.appendChild(convoMenuButton(botsConvo && convo.botKind === 'dm' ? 'Delete bot' : 'Delete', trashIcon, () => {
     closeConvoMenu();
     if (botsConvo && convo.botKind === 'dm' && convo.botId && typeof deleteBotAndSession === 'function') {
-      deleteBotAndSession(convo.botId);
+      void deleteBotAndSession(convo.botId);
     } else {
-      deleteConversation(convo.id);
+      void deleteConversation(convo.id);
     }
   }, { danger: true }));
 
   document.body.appendChild(menu);
+  menu.addEventListener('pointerdown', (event) => event.stopPropagation());
+  menu.addEventListener('click', (event) => event.stopPropagation());
   openConvoMenu = menu;
   const rect = anchor.getBoundingClientRect();
   const top = Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8);
@@ -1755,13 +1859,7 @@ function openConversationMenu(anchor, convo, row) {
   menu.style.top = Math.max(8, top) + 'px';
   menu.style.left = Math.max(8, left) + 'px';
   menu.classList.toggle('opens-above', top < rect.top);
-  if (prefersReducedMotion()) {
-    menu.classList.add('is-open');
-  } else {
-    window.requestAnimationFrame(() => {
-      if (openConvoMenu === menu && menu.isConnected) menu.classList.add('is-open');
-    });
-  }
+  menu.classList.add('is-open');
 }
 
 function moveConversation(convoId, projectId) {
@@ -2483,6 +2581,7 @@ function cancelMessageEdit({ resumeQueue = true } = {}) {
   }
   row.classList.remove('is-editing');
   editingRow = null;
+  if (typeof updateSendEnabled === 'function') updateSendEnabled();
   if (wasQueued) {
     editingQueueId = null;
     if (activeId && queueId) {
@@ -2528,13 +2627,18 @@ function beginMessageEdit(row) {
   row.classList.add('is-editing');
   editingRow = row;
   mentionInput = input;
+  if (typeof updateSendEnabled === 'function') updateSendEnabled();
 
   const commit = () => {
     const next = input.value.trim();
-    if (!next || isConvoBusy(activeId)) return;
+    if (!next) return;
+    if (isConvoBusy(activeId)) {
+      showComposerHint('Wait for the current reply to finish, or stop it.');
+      return;
+    }
     closeMentionMenu();
     mentionInput = composerInput;
-    submitEditedMessage(row, next);
+    void submitEditedMessage(row, next);
   };
   btnCancel.addEventListener('click', cancelMessageEdit);
   btnSave.addEventListener('click', commit);
@@ -2578,11 +2682,21 @@ function beginMessageEdit(row) {
 
 async function submitEditedMessage(row, rawText) {
   const index = Number(row.dataset.msgIndex);
-  if (!Number.isInteger(index) || index < 0 || isConvoBusy(activeId) || !serverReady) return;
+  if (!Number.isInteger(index) || index < 0) return;
+  if (isConvoBusy(activeId)) {
+    showComposerHint('Wait for the current reply to finish, or stop it.');
+    return;
+  }
+  if (!serverReady) {
+    showComposerHint('Model is not ready yet. Try Send again.');
+    return;
+  }
 
   const convo = conversations.find((item) => item.id === activeId);
   if (!convo || index >= convo.messages.length) return;
   if (convo.messages[index].role !== 'user') return;
+  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
+  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
 
   const mentioned = parseCapabilityMentions(rawText);
   const text = mentioned.text;
@@ -2596,8 +2710,11 @@ async function submitEditedMessage(row, rawText) {
 
   editingRow = null;
   row.classList.remove('is-editing');
+  mentionInput = composerInput;
+  closeMentionMenu();
+  updateSendEnabled();
 
-  // Drop this turn's reply and everything after, then rewrite the user message.
+  const snapshot = convo.messages.slice();
   const priorMessage = convo.messages[index];
   const priorAttachments = Array.isArray(priorMessage.attachments)
     ? priorMessage.attachments
@@ -2608,14 +2725,12 @@ async function submitEditedMessage(row, rawText) {
   copyReplyFields(priorMessage, editedMessage);
   convo.messages[index] = editedMessage;
   if (index === 0 && !convo.titleEdited) {
-    // Provisional slug for the sidebar; real title is generated after the
-    // first assistant reply so local servers aren't hit with two requests at once.
     convo.title = provisionalTitle(text || displayText);
   }
   convo.updatedAt = Date.now();
   saveConversations();
   renderSidebar();
-  renderThread(convo);
+  renderThread(convo, { drainQueue: false });
   const mappedAttachments = priorAttachments.map((att) => ({
     ...att,
     sendMode: att.sendMode || (att.kind === 'image' && att.dataUrl && !att.extractedText ? 'native' : 'text'),
@@ -2653,7 +2768,7 @@ async function submitEditedMessage(row, rawText) {
     }, editedUser, convo.title);
     return;
   }
-  await runAssistantTurn(convo, {
+  const started = await runAssistantTurn(convo, {
     useAgent: turn.useAgent,
     text: apiText,
     skills: turn.skills,
@@ -2661,6 +2776,13 @@ async function submitEditedMessage(row, rawText) {
     deepResearchOutput: turn.deepResearchOutput,
     forceTools: turn.forceTools,
   });
+  if (started === false) {
+    convo.messages = snapshot;
+    convo.updatedAt = Date.now();
+    saveConversations();
+    renderThread(convo);
+    renderSidebar();
+  }
 }
 
 function formatTokPerSec(n) {
@@ -2958,7 +3080,7 @@ function reattachLiveStream(convo) {
   return stream;
 }
 
-function renderThread(convo) {
+function renderThread(convo, { drainQueue = true } = {}) {
   cancelMessageEdit({ resumeQueue: false });
   if (typeof isBotsConvo === 'function' && isBotsConvo(convo) && typeof isSilentNoReply === 'function') {
     const kept = (convo.messages || []).filter((message) => (
@@ -2981,7 +3103,7 @@ function renderThread(convo) {
   renderOutboundQueue(convo);
   if (reattachLiveStream(convo)) {
     scrollToBottom({ force: stickToBottom });
-    maybeSendNextQueued(convo.id);
+    if (drainQueue) maybeSendNextQueued(convo.id);
     return;
   }
   let pick = null;
@@ -2995,7 +3117,7 @@ function renderThread(convo) {
   syncTraceSelectionClasses();
   refreshTraceSidebar({ animate: false });
   scrollToBottom({ force: stickToBottom });
-  maybeSendNextQueued(convo.id);
+  if (drainQueue) maybeSendNextQueued(convo.id);
 }
 
 function renderSidebar() {
@@ -3143,8 +3265,13 @@ function startDraft({ incognito = false } = {}) {
   composerInput.focus();
 }
 
-function deleteConversation(id) {
-  if (!confirm('Delete this conversation?')) return;
+async function deleteConversation(id) {
+  const ok = await confirmDanger({
+    title: 'Delete this conversation?',
+    body: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+  });
+  if (!ok) return;
   abortStream(id);
   activeStreams.delete(id);
   const deletingEdit = editingQueueId

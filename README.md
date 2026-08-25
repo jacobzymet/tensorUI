@@ -18,28 +18,13 @@ TensorMI Harness does **not** run an inference server. You point it at a base UR
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (for building from source)
-- [Python 3.10+](https://www.python.org/downloads/) with `ddgs` (only for web search when running from a source checkout; release archives include a standalone helper)
 - An OpenAI-compatible or Anthropic Messages–compatible API endpoint
 
 On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`).
 
 ## Run
 
-Official release archives include `tensorui-search`, a standalone web-search helper containing its own Python runtime and pinned DDGS dependency. Keep it beside the main `tensorui` executable; no system Python installation is needed.
-
-When running from a source checkout, create an isolated environment and install the pinned search dependency once:
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-search.txt
-```
-
-On macOS or Linux:
-
-```bash
-python3 -m venv .venv
-./.venv/bin/python -m pip install -r requirements-search.txt
-```
+Official release archives are a single `tensorui` executable. Web search runs in the Rust process (DuckDuckGo, with international Bing as an Auto fallback); no Python helper is required.
 
 ```
 cargo run
@@ -136,11 +121,4 @@ The Rust binary embeds Chat and Server HTML, the Chat CSS/JavaScript modules, `o
 cargo build --release
 ```
 
-That command builds the Rust application only. Web search can use the source checkout's `.venv` during development. The release workflow additionally builds `src/agent/ddgs_search.py` with PyInstaller and packages the resulting `tensorui-search` helper beside the Rust executable. To reproduce that helper locally:
-
-```powershell
-.\.venv\Scripts\python -m pip install -r requirements-search-build.txt
-.\.venv\Scripts\python -m PyInstaller --noconfirm --clean --onefile --name tensorui-search --collect-all ddgs --distpath target/search-helper --workpath target/search-helper-build --specpath target src/agent/ddgs_search.py
-```
-
-On macOS/Linux, use `./.venv/bin/python` for those two commands. You can override helper discovery with `TENSORUI_SEARCH_HELPER=/path/to/tensorui-search`; otherwise TensorMI Harness checks beside its executable, the app-data `search-helper` folder, then source-development Python fallbacks.
+That command builds the full application, including native web search (DuckDuckGo, with international Bing as a fallback when Auto is selected).

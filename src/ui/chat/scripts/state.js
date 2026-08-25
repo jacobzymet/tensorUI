@@ -64,7 +64,7 @@ function syncIdentityTitles(privacyOn) {
 
 const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
 const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
-const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'brave', 'bing', 'google', 'mojeek', 'startpage', 'yahoo', 'yandex', 'wikipedia'];
+const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'bing', 'wikipedia'];
 const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
 const WEB_SEARCH_RECENCIES = ['any', 'day', 'week', 'month', 'year'];
 const DEEP_RESEARCH_MODES = ['off', 'long', 'brief'];
@@ -180,6 +180,14 @@ let voiceHintUntil = 0;
 const traceSidebar = document.getElementById('traceSidebar');
 const traceSidebarBody = document.getElementById('traceSidebarBody');
 const traceSidebarTitle = document.getElementById('traceSidebarTitle');
+const traceSidebarSplit = document.getElementById('traceSidebarSplit');
+const traceSplitHandle = document.getElementById('traceSplitHandle');
+const traceMembers = document.getElementById('traceMembers');
+const traceMembersList = document.getElementById('traceMembersList');
+const traceMembersPicker = document.getElementById('traceMembersPicker');
+const btnTraceMemberAdd = document.getElementById('btnTraceMemberAdd');
+const btnTraceActivityFold = document.getElementById('btnTraceActivityFold');
+const btnTraceMembersFold = document.getElementById('btnTraceMembersFold');
 const btnToggleTrace = document.getElementById('btnToggleTrace');
 const btnExpandTrace = document.getElementById('btnExpandTrace');
 
@@ -371,16 +379,20 @@ function motionEnter(el, { y = 14, duration = 220, delay = 0 } = {}) {
   const anim = el.animate(
     [
       { opacity: 0, transform: 'translateY(' + y + 'px)' },
-      { opacity: 1, transform: 'translateY(0)' },
+      { opacity: 1, transform: 'none' },
     ],
     {
       duration,
       delay,
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'both',
+      fill: 'backwards',
     }
   );
-  anim.finished.finally(() => el.classList.remove('motion-enter')).catch(() => {});
+  const clear = () => {
+    el.classList.remove('motion-enter');
+    try { anim.cancel(); } catch { /* ignore */ }
+  };
+  anim.finished.then(clear).catch(clear);
   return anim;
 }
 
@@ -411,6 +423,36 @@ function closeBackdrop(el) {
   };
   el.addEventListener('transitionend', onEnd);
   window.setTimeout(finish, 360);
+}
+
+let confirmDangerResolver = null;
+
+function settleConfirmDanger(ok) {
+  const resolve = confirmDangerResolver;
+  confirmDangerResolver = null;
+  const modal = document.getElementById('confirmModal');
+  if (modal) closeBackdrop(modal);
+  if (resolve) resolve(!!ok);
+}
+
+function confirmDanger({ title, body, confirmLabel = 'Delete' } = {}) {
+  const modal = document.getElementById('confirmModal');
+  if (!modal) return Promise.resolve(window.confirm(body || title || 'Are you sure?'));
+  if (confirmDangerResolver) settleConfirmDanger(false);
+  const titleEl = document.getElementById('confirmModalTitle');
+  const bodyEl = document.getElementById('confirmModalBody');
+  const okBtn = document.getElementById('btnConfirmModalOk');
+  if (titleEl) titleEl.textContent = title || 'Are you sure?';
+  if (bodyEl) {
+    bodyEl.textContent = body || '';
+    bodyEl.classList.toggle('is-hidden', !body);
+  }
+  if (okBtn) okBtn.textContent = confirmLabel;
+  return new Promise((resolve) => {
+    confirmDangerResolver = resolve;
+    openBackdrop(modal);
+    window.requestAnimationFrame(() => okBtn?.focus());
+  });
 }
 
 function applyTheme(theme) {

@@ -1233,7 +1233,7 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
   box-shadow: var(--shadow-3);
   padding: 0.35rem;
   opacity: 0;
-  pointer-events: none;
+  pointer-events: auto;
   transform: translateY(-4px) scale(0.985);
   transform-origin: top right;
   transition:

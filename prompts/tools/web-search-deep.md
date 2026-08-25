@@ -1,1 +1,1 @@
-Search the public web or news and read result pages. Vary query wording, engine (backend), recency, and kind=news while investigating. Prefer many distinct searches over repeating the same query.
+Search the public web. Pass {"query": "..."}. Returns ranked titles, URLs, and snippets. Vary query wording across calls; keep useful quoted phrases. Then fetch_url promising pages.

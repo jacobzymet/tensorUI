@@ -2,12 +2,11 @@
 //! XML `<tool_call>` in content is accepted only as a fallback for local models.
 
 pub mod chat;
+pub mod search;
 pub mod skills;
 
 use std::{
     collections::{HashMap, HashSet},
-    io::ErrorKind,
-    process::Stdio,
     sync::{Mutex, OnceLock},
     time::Duration,
 };
@@ -15,8 +14,6 @@ use std::{
 use futures_util::{StreamExt, future::join_all};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
@@ -171,10 +168,6 @@ const MAX_PAGE_BYTES: u64 = 1_500_000;
 const DEFAULT_FETCH_URL_MAX_CHARS: usize = 8_000;
 const MIN_PAGE_FETCH_CHARS: usize = 1_000;
 const MAX_PAGE_FETCH_CHARS: usize = 200_000;
-const DDGS_TIMEOUT: Duration = Duration::from_secs(12);
-/// Retry flaky DDGS calls before handing a soft failure back to the model.
-const DDGS_ATTEMPTS: usize = 2;
-const DDGS_RETRY_DELAY_MS: u64 = 250;
 const PAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,25 +265,9 @@ pub enum WebSearchBackend {
     Mojeek,
     Startpage,
     Yahoo,
+    /// Accepted for saved settings only; searches are remapped away from Yandex.
     Yandex,
     Wikipedia,
-}
-
-impl WebSearchBackend {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Duckduckgo => "duckduckgo",
-            Self::Brave => "brave",
-            Self::Bing => "bing",
-            Self::Google => "google",
-            Self::Mojeek => "mojeek",
-            Self::Startpage => "startpage",
-            Self::Yahoo => "yahoo",
-            Self::Yandex => "yandex",
-            Self::Wikipedia => "wikipedia",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -917,7 +894,7 @@ async fn run_agent_loop(
                     // back so the model can reformulate and continue researching.
                     let guidance = if call.name == "web_search" {
                         format!(
-                            "{err}\n\nSearch failed. Do not stop. Try again with a different query (drop speculative dates), another backend, or kind=news vs web."
+                            "{err}\n\nSearch did not return results. You may try one simpler query, or continue without live sources."
                         )
                     } else {
                         format!(
@@ -1189,7 +1166,6 @@ fn agent_system_block(
         let mut web_line = fill(
             agent::WEB_SEARCH,
             &[
-                ("backend", skills.web_search_backend.as_str()),
                 ("region", &region),
                 ("safesearch", skills.web_search_safesearch.as_str()),
                 ("recency", &recency_note),
@@ -1721,18 +1697,6 @@ fn openai_tools_payload(
                         "query": {
                             "type": "string",
                             "description": "Search terms"
-                        },
-                        "backend": {
-                            "type": "string",
-                            "description": "Optional engine override: auto, duckduckgo, brave, bing, google, mojeek, startpage, yahoo, yandex, wikipedia"
-                        },
-                        "recency": {
-                            "type": "string",
-                            "description": "Optional recency: any, day, week, month, year"
-                        },
-                        "kind": {
-                            "type": "string",
-                            "description": "web (default) or news"
                         }
                     },
                     "required": ["query"]
@@ -2172,7 +2136,7 @@ async fn execute_tool(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
             let (search_skills, kind) = search_call_overrides(skills, &call.arguments);
-            let (result, note) = ddgs_web_search(query, &search_skills, kind).await?;
+            let (result, note) = run_web_search(query, &search_skills, kind).await?;
             let ui_result = result.clone();
             let mut model_result = result;
             if skills.fetch_url {
@@ -2303,18 +2267,6 @@ struct SearchHit {
     snippet: String,
 }
 
-#[derive(Deserialize)]
-struct DdgsSearchResponse {
-    results: Vec<DdgsSearchHit>,
-}
-
-#[derive(Deserialize)]
-struct DdgsSearchHit {
-    title: String,
-    url: String,
-    snippet: String,
-}
-
 fn parse_enum_arg<T: for<'de> Deserialize<'de>>(args: &Value, key: &str) -> Option<T> {
     let raw = args.get(key)?.as_str()?.trim();
     if raw.is_empty() {
@@ -2335,354 +2287,31 @@ fn search_call_overrides(skills: &AgentSkills, args: &Value) -> (AgentSkills, We
     (next, kind)
 }
 
-async fn ddgs_web_search(
+async fn run_web_search(
     query: &str,
     skills: &AgentSkills,
     kind: WebSearchKind,
 ) -> Result<(String, String), String> {
     let result_count = skills.search_result_count();
-    let mut last_error = None::<String>;
-
-    for attempt in 1..=DDGS_ATTEMPTS {
-        match ddgs_search_hits(query, skills, kind).await {
-            Ok(hits) if !hits.is_empty() => {
-                let kind_label = kind.label();
-                let mut out = format!(
-                    "{} search results for {query:?} (DDGS, {kind_label}, {}, {}, {}):\n",
-                    if kind == WebSearchKind::News {
-                        "News"
-                    } else {
-                        "Web"
-                    },
-                    skills.web_search_backend.as_str(),
-                    skills.search_region(),
-                    skills.web_search_safesearch.as_str(),
-                );
-                for (index, hit) in hits.iter().take(result_count).enumerate() {
-                    out.push_str(&format!(
-                        "\n{}. {}\n   URL: {}\n   {}\n",
-                        index + 1,
-                        hit.title,
-                        hit.url,
-                        hit.snippet
-                    ));
-                }
-                append_scraped_pages(&mut out, &hits, skills).await;
-                return Ok((
-                    out,
-                    format!(
-                        "via DDGS · {kind_label} · {}",
-                        skills.web_search_backend.as_str()
-                    ),
-                ));
-            }
-            Ok(_) => {
-                last_error = Some("No results found.".into());
-            }
-            Err(error) => {
-                last_error = Some(error);
-            }
-        }
-        if attempt < DDGS_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(DDGS_RETRY_DELAY_MS * attempt as u64)).await;
-        }
-    }
-
-    let detail = last_error.unwrap_or_else(|| "unknown search error".into());
-    // Soft failure: caller / agent loop should keep going with a reformulated query.
-    Err(format!(
-        "DDGS search failed after {DDGS_ATTEMPTS} attempts: {detail}"
-    ))
-}
-
-async fn ddgs_search_hits(
-    query: &str,
-    skills: &AgentSkills,
-    kind: WebSearchKind,
-) -> Result<Vec<SearchHit>, String> {
-    let result_count = skills.search_result_count();
-    let request = serde_json::to_vec(&json!({
-        "protocol": 1,
-        "query": query,
-        "max_results": result_count,
-        "backend": skills.web_search_backend.as_str(),
-        "region": skills.search_region(),
-        "safesearch": skills.web_search_safesearch.as_str(),
-        "recency": skills.web_search_recency.as_str(),
-        "kind": kind.label(),
-    }))
-    .map_err(|error| format!("Could not encode DDGS request: {error}"))?;
-
-    let mut candidates: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
-    let helper_name = if cfg!(windows) {
-        "tensorui-search.exe"
-    } else {
-        "tensorui-search"
-    };
-
-    // Release archives ship a self-contained helper beside TensorMI Harness. The env
-    // override and app-data location also leave room for managed/helper updates.
-    if let Some(path) = std::env::var_os("TENSORUI_SEARCH_HELPER").filter(|v| !v.is_empty()) {
-        candidates.push((path.into(), Vec::new()));
-    }
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(directory) = executable.parent()
-    {
-        candidates.push((directory.join(helper_name), Vec::new()));
-    }
-    candidates.push((
-        crate::store::data_dir()
-            .join("search-helper")
-            .join(helper_name),
-        Vec::new(),
-    ));
-
-    // Source-development fallback. Unlike CARGO_MANIFEST_DIR, this does not
-    // bake a developer machine's absolute repository path into release builds.
-    let working_directory = std::env::current_dir().unwrap_or_else(|_| ".".into());
-    if cfg!(windows) {
-        candidates.push((
-            working_directory
-                .join(".venv")
-                .join("Scripts")
-                .join("python.exe"),
-            vec!["-c".into(), include_str!("ddgs_search.py").into()],
-        ));
-        candidates.push((
-            "py".into(),
-            vec![
-                "-3".into(),
-                "-c".into(),
-                include_str!("ddgs_search.py").into(),
-            ],
-        ));
-        candidates.push((
-            "python".into(),
-            vec!["-c".into(), include_str!("ddgs_search.py").into()],
-        ));
-    } else {
-        candidates.push((
-            working_directory.join(".venv").join("bin").join("python"),
-            vec!["-c".into(), include_str!("ddgs_search.py").into()],
-        ));
-        candidates.push((
-            "python3".into(),
-            vec!["-c".into(), include_str!("ddgs_search.py").into()],
-        ));
-    }
-
-    let mut found_runtime = false;
-    let mut missing_ddgs = false;
-    let mut unsupported_python = false;
-    let mut missing_python_runtime = false;
-    let mut runtime_error = None;
-    for (program, prefix) in candidates {
-        let child = Command::new(&program)
-            .args(prefix)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn();
-
-        let mut child = match child {
-            Ok(child) => {
-                found_runtime = true;
-                child
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(format!("Could not start {}: {error}", program.display()));
-            }
-        };
-
-        let mut stdin = child.stdin.take().ok_or_else(|| {
-            format!(
-                "Could not open stdin for search helper {}",
-                program.display()
-            )
-        })?;
-        stdin
-            .write_all(&request)
-            .await
-            .map_err(|error| format!("Could not send request to {}: {error}", program.display()))?;
-        drop(stdin);
-
-        let output = match timeout(DDGS_TIMEOUT, child.wait_with_output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(error)) => {
-                runtime_error = Some(format!(
-                    "Search helper {} failed: {error}",
-                    program.display()
-                ));
-                continue;
-            }
-            Err(_) => {
-                runtime_error = Some(format!(
-                    "DDGS search timed out after {} seconds.",
-                    DDGS_TIMEOUT.as_secs()
-                ));
-                continue;
-            }
-        };
-
-        if output.status.success() {
-            let response: DdgsSearchResponse = serde_json::from_slice(&output.stdout)
-                .map_err(|error| format!("Invalid DDGS response: {error}"))?;
-            return Ok(response
-                .results
-                .into_iter()
-                .filter(|hit| !hit.title.trim().is_empty() && scrapeable_url(&hit.url))
-                .take(result_count)
-                .map(|hit| SearchHit {
-                    title: hit.title,
-                    url: hit.url,
-                    snippet: hit.snippet,
-                })
-                .collect());
-        }
-
-        let detail = String::from_utf8_lossy(&output.stderr);
-        if detail.contains("TENSORUI_DDGS_NOT_INSTALLED") {
-            missing_ddgs = true;
-            continue;
-        }
-        if detail.contains("TENSORUI_DDGS_PYTHON_VERSION") {
-            unsupported_python = true;
-            continue;
-        }
-        let lower_detail = detail.to_ascii_lowercase();
-        if lower_detail.contains("no installed python found")
-            || lower_detail.contains("python was not found")
-            || lower_detail.contains("no suitable python runtime found")
-        {
-            missing_python_runtime = true;
-            continue;
-        }
-        let message = detail
-            .strip_prefix("TENSORUI_DDGS_ERROR:")
-            .unwrap_or(detail.trim())
-            .trim();
-        runtime_error = Some(truncate_chars(message, 360));
-    }
-
-    if let Some(error) = runtime_error {
-        return Err(format!("DDGS search failed: {error}"));
-    }
-    if missing_ddgs {
-        return Err(ddgs_setup_message("The `ddgs` package is not installed."));
-    }
-    if unsupported_python {
-        return Err(ddgs_setup_message("Python 3.10 or newer is required."));
-    }
-    if missing_python_runtime {
-        return Err(ddgs_setup_message(
-            "The bundled search helper was not found and Python was not available.",
-        ));
-    }
-    if !found_runtime {
-        return Err(ddgs_setup_message(
-            "The bundled search helper and a compatible Python runtime were not found.",
-        ));
-    }
-    Err(ddgs_setup_message(
-        "No usable search helper or Python installation was found.",
-    ))
-}
-
-fn ddgs_setup_message(reason: &str) -> String {
-    format!(
-        "{reason} Official release archives include `tensorui-search` beside the main executable. For a source checkout, install Python 3.10+ and set up DDGS: Windows: `py -3 -m venv .venv` then `.venv\\Scripts\\python -m pip install -r requirements-search.txt`; macOS/Linux: `python3 -m venv .venv` then `./.venv/bin/python -m pip install -r requirements-search.txt`."
-    )
-}
-
-/* Retired direct DuckDuckGo HTTP implementation. DDGS now owns provider selection,
-request handling, parsing, and failover.
-#[derive(Debug, Clone, Copy)]
-enum SearchBackend {
-    Lite,
-    Html,
-    InstantAnswer { html_blocked: bool },
-}
-
-impl SearchBackend {
-    fn ui_note(self) -> &'static str {
-        match self {
-            Self::Lite => "via DuckDuckGo Lite",
-            Self::Html => "via DuckDuckGo",
-            Self::InstantAnswer { html_blocked: true } => {
-                "fell back to Instant Answer (HTML search blocked)"
-            }
-            Self::InstantAnswer {
-                html_blocked: false,
-            } => "fell back to Instant Answer (no HTML results)",
-        }
-    }
-
-    fn result_label(self) -> &'static str {
-        match self {
-            Self::Lite => "DuckDuckGo Lite",
-            Self::Html => "DuckDuckGo",
-            Self::InstantAnswer { html_blocked: true } => {
-                "DuckDuckGo Instant Answer — HTML search blocked"
-            }
-            Self::InstantAnswer {
-                html_blocked: false,
-            } => "DuckDuckGo Instant Answer — no HTML results",
-        }
-    }
-}
-
-async fn duckduckgo_search(
-    query: &str,
-    depth: WebSearchDepth,
-) -> Result<(String, String), String> {
-    // Prefer HTML results, but never try to defeat DDG captchas — fall through to
-    // Instant Answer (official keyless JSON API) when the HTML endpoints challenge us.
-    let mut blocked = false;
-    let mut hits = Vec::new();
-    let mut backend = SearchBackend::Lite;
-
-    match duckduckgo_html_hits(query, "https://lite.duckduckgo.com/lite/", true).await {
-        Ok(parsed) if !parsed.is_empty() => {
-            hits = parsed;
-            backend = SearchBackend::Lite;
-        }
-        Ok(_) => {}
-        Err(DuckHtmlError::Blocked) => blocked = true,
-        Err(DuckHtmlError::Other) => {}
-    }
-
+    let (hits, engine) = search::search_web(query, skills, kind).await?;
+    let kind_label = kind.label();
     if hits.is_empty() {
-        match duckduckgo_html_hits(query, "https://html.duckduckgo.com/html/", false).await {
-            Ok(parsed) if !parsed.is_empty() => {
-                hits = parsed;
-                backend = SearchBackend::Html;
-            }
-            Ok(_) => {}
-            Err(DuckHtmlError::Blocked) => blocked = true,
-            Err(DuckHtmlError::Other) => {}
-        }
+        return Ok((
+            format!("No results found for {query:?}."),
+            format!("via {kind_label} · {engine}"),
+        ));
     }
-
-    if hits.is_empty() {
-        backend = SearchBackend::InstantAnswer {
-            html_blocked: blocked,
-        };
-        return match duckduckgo_instant_answer(query, depth, backend).await {
-            Ok(out) => Ok((out, backend.ui_note().to_string())),
-            Err(ia_err) if blocked => Err(format!(
-                "DuckDuckGo challenged the HTML search (captcha/bot check) and Instant Answer also failed: {ia_err}"
-            )),
-            Err(ia_err) => Err(ia_err),
-        };
-    }
-
     let mut out = format!(
-        "Web search results for {query:?} ({}):\n",
-        backend.result_label()
+        "{} search results for {query:?} ({engine}, {}, {}):\n",
+        if kind == WebSearchKind::News {
+            "News"
+        } else {
+            "Web"
+        },
+        skills.search_region(),
+        skills.web_search_safesearch.as_str(),
     );
-    for (index, hit) in hits.iter().take(MAX_SEARCH_RESULTS).enumerate() {
+    for (index, hit) in hits.iter().take(result_count).enumerate() {
         out.push_str(&format!(
             "\n{}. {}\n   URL: {}\n   {}\n",
             index + 1,
@@ -2691,171 +2320,10 @@ async fn duckduckgo_search(
             hit.snippet
         ));
     }
-    append_scraped_pages(&mut out, &hits, depth).await;
-    Ok((out, backend.ui_note().to_string()))
+    append_scraped_pages(&mut out, &hits, skills).await;
+    Ok((out, format!("via {kind_label} · {engine}")))
 }
 
-#[derive(Debug)]
-enum DuckHtmlError {
-    Blocked,
-    Other,
-}
-
-async fn duckduckgo_html_hits(
-    query: &str,
-    endpoint: &str,
-    lite: bool,
-) -> Result<Vec<SearchHit>, DuckHtmlError> {
-    let client = http::public_client();
-    let response = if lite {
-        apply_browser_page_headers(
-            client
-                .get(endpoint)
-                .timeout(SEARCH_TIMEOUT)
-                .query(&[("q", query)]),
-        )
-        .send()
-        .await
-        .map_err(|_| DuckHtmlError::Other)?
-    } else {
-        match apply_browser_page_headers(
-            client
-                .post(endpoint)
-                .timeout(SEARCH_TIMEOUT),
-        )
-        .form(&[("q", query), ("b", "")])
-        .send()
-        .await
-        {
-            Ok(response) => response,
-            Err(_) => apply_browser_page_headers(
-                client
-                    .get(endpoint)
-                    .timeout(SEARCH_TIMEOUT)
-                    .query(&[("q", query)]),
-            )
-            .send()
-            .await
-            .map_err(|_| DuckHtmlError::Other)?,
-        }
-    };
-
-    let status = response.status().as_u16();
-    if status != 200 && status != 202 {
-        return Err(DuckHtmlError::Other);
-    }
-
-    let html = response.text().await.map_err(|_| DuckHtmlError::Other)?;
-
-    if html.contains("anomaly.js") || html.contains("Please complete the captcha") {
-        return Err(DuckHtmlError::Blocked);
-    }
-
-    let hits = if lite {
-        parse_ddg_lite_html(&html)
-    } else {
-        parse_ddg_html(&html)
-    };
-    Ok(hits)
-}
-
-async fn duckduckgo_instant_answer(
-    query: &str,
-    depth: WebSearchDepth,
-    backend: SearchBackend,
-) -> Result<String, String> {
-    let client = http::public_client();
-    let response = client
-        .get("https://api.duckduckgo.com/")
-        .timeout(SEARCH_TIMEOUT)
-        .query(&[
-            ("q", query),
-            ("format", "json"),
-            ("no_html", "1"),
-            ("skip_disambig", "1"),
-        ])
-        .send()
-        .await
-        .map_err(|error| format!("DuckDuckGo Instant Answer failed: {error}"))?;
-
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("Invalid Instant Answer JSON: {error}"))?;
-
-    let mut lines = vec![format!(
-        "Web search results for {query:?} ({}):",
-        backend.result_label()
-    )];
-    let mut hits = Vec::new();
-    if let Some(text) = body.get("AbstractText").and_then(|v| v.as_str())
-        && !text.is_empty()
-    {
-        let url = body
-            .get("AbstractURL")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        lines.push(format!("\nSummary: {text}"));
-        if !url.is_empty() {
-            lines.push(format!("Source: {url}"));
-            hits.push(SearchHit {
-                title: "Abstract".into(),
-                url: url.to_string(),
-                snippet: text.to_string(),
-            });
-        }
-    }
-
-    let mut count = 0usize;
-    if let Some(topics) = body.get("RelatedTopics").and_then(|v| v.as_array()) {
-        for topic in topics {
-            if count >= MAX_SEARCH_RESULTS {
-                break;
-            }
-            if let Some(text) = topic.get("Text").and_then(|v| v.as_str()) {
-                let url = topic.get("FirstURL").and_then(|v| v.as_str()).unwrap_or("");
-                count += 1;
-                lines.push(format!("\n{count}. {text}"));
-                if !url.is_empty() {
-                    lines.push(format!("   URL: {url}"));
-                    hits.push(SearchHit {
-                        title: format!("Related {count}"),
-                        url: url.to_string(),
-                        snippet: text.to_string(),
-                    });
-                }
-            } else if let Some(nested) = topic.get("Topics").and_then(|v| v.as_array()) {
-                for item in nested {
-                    if count >= MAX_SEARCH_RESULTS {
-                        break;
-                    }
-                    if let Some(text) = item.get("Text").and_then(|v| v.as_str()) {
-                        let url = item.get("FirstURL").and_then(|v| v.as_str()).unwrap_or("");
-                        count += 1;
-                        lines.push(format!("\n{count}. {text}"));
-                        if !url.is_empty() {
-                            lines.push(format!("   URL: {url}"));
-                            hits.push(SearchHit {
-                                title: format!("Related {count}"),
-                                url: url.to_string(),
-                                snippet: text.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if lines.len() == 1 {
-        lines.push("\nNo results found.".into());
-    }
-    let mut out = lines.join("\n");
-    append_scraped_pages(&mut out, &hits, depth).await;
-    Ok(out)
-}
-
-*/
 async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &AgentSkills) {
     let Some((page_count, max_chars)) = skills.search_scrape_plan() else {
         return;
@@ -3086,123 +2554,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
-/* Retired direct DuckDuckGo HTML parsers.
-fn parse_ddg_html(html: &str) -> Vec<SearchHit> {
-    let mut hits = Vec::new();
-    let mut rest = html;
-    while let Some(idx) = rest.find("result__a") {
-        rest = &rest[idx..];
-        let href = match attr_after(rest, "href=\"") {
-            Some(v) => v,
-            None => {
-                rest = &rest[1..];
-                continue;
-            }
-        };
-        let title_html = match between(rest, ">", "</a>") {
-            Some(v) => v,
-            None => {
-                rest = &rest[1..];
-                continue;
-            }
-        };
-        let title = collapse_ws(&strip_tags(title_html));
-        let url = decode_ddg_href(href);
-        let snippet = rest
-            .find("result__snippet")
-            .and_then(|s| {
-                let slice = &rest[s..];
-                let window = &slice[..slice.len().min(1200)];
-                between(window, ">", "</")
-                    .map(strip_tags)
-                    .map(|s| collapse_ws(&s))
-            })
-            .unwrap_or_default();
-
-        if !title.is_empty() && !url.is_empty() {
-            hits.push(SearchHit {
-                title,
-                url,
-                snippet,
-            });
-        }
-        if hits.len() >= MAX_SEARCH_RESULTS {
-            break;
-        }
-        rest = &rest[1..];
-    }
-    hits
-}
-
-/// Lite results use plain result-link anchors rather than `result__a`.
-fn parse_ddg_lite_html(html: &str) -> Vec<SearchHit> {
-    let mut hits = Vec::new();
-    let mut rest = html;
-    while let Some(idx) = rest.find("class=\"result-link\"") {
-        let window_start = rest[..idx].rfind('<').unwrap_or(idx);
-        rest = &rest[window_start..];
-        let href = match attr_after(rest, "href=\"") {
-            Some(v) => v,
-            None => {
-                rest = &rest[1..];
-                continue;
-            }
-        };
-        let title_html = match between(rest, ">", "</a>") {
-            Some(v) => v,
-            None => {
-                rest = &rest[1..];
-                continue;
-            }
-        };
-        let title = collapse_ws(&strip_tags(title_html));
-        let url = decode_ddg_href(href);
-        let snippet = rest
-            .find("class=\"result-snippet\"")
-            .and_then(|s| {
-                let slice = &rest[s..];
-                let window = &slice[..slice.len().min(1200)];
-                between(window, ">", "</td>")
-                    .or_else(|| between(window, ">", "</"))
-                    .map(strip_tags)
-                    .map(|s| collapse_ws(&s))
-            })
-            .unwrap_or_default();
-        if !title.is_empty()
-            && !url.is_empty()
-            && (url.starts_with("http://") || url.starts_with("https://"))
-        {
-            hits.push(SearchHit {
-                title,
-                url,
-                snippet,
-            });
-        }
-        if hits.len() >= MAX_SEARCH_RESULTS {
-            break;
-        }
-        rest = &rest[1..];
-    }
-    if hits.is_empty() {
-        // Older lite markup sometimes omits result-link class.
-        return parse_ddg_html(html);
-    }
-    hits
-}
-
-fn attr_after<'a>(s: &'a str, key: &str) -> Option<&'a str> {
-    let start = s.find(key)? + key.len();
-    let end = s[start..].find('"')? + start;
-    Some(&s[start..end])
-}
-
-fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
-    let start = s.find(open)? + open.len();
-    let end = s[start..].find(close)? + start;
-    Some(&s[start..end])
-}
-
-*/
 fn strip_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -3478,7 +2829,15 @@ mod tests {
     }
 
     #[test]
-    fn web_search_tool_exposes_search_method_args() {
+    fn web_search_never_queries_yandex() {
+        // Saved "yandex" still deserializes; search.rs has no Yandex path.
+        let (next, _) =
+            search_call_overrides(&AgentSkills::default(), &json!({ "backend": "yandex" }));
+        assert_eq!(next.web_search_backend, WebSearchBackend::Yandex);
+    }
+
+    #[test]
+    fn web_search_tool_is_query_only() {
         let skills = AgentSkills {
             web_search: true,
             ..AgentSkills::default()
@@ -3489,11 +2848,13 @@ mod tests {
             .find(|tool| tool["function"]["name"] == "web_search")
             .expect("web_search tool");
         let props = &search["function"]["parameters"]["properties"];
-        assert!(props.get("backend").is_some());
-        assert!(props.get("recency").is_some());
-        assert!(props.get("kind").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("backend").is_none());
+        assert!(props.get("recency").is_none());
+        assert!(props.get("kind").is_none());
         let description = search["function"]["description"].as_str().unwrap();
-        assert!(description.contains("kind=news"));
+        assert!(description.contains("snippets"));
+        assert!(!description.contains("kind=news"));
     }
 
     #[test]

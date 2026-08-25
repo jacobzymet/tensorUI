@@ -127,11 +127,12 @@ function updateSendEnabled() {
   const hasText = composerInput.value.trim() !== '';
   const hasFiles = pendingAttachments.length > 0;
   const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
+  const editingLive = !!(editingRow && !editingRow.classList.contains('msg-queued'));
   const botsDraft = typeof isBotsSurface === 'function' && isBotsSurface() && !activeId;
   const canCompose = !diskEncryptionLocked()
     && serverReady
     && !botsDraft
-    && (hasText || hasFiles || hasQuote);
+    && (hasText || hasFiles || hasQuote || editingLive);
   btnSend.disabled = !canCompose;
   if (btnBranch) {
     const botsConvo = typeof isBotsConvo === 'function'
@@ -616,6 +617,7 @@ function chooseModelOption(value) {
   }
   closeModelMenu({ restoreFocus: true });
   if (latestState) updateServerChip(latestState);
+  if (typeof updateSendEnabled === 'function') updateSendEnabled();
   if (typeof fillDefaultModelSetting === 'function'
     && settingsModal
     && !settingsModal.classList.contains('is-hidden')) {
@@ -856,7 +858,11 @@ function updateServerChip(data) {
     || network.remote_label
     || 'provider';
   const connected = !!(remoteSelected?.ready || remoteOk);
-  serverReady = connected;
+  // Switching models can briefly look "checking" even though we already have a
+  // catalog to talk to. Don't disable Send/resend across that blip.
+  if (!(remoteChecking && !connected && serverReady && selectedChatModel)) {
+    serverReady = connected;
+  }
 
   serverChip.className = 'status-chip sidebar-server-status status-' + (
     connected ? 'ready' : (remoteChecking ? 'checking' : (!network.remote_saved ? 'stopped' : 'failed'))
@@ -963,6 +969,19 @@ async function pollState() {
 }
 
 async function sendMessage({ branch = false } = {}) {
+  if (
+    !branch
+    && editingRow
+    && !editingRow.classList.contains('msg-queued')
+    && typeof submitEditedMessage === 'function'
+  ) {
+    const input = editingRow.querySelector('.msg-edit-input');
+    const next = (input?.value || '').trim();
+    if (next) {
+      await submitEditedMessage(editingRow, next);
+      return;
+    }
+  }
   const typed = composerInput.value.trim();
   const queuedFiles = pendingAttachments.slice();
   const replyQuote = typeof pendingReplyQuote === 'string' ? pendingReplyQuote.trim() : '';
@@ -1383,7 +1402,8 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
       const steps = answerEl.querySelectorAll(':scope > .agent-step');
       const seen = stream.enteredSteps || 0;
       steps.forEach((el, index) => {
-        if (index >= seen) motionEnter(el, { y: 10, duration: 200, delay: Math.min(index - seen, 6) * 28 });
+        if (index < seen || el.classList.contains('is-live')) return;
+        motionEnter(el, { y: 10, duration: 200, delay: Math.min(index - seen, 6) * 28 });
       });
       stream.enteredSteps = steps.length;
     }
@@ -1428,14 +1448,20 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
   if (desktop) {
     const idx = Number(row.dataset.msgIndex);
     const hasActivity = hasTimeline || thinkingOpen;
+    // Open the pane before painting live cards. WebKit freezes CSS/WAAPI
+    // animations that start while the sidebar is still width:0 / opacity:0.
+    if (hasActivity) maybeAutoOpenTraceSidebar(convo.id);
     if (selectedTraceMsgIndex !== idx) {
       selectTraceMessage(idx, { animate: false, ensureOpen: false });
     } else {
       refreshTraceSidebar({ animate: false });
     }
-    if (hasActivity) maybeAutoOpenTraceSidebar(convo.id);
   } else {
     syncLiveToolClocks(answerEl);
+  }
+  if (typeof kickLiveToolMotion === 'function' && (toolLive || clarifyLive)) {
+    kickLiveToolMotion(answerEl);
+    if (desktop && traceSidebarBody) kickLiveToolMotion(traceSidebarBody);
   }
 }
 
@@ -1453,8 +1479,15 @@ async function runAssistantTurn(convo, {
   speakerBotId = null,
   skipQueue = false,
 }) {
-  if (!serverReady || activeStreams.has(convo.id)) return;
-  if (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id)) return;
+  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
+  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+  if (activeStreams.has(convo.id)) return false;
+  if (!serverReady) {
+    if (typeof showComposerHint === 'function') {
+      showComposerHint('Model is not ready yet. Try Send again.');
+    }
+    return false;
+  }
   resetTraceAutoOpenState();
 
   const turnSkills = skills || {
@@ -2514,6 +2547,15 @@ document.addEventListener('mouseup', () => {
 chatViewport?.addEventListener('scroll', hideSelectionReplyBar, { passive: true });
 window.addEventListener('scroll', hideSelectionReplyBar, true);
 window.addEventListener('resize', hideSelectionReplyBar);
+function kickVisibleLiveToolMotion() {
+  if (typeof kickLiveToolMotion !== 'function') return;
+  if (traceSidebarBody) kickLiveToolMotion(traceSidebarBody);
+  if (chatThread) kickLiveToolMotion(chatThread);
+}
+window.addEventListener('focus', kickVisibleLiveToolMotion);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') kickVisibleLiveToolMotion();
+});
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') hideSelectionReplyBar();
 });
@@ -3441,6 +3483,11 @@ document.addEventListener('click', (event) => {
     closeConvoMenu();
   }
 });
+document.getElementById('btnConfirmModalCancel')?.addEventListener('click', () => settleConfirmDanger(false));
+document.getElementById('btnConfirmModalOk')?.addEventListener('click', () => settleConfirmDanger(true));
+document.getElementById('confirmModal')?.addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) settleConfirmDanger(false);
+});
 convoTitleEl.addEventListener('click', beginTopbarTitleEdit);
 convoTitleEl.addEventListener('keydown', (event) => {
   if ((event.key === 'Enter' || event.key === ' ') && !convoTitleEl.querySelector('input')) {
@@ -3456,6 +3503,31 @@ document.addEventListener('keydown', (event) => {
     else openSearchModal();
     return;
   }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+    const field = event.target;
+    const textField = field instanceof HTMLTextAreaElement
+      || (field instanceof HTMLInputElement
+        && !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes((field.type || 'text').toLowerCase()));
+    if (textField && (key === 'a' || key === 'c' || key === 'x')) {
+      if (key === 'a') {
+        event.preventDefault();
+        field.select();
+        return;
+      }
+      const start = field.selectionStart ?? 0;
+      const end = field.selectionEnd ?? 0;
+      if (end > start && navigator.clipboard?.writeText) {
+        const selected = field.value.slice(start, end);
+        event.preventDefault();
+        void navigator.clipboard.writeText(selected).then(() => {
+          if (key !== 'x') return;
+          field.setRangeText('', start, end, 'start');
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        return;
+      }
+    }
+  }
   if (event.key === 'Escape') {
     if (voiceListening) {
       stopVoiceInput();
@@ -3463,6 +3535,11 @@ document.addEventListener('keydown', (event) => {
     }
     if (searchModal && !searchModal.classList.contains('is-hidden')) {
       closeSearchModal();
+      return;
+    }
+    const confirmModal = document.getElementById('confirmModal');
+    if (confirmModal && !confirmModal.classList.contains('is-hidden')) {
+      settleConfirmDanger(false);
       return;
     }
     const unlockModal = document.getElementById('unlockModal');

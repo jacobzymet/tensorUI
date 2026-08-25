@@ -159,6 +159,62 @@ fn apply_macos_dock_icon() {
     }
 }
 
+/// AppKit only dispatches Cmd+C/V/X/A/Z to the webview when an Edit menu
+/// binds those key equivalents to the first-responder selectors. Without it,
+/// the chat composer (and every other field) ignores copy / select-all.
+#[cfg(target_os = "macos")]
+fn apply_macos_edit_menu() {
+    use objc2::{MainThreadMarker, MainThreadOnly, sel};
+    use objc2_app_kit::{NSApp, NSMenu, NSMenuItem};
+    use objc2_foundation::ns_string;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApp(mtm);
+    let menu_bar = app.mainMenu().unwrap_or_else(|| NSMenu::new(mtm));
+
+    let existing_edit = (0..menu_bar.numberOfItems()).any(|index| {
+        menu_bar
+            .itemAtIndex(index)
+            .is_some_and(|item| &*item.title() == ns_string!("Edit"))
+    });
+    if existing_edit {
+        return;
+    }
+
+    let edit_menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), ns_string!("Edit"));
+
+    let add = |title, action, key: &objc2_foundation::NSString| {
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                title,
+                action,
+                key,
+            )
+        };
+        edit_menu.addItem(&item);
+    };
+    add(ns_string!("Undo"), Some(sel!(undo:)), ns_string!("z"));
+    add(ns_string!("Redo"), Some(sel!(redo:)), ns_string!("Z"));
+    edit_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    add(ns_string!("Cut"), Some(sel!(cut:)), ns_string!("x"));
+    add(ns_string!("Copy"), Some(sel!(copy:)), ns_string!("c"));
+    add(ns_string!("Paste"), Some(sel!(paste:)), ns_string!("v"));
+    add(
+        ns_string!("Select All"),
+        Some(sel!(selectAll:)),
+        ns_string!("a"),
+    );
+
+    let edit_item = NSMenuItem::new(mtm);
+    edit_item.setTitle(ns_string!("Edit"));
+    edit_item.setSubmenu(Some(&edit_menu));
+    menu_bar.addItem(&edit_item);
+    app.setMainMenu(Some(&menu_bar));
+}
+
 fn spawn_quit_listeners(runtime: &tokio::runtime::Handle, proxy: EventLoopProxy<DesktopEvent>) {
     let interrupt_proxy = proxy.clone();
     runtime.spawn(async move {
@@ -236,9 +292,59 @@ pub fn run_window(url: &str, runtime: &tokio::runtime::Handle) -> Result<()> {
     #[cfg(target_os = "macos")]
     apply_macos_dock_icon();
 
+    let app_origin = url.trim_end_matches('/').to_string();
+    let stay_origin = app_origin.clone();
+    let window_origin = app_origin.clone();
     let builder = WebViewBuilder::new()
         .with_url(url)
-        .with_devtools(cfg!(debug_assertions));
+        .with_background_color((22, 24, 30, 255))
+        .with_devtools(cfg!(debug_assertions))
+        .with_navigation_handler(move |target| {
+            if crate::system::url_stays_in_webview(&stay_origin, &target) {
+                return true;
+            }
+            if crate::system::is_openable_external_url(&target) {
+                let _ = crate::system::open_in_browser(&target);
+            }
+            false
+        })
+        .with_new_window_req_handler(move |target, _features| {
+            if !crate::system::url_stays_in_webview(&window_origin, &target)
+                && crate::system::is_openable_external_url(&target)
+            {
+                let _ = crate::system::open_in_browser(&target);
+            }
+            wry::NewWindowResponse::Deny
+        })
+        .with_initialization_script(
+            r#"(function () {
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var host = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (!host || host.hasAttribute('download')) return;
+    var href = host.href;
+    if (!href) return;
+    var url;
+    try { url = new URL(href, location.href); } catch (e) { return; }
+    if (url.origin === location.origin) {
+      if (host.getAttribute('target') === '_blank') {
+        event.preventDefault();
+        location.assign(url.href);
+      }
+      return;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'mailto:') return;
+    event.preventDefault();
+    fetch('/api/open-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.href }),
+      keepalive: true
+    }).catch(function () {});
+  }, true);
+})();"#,
+        );
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let _webview = builder
@@ -277,6 +383,7 @@ pub fn run_window(url: &str, runtime: &tokio::runtime::Handle) -> Result<()> {
                 #[cfg(target_os = "macos")]
                 if !applied_dock_icon {
                     apply_macos_dock_icon();
+                    apply_macos_edit_menu();
                     applied_dock_icon = true;
                 }
             }

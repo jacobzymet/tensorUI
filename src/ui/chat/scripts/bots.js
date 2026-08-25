@@ -946,6 +946,7 @@ function saveGroupFromDialog() {
     }
     closeGroupDialog();
     renderSidebar();
+    if (typeof syncProjectChrome === 'function') syncProjectChrome();
     return;
   }
   const convo = createBotSession(getBot(picks[0]), {
@@ -958,10 +959,15 @@ function saveGroupFromDialog() {
   selectConversation(convo.id);
 }
 
-function deleteBotAndSession(botId) {
+async function deleteBotAndSession(botId) {
   const bot = getBot(botId);
   if (!bot) return;
-  if (!confirm('Delete ' + botDisplayHandle(bot) + ' and its session?')) return;
+  const ok = await confirmDanger({
+    title: 'Delete ' + botDisplayHandle(bot) + ' and its session?',
+    body: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+  });
+  if (!ok) return;
   abortStream(bot.sessionId);
   conversations = conversations.filter((convo) => convo.id !== bot.sessionId);
   conversations.forEach((convo) => {
@@ -971,7 +977,10 @@ function deleteBotAndSession(botId) {
   bots = bots.filter((item) => item.id !== botId);
   saveStore({ immediate: true });
   if (activeId === bot.sessionId) startDraft();
-  else renderSidebar();
+  else {
+    renderSidebar();
+    if (typeof syncProjectChrome === 'function') syncProjectChrome();
+  }
 }
 
 function applyAppSurface(next, { skipRoute = false } = {}) {
@@ -999,6 +1008,335 @@ function restoreAppSurface() {
   } catch { /* ignore */ }
 }
 
+function botsNotInGroup(convo) {
+  const inGroup = new Set(Array.isArray(convo?.participantBotIds) ? convo.participantBotIds : []);
+  return bots.filter((bot) => !inGroup.has(bot.id));
+}
+
+function persistGroupParticipants(convo, ids) {
+  convo.participantBotIds = ids;
+  if (convo.botsHeldBy && !ids.includes(convo.botsHeldBy)) convo.botsHeldBy = null;
+  convo.updatedAt = Date.now();
+  saveStore({ immediate: true });
+  renderSidebar();
+  if (typeof syncProjectChrome === 'function') syncProjectChrome();
+}
+
+function closeTraceMembersPicker() {
+  if (!traceMembersPicker) return;
+  traceMembersPicker.classList.add('is-hidden');
+  traceMembersPicker.hidden = true;
+  traceMembersPicker.innerHTML = '';
+  btnTraceMemberAdd?.setAttribute('aria-expanded', 'false');
+}
+
+function renderTraceMembersPicker(convo) {
+  if (!traceMembersPicker) return;
+  traceMembersPicker.innerHTML = '';
+  const available = botsNotInGroup(convo);
+  if (!available.length) {
+    const empty = document.createElement('p');
+    empty.className = 'trace-members-empty';
+    empty.textContent = 'Every bot is already in this group.';
+    traceMembersPicker.appendChild(empty);
+    return;
+  }
+  available.forEach((bot) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'trace-member-pick';
+    btn.dataset.botId = bot.id;
+    const avatar = createBotAvatarEl(bot, { className: 'trace-member-avatar' });
+    applyPrivacyMosaic(avatar, 'bot-avatar:' + bot.id, { dense: true });
+    btn.appendChild(avatar);
+    const copy = document.createElement('span');
+    copy.className = 'trace-member-copy';
+    const handle = document.createElement('span');
+    handle.className = 'trace-member-handle';
+    handle.textContent = botDisplayHandle(bot);
+    applyPrivacyMosaic(handle, 'bot-handle:' + bot.id);
+    const desc = document.createElement('span');
+    desc.className = 'trace-member-desc';
+    desc.textContent = bot.description || 'No description';
+    copy.appendChild(handle);
+    copy.appendChild(desc);
+    btn.appendChild(copy);
+    traceMembersPicker.appendChild(btn);
+  });
+}
+
+function toggleTraceMembersPicker() {
+  if (!requireUnlockedData()) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  if (!traceMembersPicker || !isBotGroup(convo)) return;
+  if (traceMembersFolded) setTraceMembersFolded(false);
+  if (traceMembersPicker.hidden) {
+    traceMembersPicker.hidden = false;
+    traceMembersPicker.classList.remove('is-hidden');
+    btnTraceMemberAdd?.setAttribute('aria-expanded', 'true');
+    renderTraceMembersPicker(convo);
+  } else {
+    closeTraceMembersPicker();
+  }
+}
+
+function kickBotFromActiveGroup(botId) {
+  if (!requireUnlockedData()) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  if (!isBotGroup(convo)) return;
+  const ids = (Array.isArray(convo.participantBotIds) ? convo.participantBotIds : [])
+    .filter((id) => id !== botId);
+  if (ids.length < 2) return;
+  persistGroupParticipants(convo, ids);
+}
+
+function addBotToActiveGroup(botId) {
+  if (!requireUnlockedData()) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  if (!isBotGroup(convo)) return;
+  if (!getBot(botId)) return;
+  const ids = Array.isArray(convo.participantBotIds) ? convo.participantBotIds.slice() : [];
+  if (ids.includes(botId)) return;
+  ids.push(botId);
+  persistGroupParticipants(convo, ids);
+}
+
+const TRACE_SPLIT_KEY = 'tensorui.chat.traceSplit';
+const TRACE_ACTIVITY_SHARE_DEFAULT = 0.6;
+const TRACE_ACTIVITY_SHARE_MIN = 0.22;
+const TRACE_ACTIVITY_SHARE_MAX = 0.78;
+
+let traceActivityShare = TRACE_ACTIVITY_SHARE_DEFAULT;
+let traceActivityFolded = false;
+let traceMembersFolded = false;
+let traceSplitDrag = null;
+
+function clampTraceActivityShare(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return TRACE_ACTIVITY_SHARE_DEFAULT;
+  return Math.min(TRACE_ACTIVITY_SHARE_MAX, Math.max(TRACE_ACTIVITY_SHARE_MIN, n));
+}
+
+function loadTraceSplitPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TRACE_SPLIT_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return;
+    if (typeof raw.activityShare === 'number') {
+      traceActivityShare = clampTraceActivityShare(raw.activityShare);
+    }
+    traceActivityFolded = !!raw.activityFolded;
+    traceMembersFolded = !!raw.membersFolded;
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveTraceSplitPrefs() {
+  try {
+    localStorage.setItem(TRACE_SPLIT_KEY, JSON.stringify({
+      activityShare: traceActivityShare,
+      activityFolded: traceActivityFolded,
+      membersFolded: traceMembersFolded,
+    }));
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyTraceSplitLayout() {
+  const show = !!(traceSidebar && traceSidebar.classList.contains('has-members'));
+  if (btnTraceActivityFold) btnTraceActivityFold.hidden = !show;
+  if (traceSplitHandle) {
+    traceSplitHandle.hidden = !show;
+    traceSplitHandle.setAttribute('aria-valuenow', String(Math.round(traceActivityShare * 100)));
+    traceSplitHandle.setAttribute(
+      'aria-disabled',
+      (!show || traceActivityFolded || traceMembersFolded) ? 'true' : 'false'
+    );
+  }
+  if (!traceSidebar) return;
+  if (!show) {
+    traceSidebar.classList.remove('activity-folded', 'members-folded', 'is-resizing');
+    traceSidebarSplit?.style.removeProperty('--trace-activity-share');
+    traceSidebarSplit?.style.removeProperty('--trace-members-share');
+    return;
+  }
+  traceSidebar.classList.toggle('activity-folded', traceActivityFolded);
+  traceSidebar.classList.toggle('members-folded', traceMembersFolded);
+  traceSidebarSplit?.style.setProperty('--trace-activity-share', traceActivityShare + 'fr');
+  traceSidebarSplit?.style.setProperty('--trace-members-share', (1 - traceActivityShare) + 'fr');
+  if (btnTraceActivityFold) {
+    const expanded = !traceActivityFolded;
+    btnTraceActivityFold.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    btnTraceActivityFold.title = expanded ? 'Collapse live activity' : 'Show live activity';
+    btnTraceActivityFold.setAttribute(
+      'aria-label',
+      expanded ? 'Collapse live activity' : 'Show live activity'
+    );
+  }
+  if (btnTraceMembersFold) {
+    const expanded = !traceMembersFolded;
+    btnTraceMembersFold.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    btnTraceMembersFold.title = expanded ? 'Collapse members' : 'Show members';
+    btnTraceMembersFold.setAttribute(
+      'aria-label',
+      expanded ? 'Collapse members' : 'Show members'
+    );
+  }
+}
+
+function setTraceActivityFolded(next) {
+  traceActivityFolded = !!next;
+  saveTraceSplitPrefs();
+  applyTraceSplitLayout();
+}
+
+function setTraceMembersFolded(next) {
+  traceMembersFolded = !!next;
+  if (traceMembersFolded) closeTraceMembersPicker();
+  saveTraceSplitPrefs();
+  applyTraceSplitLayout();
+}
+
+function setTraceActivityShare(next, { persist = true } = {}) {
+  traceActivityShare = clampTraceActivityShare(next);
+  applyTraceSplitLayout();
+  if (persist) saveTraceSplitPrefs();
+}
+
+function beginTraceSplitDrag(event) {
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  if (!traceSidebar?.classList.contains('has-members')) return;
+  if (traceActivityFolded || traceMembersFolded) return;
+  if (!traceSidebarSplit || !traceSplitHandle) return;
+  event.preventDefault();
+  traceSplitDrag = { pointerId: event.pointerId };
+  traceSidebar.classList.add('is-resizing');
+  try { traceSplitHandle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+  window.addEventListener('pointermove', moveTraceSplitDrag);
+  window.addEventListener('pointerup', endTraceSplitDrag);
+  window.addEventListener('pointercancel', endTraceSplitDrag);
+  moveTraceSplitDrag(event);
+}
+
+function moveTraceSplitDrag(event) {
+  if (!traceSplitDrag || !traceSidebarSplit) return;
+  const rect = traceSidebarSplit.getBoundingClientRect();
+  const handleH = traceSplitHandle ? traceSplitHandle.getBoundingClientRect().height : 8;
+  const available = Math.max(1, rect.height - handleH);
+  const y = event.clientY - rect.top - handleH / 2;
+  setTraceActivityShare(y / available, { persist: false });
+}
+
+function endTraceSplitDrag(event) {
+  if (!traceSplitDrag) return;
+  if (event && event.pointerId != null && traceSplitHandle) {
+    try { traceSplitHandle.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+  }
+  traceSplitDrag = null;
+  window.removeEventListener('pointermove', moveTraceSplitDrag);
+  window.removeEventListener('pointerup', endTraceSplitDrag);
+  window.removeEventListener('pointercancel', endTraceSplitDrag);
+  traceSidebar?.classList.remove('is-resizing');
+  saveTraceSplitPrefs();
+}
+
+function bindTraceSplitChrome() {
+  loadTraceSplitPrefs();
+  applyTraceSplitLayout();
+  btnTraceActivityFold?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setTraceActivityFolded(!traceActivityFolded);
+  });
+  btnTraceMembersFold?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setTraceMembersFolded(!traceMembersFolded);
+  });
+  if (!traceSplitHandle) return;
+  traceSplitHandle.addEventListener('pointerdown', beginTraceSplitDrag);
+  traceSplitHandle.addEventListener('pointermove', moveTraceSplitDrag);
+  traceSplitHandle.addEventListener('pointerup', endTraceSplitDrag);
+  traceSplitHandle.addEventListener('pointercancel', endTraceSplitDrag);
+  traceSplitHandle.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    setTraceActivityShare(TRACE_ACTIVITY_SHARE_DEFAULT);
+  });
+  traceSplitHandle.addEventListener('keydown', (event) => {
+    if (traceActivityFolded || traceMembersFolded) return;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowUp' ? -0.04 : 0.04;
+      setTraceActivityShare(traceActivityShare + delta);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setTraceActivityShare(TRACE_ACTIVITY_SHARE_DEFAULT);
+    }
+  });
+}
+
+function renderTraceMembers() {
+  if (!traceSidebar || !traceMembers) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  const show = isBotsSurface() && isBotGroup(convo);
+  traceSidebar.classList.toggle('has-members', show);
+  traceMembers.hidden = !show;
+  if (!show) {
+    closeTraceMembersPicker();
+    if (traceMembersList) traceMembersList.replaceChildren();
+    applyTraceSplitLayout();
+    return;
+  }
+  const members = participantBots(convo);
+  const title = document.getElementById('traceMembersTitle');
+  if (title) title.textContent = 'Members · ' + members.length;
+  const available = botsNotInGroup(convo);
+  if (btnTraceMemberAdd) {
+    btnTraceMemberAdd.disabled = available.length === 0;
+    btnTraceMemberAdd.title = available.length ? 'Add a bot' : 'Every bot is already in this group';
+  }
+  if (!traceMembersList) {
+    applyTraceSplitLayout();
+    return;
+  }
+  traceMembersList.replaceChildren();
+  const canKick = members.length > 2;
+  members.forEach((bot) => {
+    const row = document.createElement('div');
+    row.className = 'trace-member';
+    const avatar = createBotAvatarEl(bot, { className: 'trace-member-avatar' });
+    applyPrivacyMosaic(avatar, 'bot-avatar:' + bot.id, { dense: true });
+    row.appendChild(avatar);
+    const copy = document.createElement('div');
+    copy.className = 'trace-member-copy';
+    const handle = document.createElement('span');
+    handle.className = 'trace-member-handle';
+    handle.textContent = botDisplayHandle(bot);
+    applyPrivacyMosaic(handle, 'bot-handle:' + bot.id);
+    setIdentityTitle(handle, botDisplayHandle(bot));
+    const desc = document.createElement('span');
+    desc.className = 'trace-member-desc';
+    desc.textContent = bot.description || 'No description';
+    copy.appendChild(handle);
+    copy.appendChild(desc);
+    row.appendChild(copy);
+    const kick = document.createElement('button');
+    kick.type = 'button';
+    kick.className = 'btn btn-ghost btn-icon trace-member-kick';
+    kick.dataset.botId = bot.id;
+    kick.setAttribute('aria-label', 'Remove ' + botDisplayHandle(bot) + ' from this group');
+    kick.title = canKick ? 'Remove from group' : 'Groups need at least two bots';
+    kick.disabled = !canKick;
+    kick.textContent = '×';
+    row.appendChild(kick);
+    traceMembersList.appendChild(row);
+  });
+  if (traceMembersPicker && !traceMembersPicker.hidden) {
+    if (!available.length) closeTraceMembersPicker();
+    else renderTraceMembersPicker(convo);
+  }
+  applyTraceSplitLayout();
+}
+
 function bindBotChrome() {
   document.getElementById('btnNewBot')?.addEventListener('click', () => openBotDialog());
   document.getElementById('btnNewGroup')?.addEventListener('click', () => openGroupDialog(null));
@@ -1014,6 +1352,26 @@ function bindBotChrome() {
   document.getElementById('groupModal')?.addEventListener('click', (event) => {
     if (event.target.id === 'groupModal') closeGroupDialog();
   });
+  btnTraceMemberAdd?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleTraceMembersPicker();
+  });
+  traceMembersList?.addEventListener('click', (event) => {
+    const kick = event.target.closest('.trace-member-kick');
+    if (!kick || kick.disabled) return;
+    kickBotFromActiveGroup(kick.dataset.botId);
+  });
+  traceMembersPicker?.addEventListener('click', (event) => {
+    const pick = event.target.closest('.trace-member-pick');
+    if (!pick) return;
+    addBotToActiveGroup(pick.dataset.botId);
+  });
+  document.addEventListener('click', (event) => {
+    if (!traceMembersPicker || traceMembersPicker.hidden) return;
+    if (event.target.closest('#traceMembers')) return;
+    closeTraceMembersPicker();
+  });
+  bindTraceSplitChrome();
 }
 
 restoreAppSurface();

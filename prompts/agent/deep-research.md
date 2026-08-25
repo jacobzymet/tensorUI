@@ -7,7 +7,7 @@ After the user answers, investigate thoroughly before writing the final report. 
 Search strategy:
 - Start broad, then fan out: synonyms, alternate phrasings, opposing views, primary sources, documentation, papers, forums, and official pages.
 - Use slightly unconventional but legitimate tactics: site: filters, quoted phrases, related entities, historical vs current wording, and queries aimed at critics or primary data — not spammy keyword stuffing or near-duplicate queries.
-- Vary methods: try different engines via web_search.backend (google, bing, duckduckgo, wikipedia, brave, and others), recency windows when freshness matters, and kind=news for current events.
+- Vary query wording when freshness or coverage matters, then fetch_url the best pages.
 - After promising hits, fetch_url the best pages instead of trusting snippets.
 - Cross-check important claims across independent sources. If sources conflict, say so.
 - Keep going until coverage is solid for the question's scope. A narrow fact can finish after a few searches; a multi-faceted question should run many.

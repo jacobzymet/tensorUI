@@ -36,8 +36,8 @@ use crate::{
 };
 pub(crate) use embed::APP_ICON_PNG;
 use embed::{
-    CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, ORB_JS, PURIFY_JS, SETTINGS_HTML,
-    UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
+    CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, OPTIONAL_FONTS_JS, ORB_JS, PURIFY_JS,
+    SETTINGS_HTML, UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
 };
 
 const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
@@ -189,6 +189,7 @@ fn locked_api_request_allowed(method: &axum::http::Method, path: &str) -> bool {
         || (path == "/api/data" && *method == axum::http::Method::GET)
         || (path == "/api/data/encryption/unlock" && *method == axum::http::Method::POST)
         || (path == "/api/focus" && *method == axum::http::Method::POST)
+        || (path == "/api/open-url" && *method == axum::http::Method::POST)
 }
 
 static PROVIDER_CACHE_WARM_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -308,6 +309,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/api/local-llms/start", post(local_llms_start))
         .route("/api/local-llms/stop", post(local_llms_stop))
         .route("/api/focus", post(focus))
+        .route("/api/open-url", post(open_url))
         .route("/api/data", get(data_info).post(set_storage_mode))
         .route("/api/data/open", post(open_data_dir))
         .route("/api/data/encryption/enable", post(enable_encryption))
@@ -361,6 +363,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/highlight.min.js", get(highlight_script))
         .route("/marked.min.js", get(marked_script))
         .route("/purify.min.js", get(purify_script))
+        .route("/optional-fonts.js", get(optional_fonts_script))
         .route("/browser-favicon.png", get(app_icon_png))
         .route("/icon-darkmode.png", get(ui_mark_dark))
         .route("/icon-lightmode.png", get(ui_mark_light))
@@ -486,6 +489,13 @@ async fn purify_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         PURIFY_JS,
+    )
+}
+
+async fn optional_fonts_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        OPTIONAL_FONTS_JS,
     )
 }
 
@@ -1525,6 +1535,21 @@ async fn focus(State(_app): State<SharedApp>) -> Result<Json<InstanceInfo>, ApiE
 }
 
 #[derive(Debug, Deserialize)]
+struct OpenUrlBody {
+    url: String,
+}
+
+async fn open_url(Json(body): Json<OpenUrlBody>) -> Result<Json<serde_json::Value>, ApiError> {
+    let url = body.url.trim();
+    if !system::is_openable_external_url(url) {
+        return Err(ApiError::bad_request("unsupported url"));
+    }
+    system::open_in_browser(url)
+        .map_err(|error| ApiError::bad_request(format!("could not open link: {error}")))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
 struct UpdateCheckQuery {
     #[serde(default)]
     force: Option<String>,
@@ -1790,6 +1815,7 @@ mod tests {
             "/api/data/encryption/unlock"
         ));
         assert!(locked_api_request_allowed(&Method::POST, "/api/focus"));
+        assert!(locked_api_request_allowed(&Method::POST, "/api/open-url"));
 
         for (method, path) in [
             (Method::GET, "/api/providers"),
