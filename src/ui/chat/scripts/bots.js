@@ -146,20 +146,20 @@ function buildBotAvatarSvg(seedInput) {
   );
 }
 
-function createBotAvatarEl(botOrSeed, { className = 'convo-avatar', busy = false } = {}) {
+function createBotAvatarEl(botOrSeed, { className = 'convo-avatar' } = {}) {
   const el = document.createElement('span');
-  el.className = className + (busy ? ' is-busy' : '');
+  el.className = className;
   el.setAttribute('aria-hidden', 'true');
   el.innerHTML = buildBotAvatarSvg(botOrSeed);
   return el;
 }
 
-function createConvoAvatarEl(convo, { busy = false } = {}) {
+function createConvoAvatarEl(convo) {
   if (!isBotsConvo(convo)) return null;
   if (isBotGroup(convo)) {
     const members = participantBots(convo).slice(0, 2);
     const stack = document.createElement('span');
-    stack.className = 'convo-avatar convo-avatar-stack' + (busy ? ' is-busy' : '');
+    stack.className = 'convo-avatar convo-avatar-stack';
     stack.setAttribute('aria-hidden', 'true');
     if (!members.length) {
       stack.appendChild(createBotAvatarEl(convo.title || convo.id || 'group', { className: 'convo-avatar-piece' }));
@@ -171,7 +171,7 @@ function createConvoAvatarEl(convo, { busy = false } = {}) {
     return stack;
   }
   const bot = convo.botId ? getBot(convo.botId) : null;
-  return createBotAvatarEl(bot || { handle: 'bot' }, { busy });
+  return createBotAvatarEl(bot || { handle: 'bot' });
 }
 
 function participantBots(convo) {

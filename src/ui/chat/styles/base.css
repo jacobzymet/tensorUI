@@ -1083,18 +1083,51 @@ html[data-theme="light"] .btn-new-chat-split > .btn-new-chat-incognito:hover:not
 .convo-item.is-streaming .convo-title {
   color: var(--color-accent);
 }
-.convo-spinner {
-  flex: 0 0 auto;
-  width: 0.85rem;
-  height: 0.85rem;
-  margin-right: 0.1rem;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
-  border-top-color: var(--color-accent);
-  animation: convo-spin 0.7s linear infinite;
+.convo-item.is-streaming {
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--color-accent) 45%, transparent);
+}
+.convo-busy-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  padding: 3px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.convo-busy-ring::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 220%;
+  height: 220%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 38%,
+    color-mix(in oklch, var(--color-accent) 55%, transparent) 58%,
+    var(--color-accent) 76%,
+    color-mix(in oklch, var(--color-accent) 55%, transparent) 88%,
+    transparent 100%
+  );
+  animation: convo-spin 1.15s linear infinite;
 }
 @keyframes convo-spin {
-  to { transform: rotate(360deg); }
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .convo-busy-ring::before { animation: none; opacity: 0; }
+  .convo-item.is-streaming {
+    box-shadow: inset 0 0 0 3px color-mix(in oklch, var(--color-accent) 70%, transparent);
+  }
 }
 .convo-item.is-dragging {
   opacity: 0.45;
@@ -1498,7 +1531,6 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
 }
 .privacy-mode .convo-item:hover .convo-avatar.privacy-mask-dense::before,
 .privacy-mode .convo-item:focus-within .convo-avatar.privacy-mask-dense::before,
-.privacy-mode .convo-item .convo-avatar.is-busy.privacy-mask-dense::before,
 .privacy-mode .msg-speaker:hover .msg-speaker-avatar.privacy-mask-dense::before {
   opacity: 0;
   filter: blur(3px);
@@ -1506,16 +1538,13 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
 }
 .privacy-mode .convo-item:hover .convo-avatar.privacy-mask-dense svg,
 .privacy-mode .convo-item:focus-within .convo-avatar.privacy-mask-dense svg,
-.privacy-mode .convo-item .convo-avatar.is-busy.privacy-mask-dense svg,
 .privacy-mode .convo-item:hover .convo-avatar-piece,
 .privacy-mode .convo-item:focus-within .convo-avatar-piece,
-.privacy-mode .convo-item .convo-avatar-stack.is-busy .convo-avatar-piece,
 .privacy-mode .msg-speaker:hover .msg-speaker-avatar.privacy-mask-dense svg {
   opacity: 1;
 }
 .privacy-mode .convo-item:hover .convo-avatar-stack.privacy-mask-dense,
-.privacy-mode .convo-item:focus-within .convo-avatar-stack.privacy-mask-dense,
-.privacy-mode .convo-item .convo-avatar-stack.is-busy.privacy-mask-dense {
+.privacy-mode .convo-item:focus-within .convo-avatar-stack.privacy-mask-dense {
   overflow: visible;
   width: 1.55rem;
   height: 1.35rem;

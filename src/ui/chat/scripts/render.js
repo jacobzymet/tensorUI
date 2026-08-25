@@ -1582,18 +1582,19 @@ function createConvoItem(convo, { nested = false } = {}) {
   if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
   const fullTitle = convo.title || (convo.incognito ? 'Ghost Chat' : 'New chat');
   const botsConvoItem = typeof isBotsConvo === 'function' && isBotsConvo(convo);
-  const busy = isConvoBusy(convo.id);
+  if (isConvoBusy(convo.id)) {
+    const ring = document.createElement('span');
+    ring.className = 'convo-busy-ring';
+    ring.setAttribute('aria-hidden', 'true');
+    item.appendChild(ring);
+    item.setAttribute('aria-busy', 'true');
+  }
   if (botsConvoItem && typeof createConvoAvatarEl === 'function') {
-    const avatar = createConvoAvatarEl(convo, { busy });
+    const avatar = createConvoAvatarEl(convo);
     if (avatar) {
       applyPrivacyMosaic(avatar, 'convo-avatar:' + convo.id, { dense: true });
       item.appendChild(avatar);
     }
-  } else if (busy) {
-    const spinner = document.createElement('span');
-    spinner.className = 'convo-spinner';
-    spinner.setAttribute('aria-hidden', 'true');
-    item.appendChild(spinner);
   } else if (convo.incognito) {
     const mark = document.createElement('span');
     mark.className = 'convo-incognito-mark';
