@@ -1123,32 +1123,6 @@ async function sendMessage({ branch = false } = {}) {
 
   // Branch always starts a fresh turn on the new chat (never queue on the parent).
   if (!branch && isConvoBusy(convo.id)) {
-    // Live agent: inject guidance into the current turn instead of waiting.
-    if (canSteerLiveStream()) {
-      const text = steerTextFromItem(outbound);
-      if (text) {
-        const stream = activeStreams.get(convo.id);
-        if (stream) {
-          if (!stream.pendingSteers) stream.pendingSteers = [];
-          const entry = { item: outbound, text, posted: false, applied: false };
-          stream.pendingSteers.push(entry);
-          renderPendingSteerBubble(convo.id, entry);
-          void flushPendingSteers(stream);
-          focusComposer();
-          return;
-        }
-      }
-    }
-    // Bots hop: soft-interrupt / inject so the room can be steered mid-thought.
-    if (
-      typeof isBotsConvo === 'function'
-      && isBotsConvo(convo)
-      && typeof injectBotsOutbound === 'function'
-      && injectBotsOutbound(convo, outbound)
-    ) {
-      focusComposer();
-      return;
-    }
     enqueueOutbound(convo, outbound);
     focusComposer();
     return;
@@ -1175,7 +1149,7 @@ function ensureStreamDom(convo, stream) {
   const assistantRow = document.createElement('div');
   assistantRow.className = 'msg msg-role-assistant';
   assistantRow.dataset.streamId = convo.id;
-  assistantRow.dataset.msgIndex = String(convo.messages.length);
+  assistantRow.dataset.msgIndex = String(liveTurnSlices(convo).followUpStart);
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
 
@@ -1211,7 +1185,9 @@ function ensureStreamDom(convo, stream) {
     syncMessageSpeaker(assistantRow, { role: 'assistant' });
   }
   attachMessageActions(assistantRow);
-  chatThread.appendChild(assistantRow);
+  const followUp = chatThread.querySelector('.msg-queued');
+  if (followUp) chatThread.insertBefore(assistantRow, followUp);
+  else chatThread.appendChild(assistantRow);
   queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
   const thinkingOrb = mountOrb(orbCanvas, 20);
   stream.dom = {
@@ -1670,8 +1646,27 @@ function commitLiveAssistant(convo, message, turnId) {
     Object.assign(existing, message);
     return existing;
   }
-  convo.messages.push(message);
+  const insertAt = liveTurnSlices(convo).followUpStart;
+  if (insertAt < convo.messages.length) convo.messages.splice(insertAt, 0, message);
+  else convo.messages.push(message);
   return message;
+}
+
+function liveTurnSlices(convo) {
+  const messages = convo.messages || [];
+  let lastAsst = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]?.role === 'assistant') lastAsst = i;
+  }
+  const rest = messages.slice(lastAsst + 1);
+  return {
+    lastAsst,
+    head: messages.slice(0, lastAsst + 1),
+    prompt: rest[0] || null,
+    promptIndex: lastAsst + 1,
+    followUps: rest.slice(1),
+    followUpStart: lastAsst + 2,
+  };
 }
 
 async function syncConvoFromStore(convoId) {

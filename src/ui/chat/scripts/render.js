@@ -3066,12 +3066,8 @@ function reattachLiveStream(convo) {
   if (!stream || stream.hardStopped) return null;
   stream.dom = null;
   paintStreamIntoView(convo, stream, stream.partial || '', true);
-  for (const entry of stream.pendingSteers || []) {
-    if (entry?.applied) continue;
-    renderPendingSteerBubble(convo.id, entry);
-  }
   if (stream.dom?.row) {
-    stream.dom.row.dataset.msgIndex = String(convo.messages.length);
+    stream.dom.row.dataset.msgIndex = String(liveTurnSlices(convo).followUpStart);
     selectTraceMessage(Number(stream.dom.row.dataset.msgIndex), {
       animate: false,
       ensureOpen: false,
@@ -3092,10 +3088,36 @@ function renderThread(convo, { drainQueue = true } = {}) {
     }
   }
   chatThread.innerHTML = '';
-  // Drop any DOM handles — rows were destroyed; streams recreate on paint/select.
   for (const stream of activeStreams.values()) {
     try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
     stream.dom = null;
+  }
+  const liveStream = activeStreams.get(convo.id);
+  const live = !!(liveStream && !liveStream.hardStopped);
+  if (live) {
+    const slices = liveTurnSlices(convo);
+    slices.head.forEach((message, index) => {
+      chatThread.appendChild(buildBubble(message.role, message.content, index, message));
+    });
+    if (slices.prompt) {
+      chatThread.appendChild(
+        buildBubble(slices.prompt.role, slices.prompt.content, slices.promptIndex, slices.prompt)
+      );
+    }
+    reattachLiveStream(convo);
+    slices.followUps.forEach((message, offset) => {
+      chatThread.appendChild(
+        buildBubble(message.role, message.content, slices.followUpStart + offset, message)
+      );
+    });
+    for (const entry of liveStream.pendingSteers || []) {
+      if (entry?.applied) continue;
+      renderPendingSteerBubble(convo.id, entry);
+    }
+    renderOutboundQueue(convo);
+    scrollToBottom({ force: stickToBottom });
+    if (drainQueue) maybeSendNextQueued(convo.id);
+    return;
   }
   convo.messages.forEach((message, index) => {
     chatThread.appendChild(buildBubble(message.role, message.content, index, message));
