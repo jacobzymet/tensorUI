@@ -162,10 +162,19 @@
 .convo-avatar.is-busy::after {
   content: '';
   position: absolute;
+  z-index: 3;
   inset: -2px;
+  width: auto;
+  height: auto;
   border-radius: 50%;
   border: 1.5px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
   border-top-color: var(--color-accent);
+  background: none;
+  box-shadow: none;
+  filter: none;
+  opacity: 1;
+  transform: none;
+  pointer-events: none;
   animation: convo-spin 0.7s linear infinite;
 }
 .convo-avatar-stack {

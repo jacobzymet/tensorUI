@@ -1498,6 +1498,7 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
 }
 .privacy-mode .convo-item:hover .convo-avatar.privacy-mask-dense::before,
 .privacy-mode .convo-item:focus-within .convo-avatar.privacy-mask-dense::before,
+.privacy-mode .convo-item .convo-avatar.is-busy.privacy-mask-dense::before,
 .privacy-mode .msg-speaker:hover .msg-speaker-avatar.privacy-mask-dense::before {
   opacity: 0;
   filter: blur(3px);
@@ -1505,13 +1506,16 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
 }
 .privacy-mode .convo-item:hover .convo-avatar.privacy-mask-dense svg,
 .privacy-mode .convo-item:focus-within .convo-avatar.privacy-mask-dense svg,
+.privacy-mode .convo-item .convo-avatar.is-busy.privacy-mask-dense svg,
 .privacy-mode .convo-item:hover .convo-avatar-piece,
 .privacy-mode .convo-item:focus-within .convo-avatar-piece,
+.privacy-mode .convo-item .convo-avatar-stack.is-busy .convo-avatar-piece,
 .privacy-mode .msg-speaker:hover .msg-speaker-avatar.privacy-mask-dense svg {
   opacity: 1;
 }
 .privacy-mode .convo-item:hover .convo-avatar-stack.privacy-mask-dense,
-.privacy-mode .convo-item:focus-within .convo-avatar-stack.privacy-mask-dense {
+.privacy-mode .convo-item:focus-within .convo-avatar-stack.privacy-mask-dense,
+.privacy-mode .convo-item .convo-avatar-stack.is-busy.privacy-mask-dense {
   overflow: visible;
   width: 1.55rem;
   height: 1.35rem;
