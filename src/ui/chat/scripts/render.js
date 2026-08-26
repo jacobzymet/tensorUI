@@ -2593,8 +2593,27 @@ function cancelMessageEdit({ resumeQueue = true } = {}) {
   }
 }
 
+function resolveUserMessageIndex(row, convo) {
+  const messages = convo?.messages || [];
+  const hinted = Number(row?.dataset.msgIndex);
+  if (Number.isInteger(hinted) && hinted >= 0 && messages[hinted]?.role === 'user') {
+    return hinted;
+  }
+  if (!row || !chatThread) return -1;
+  const userRows = [...chatThread.querySelectorAll('.msg.msg-role-user:not(.msg-queued)')];
+  const pos = userRows.indexOf(row);
+  if (pos < 0) return -1;
+  let seen = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]?.role !== 'user') continue;
+    seen += 1;
+    if (seen === pos) return i;
+  }
+  return -1;
+}
+
 function beginMessageEdit(row) {
-  if (isConvoBusy(activeId) || row.classList.contains('is-editing')) return;
+  if (row.classList.contains('is-editing') || row.classList.contains('msg-queued')) return;
   if (editingRow && editingRow !== row) cancelMessageEdit();
 
   const raw = row.dataset.raw || '';
@@ -2632,10 +2651,6 @@ function beginMessageEdit(row) {
   const commit = () => {
     const next = input.value.trim();
     if (!next) return;
-    if (isConvoBusy(activeId)) {
-      showComposerHint('Wait for the current reply to finish, or stop it.');
-      return;
-    }
     closeMentionMenu();
     mentionInput = composerInput;
     void submitEditedMessage(row, next);
@@ -2681,20 +2696,23 @@ function beginMessageEdit(row) {
 }
 
 async function submitEditedMessage(row, rawText) {
-  const index = Number(row.dataset.msgIndex);
-  if (!Number.isInteger(index) || index < 0) return;
-  if (isConvoBusy(activeId)) {
-    showComposerHint('Wait for the current reply to finish, or stop it.');
+  const convo = conversations.find((item) => item.id === activeId);
+  if (!convo) return;
+  const index = resolveUserMessageIndex(row, convo);
+  if (index < 0) {
+    showComposerHint('Could not find that message. Try Send again.');
     return;
   }
   if (!serverReady) {
     showComposerHint('Model is not ready yet. Try Send again.');
     return;
   }
-
-  const convo = conversations.find((item) => item.id === activeId);
-  if (!convo || index >= convo.messages.length) return;
-  if (convo.messages[index].role !== 'user') return;
+  const live = typeof activeStreams !== 'undefined' ? activeStreams.get(convo.id) : null;
+  if (live) {
+    live.replaced = true;
+    live.skipQueue = true;
+    abortStream(convo.id, { cancelServer: true });
+  }
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
 
@@ -2775,6 +2793,7 @@ async function submitEditedMessage(row, rawText) {
     deepResearch: turn.deepResearch,
     deepResearchOutput: turn.deepResearchOutput,
     forceTools: turn.forceTools,
+    replaceLive: true,
   });
   if (started === false) {
     convo.messages = snapshot;
@@ -2782,6 +2801,7 @@ async function submitEditedMessage(row, rawText) {
     saveConversations();
     renderThread(convo);
     renderSidebar();
+    showComposerHint('Could not restart that turn. Try Send again.');
   }
 }
 

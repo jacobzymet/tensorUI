@@ -1454,10 +1454,21 @@ async function runAssistantTurn(convo, {
   previousTitle = '',
   speakerBotId = null,
   skipQueue = false,
+  replaceLive = false,
 }) {
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
-  if (activeStreams.has(convo.id)) return false;
+  if (activeStreams.has(convo.id)) {
+    if (!replaceLive) return false;
+    const live = activeStreams.get(convo.id);
+    if (live) {
+      live.replaced = true;
+      live.skipQueue = true;
+    }
+    abortStream(convo.id, { cancelServer: true });
+    if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
+    if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+  }
   if (!serverReady) {
     if (typeof showComposerHint === 'function') {
       showComposerHint('Model is not ready yet. Try Send again.');
@@ -2102,8 +2113,13 @@ async function driveAssistantSse(convo, stream, response) {
     }
   } catch (error) {
     if (error.name === 'AbortError') {
+      if (stream.replaced) {
+        dropLiveSubscriber(convo.id, stream);
+        return;
+      }
       if (!stream.cancelled) {
         dropLiveSubscriber(convo.id, stream);
+        maybeSendNextQueued(convo.id);
         return;
       }
     } else {
@@ -2111,8 +2127,12 @@ async function driveAssistantSse(convo, stream, response) {
     }
   }
 
-  let queueAfter = !stream.skipQueue;
+  let queueAfter = !stream.skipQueue && !stream.replaced;
   try {
+  if (stream.replaced || activeStreams.get(convo.id) !== stream) {
+    queueAfter = false;
+    return;
+  }
   typer.flush();
   if (!conversations.some((item) => item.id === convo.id)) {
     return;
@@ -2356,17 +2376,14 @@ async function driveAssistantSse(convo, stream, response) {
     }
     composerInput.focus();
   }
-  if (queueAfter) {
-    queueAfter = false;
-    maybeSendNextQueued(convo.id);
-  }
   } catch (error) {
     console.warn('Assistant turn finalize failed:', error?.message || error);
     if (!stream.errorMessage) {
       stream.errorMessage = error?.message || 'The request failed.';
     }
   } finally {
-    if (finishLiveStream(convo.id, stream) && queueAfter) {
+    const finished = activeStreams.get(convo.id) === stream && finishLiveStream(convo.id, stream);
+    if (finished && queueAfter) {
       maybeSendNextQueued(convo.id);
     }
     if (!stream.skipQueue && typeof flushBotNavigation === 'function') {
