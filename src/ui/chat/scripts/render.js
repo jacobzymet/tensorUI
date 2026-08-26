@@ -1289,12 +1289,11 @@ function applyLocationRoute() {
   const locked = diskEncryptionLocked();
   suppressUrlSync = true;
   try {
-    if (route.surface && typeof applyAppSurface === 'function' && appSurface !== route.surface) {
+    if (route.surface && typeof persistAppSurface === 'function' && appSurface !== route.surface) {
+      persistAppSurface(route.surface);
+    } else if (route.surface && typeof applyAppSurface !== 'function' && appSurface !== route.surface) {
       appSurface = route.surface;
       document.getElementById('chatShell')?.setAttribute('data-surface', appSurface);
-      try {
-        localStorage.setItem(typeof APP_SURFACE_KEY === 'string' ? APP_SURFACE_KEY : 'tensorui.chat.appSurface', appSurface);
-      } catch { /* ignore */ }
       if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(appSurface);
     }
     if (route.kind === 'projects') {
@@ -2707,14 +2706,13 @@ async function submitEditedMessage(row, rawText) {
     showComposerHint('Model is not ready yet. Try Send again.');
     return;
   }
+  markOutboundStarting(convo.id);
   const live = typeof activeStreams !== 'undefined' ? activeStreams.get(convo.id) : null;
   if (live) {
     live.replaced = true;
     live.skipQueue = true;
-    abortStream(convo.id, { cancelServer: true });
+    await abortStream(convo.id, { cancelServer: true });
   }
-  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
-  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
 
   const mentioned = parseCapabilityMentions(rawText);
   const text = mentioned.text;
@@ -2784,6 +2782,7 @@ async function submitEditedMessage(row, rawText) {
         forceTools: turn.forceTools,
       },
     }, editedUser, convo.title);
+    clearOutboundStarting(convo.id);
     return;
   }
   const started = await runAssistantTurn(convo, {
@@ -2796,6 +2795,7 @@ async function submitEditedMessage(row, rawText) {
     replaceLive: true,
   });
   if (started === false) {
+    clearOutboundStarting(convo.id);
     convo.messages = snapshot;
     convo.updatedAt = Date.now();
     saveConversations();
@@ -3246,15 +3246,14 @@ function selectConversation(id) {
   if (typeof convoSurfaceOf === 'function') {
     const surface = convoSurfaceOf(convo);
     if (appSurface !== surface) {
-      appSurface = surface;
-      document.getElementById('chatShell')?.setAttribute('data-surface', surface);
-      try {
-        localStorage.setItem(typeof APP_SURFACE_KEY === 'string' ? APP_SURFACE_KEY : 'tensorui.chat.appSurface', surface);
-      } catch { /* ignore */ }
-      if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(surface);
+      if (typeof persistAppSurface === 'function') persistAppSurface(surface);
+      else {
+        appSurface = surface;
+        document.getElementById('chatShell')?.setAttribute('data-surface', surface);
+        if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(surface);
+      }
     }
   }
-  const previousId = activeId;
   if (activeId) stickByConvo.set(activeId, stickToBottom);
   activeId = id;
   draftIncognito = !!convo.incognito;
@@ -3268,7 +3267,6 @@ function selectConversation(id) {
   renderSidebar();
   showThread(convo);
   renderThread(convo);
-  if (previousId && previousId !== id) maybeSendNextQueued(previousId);
   clearPendingReplyQuote();
   hideSelectionReplyBar();
   syncComposerStreamUi();
@@ -3280,7 +3278,6 @@ function selectConversation(id) {
 /** Return to the draft state — no conversation object until a message is sent. */
 function startDraft({ incognito = false } = {}) {
   if (typeof isBotsSurface === 'function' && isBotsSurface()) incognito = false;
-  const previousId = activeId;
   cancelMessageEdit({ resumeQueue: false });
   clearPendingReplyQuote();
   hideSelectionReplyBar();
@@ -3303,7 +3300,6 @@ function startDraft({ incognito = false } = {}) {
   setTraceSidebarOpen(false);
   syncUrlFromState();
   closeMobileSidebar();
-  if (previousId) maybeSendNextQueued(previousId);
   composerInput.focus();
 }
 

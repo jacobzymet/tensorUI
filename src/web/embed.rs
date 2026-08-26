@@ -29,9 +29,13 @@ mod tests {
     }
 
     #[test]
-    fn chat_ui_does_not_write_application_state_to_local_storage() {
-        assert!(!CHAT_JS.contains("localStorage.setItem"));
-        assert!(!SETTINGS_HTML.contains("localStorage.setItem"));
+    fn chat_ui_does_not_use_local_storage() {
+        for blob in [CHAT_JS, SETTINGS_HTML, CHAT_HTML] {
+            assert!(
+                !blob.contains("localStorage"),
+                "chat UI must not read or write localStorage"
+            );
+        }
         assert!(!CHAT_HTML.contains("settingBrowserStorage"));
     }
 

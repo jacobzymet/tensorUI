@@ -1277,7 +1277,7 @@ fn data_info_from_app(app: &App) -> DataInfo {
     };
     DataInfo {
         storage: app.storage_mode().as_str(),
-        browser_storage: app.storage_mode().is_browser(),
+        browser_storage: false,
         encryption_enabled: app.encryption_enabled(),
         encryption_unlocked: app.encryption_unlocked(),
         encryption_transition_pending: encryption_transition::exists(&root),

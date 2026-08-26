@@ -135,7 +135,7 @@
 .composer-hint {
   margin: 0;
   font-size: var(--text-xs);
-  color: color-mix(in oklch, var(--color-muted) 88%, transparent);
+  color: var(--color-muted);
   text-align: center;
   line-height: 1.4;
   padding: 0 0.5rem;

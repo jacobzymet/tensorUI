@@ -935,7 +935,6 @@ function syncExternalEncryptionState(data) {
     const response = await fetch('/api/data');
     if (!response.ok) throw new Error('Could not refresh encryption state');
     dataInfo = await response.json();
-    browserStorage = !!dataInfo.browser_storage;
     await loadDiskDataAfterUnlock();
     refreshLocalDataPane();
     refreshSettingsDataSummary();
@@ -960,7 +959,7 @@ async function pollState() {
     const data = await response.json();
     syncExternalEncryptionState(data);
     updateServerChip(data);
-    void resumeLiveTurns(data.live_turns);
+    await resumeLiveTurns(data.live_turns);
   } catch {
     // control server briefly unreachable — retry on the next tick
   } finally {
@@ -1456,8 +1455,7 @@ async function runAssistantTurn(convo, {
   skipQueue = false,
   replaceLive = false,
 }) {
-  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
-  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+  if (outboundStarting.has(convo.id) && !replaceLive) return false;
   if (activeStreams.has(convo.id)) {
     if (!replaceLive) return false;
     const live = activeStreams.get(convo.id);
@@ -1466,9 +1464,13 @@ async function runAssistantTurn(convo, {
       live.skipQueue = true;
     }
     abortStream(convo.id, { cancelServer: true });
-    if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
-    if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
   }
+  markOutboundStarting(convo.id);
+  let liveStarted = false;
+  try {
+  if (typeof waitForCancel === 'function') await waitForCancel(convo.id);
+  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
+  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
   if (!serverReady) {
     if (typeof showComposerHint === 'function') {
       showComposerHint('Model is not ready yet. Try Send again.');
@@ -1531,6 +1533,8 @@ async function runAssistantTurn(convo, {
     turnForceTools,
     speakerBotId: speakerBotId || null,
   });
+  liveStarted = true;
+  clearOutboundStarting(convo.id);
   stream.speakerBotId = speakerBotId || null;
   stream.skipQueue = !!skipQueue;
   syncStreamSpeakerChrome(convo, stream);
@@ -1611,15 +1615,20 @@ async function runAssistantTurn(convo, {
           updateComposerHint();
         }
         await attachLiveTurn(convo, {});
-        return;
+        return true;
       }
       const problem = await response.json().catch(() => null);
       throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
     }
   } catch (error) {
     if (error.name === 'AbortError') {
+      if (stream.replaced) {
+        dropLiveSubscriber(convo.id, stream);
+        return;
+      }
       if (!stream.cancelled) {
         dropLiveSubscriber(convo.id, stream);
+        if (!stream.skipQueue) maybeSendNextQueued(convo.id);
         return;
       }
     } else {
@@ -1627,6 +1636,10 @@ async function runAssistantTurn(convo, {
     }
   }
   await driveAssistantSse(convo, stream, response);
+  return true;
+  } finally {
+    if (!liveStarted) clearOutboundStarting(convo.id);
+  }
 }
 
 function dropLiveSubscriber(convoId, stream) {
@@ -1687,6 +1700,7 @@ async function syncConvoFromStore(convoId) {
     const parsed = parseStorePayload(await response.json());
     const fresh = (parsed.conversations || []).find((item) => item.id === convoId);
     if (!fresh) return conversations.find((item) => item.id === convoId) || null;
+    if (typeof adoptPersistedOutboundQueue === 'function') adoptPersistedOutboundQueue(fresh);
     const idx = conversations.findIndex((item) => item.id === convoId);
     if (idx >= 0) {
       const localUpdated = Number(conversations[idx]?.updatedAt) || 0;
@@ -2119,7 +2133,7 @@ async function driveAssistantSse(convo, stream, response) {
       }
       if (!stream.cancelled) {
         dropLiveSubscriber(convo.id, stream);
-        maybeSendNextQueued(convo.id);
+        if (!stream.skipQueue) maybeSendNextQueued(convo.id);
         return;
       }
     } else {
@@ -2583,6 +2597,7 @@ btnStop.addEventListener('click', () => {
       row.remove();
     });
   }
+  maybeSendNextQueued(activeId);
 });
 btnPlus?.addEventListener('click', (event) => {
   event.stopPropagation();
@@ -3902,6 +3917,7 @@ btnUpdateDismiss?.addEventListener('click', () => {
   syncAgentButton();
   syncResearchControls();
   renderSidebar();
+  await pollState();
   applyLocationRoute();
   // Route rendering focuses the composer. When encrypted data is locked, put
   // focus back in the blocking unlock field after that startup work completes.
@@ -3909,7 +3925,6 @@ btnUpdateDismiss?.addEventListener('click', () => {
   window.addEventListener('popstate', () => {
     applyLocationRoute();
   });
-  pollState();
   setInterval(pollState, 2000);
   loadUserSkills();
   // Soft update check after the UI settles; GitHub answers are cached server-side.

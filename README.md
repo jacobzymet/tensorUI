@@ -88,7 +88,7 @@ In **Chat → Settings → Local Data**, enable encryption with a passphrase. Te
 
 Encryption covers chats, preferences (including model pins and recent-model state), provider definitions and credentials, and skill contents stored on disk. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
 
-In **Settings → Local Data** you can also open the data folder. Older browser-storage data and UI preferences are migrated to disk once and then removed from `localStorage`.
+In **Settings → Local Data** you can also open the data folder. Chats and preferences are stored on disk only.
 
 ```toml
 [ui]
@@ -97,7 +97,7 @@ port = 3930
 theme = "dark"
 
 [data]
-storage = "disk"   # or "browser"
+storage = "disk"
 
 active_provider_id = "…"
 

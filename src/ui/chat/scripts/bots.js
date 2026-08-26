@@ -3,9 +3,28 @@ const BOT_MENTION_RE = /@([a-z][a-z0-9_]{1,31}|everyone|user)\b/gi;
 const BOT_COMPACT_CHARS = 28000;
 const BOT_COMPACT_KEEP = 10;
 const BOT_GROUP_MAX_HOPS = 8;
-const APP_SURFACE_KEY = 'tensorui.chat.appSurface';
 /** Bumped on Stop so in-flight group hop loops exit instead of spawning more turns. */
 const botsOutboundEpoch = new Map();
+/** Refcount: a group stays busy between hops, not only while a stream is live. */
+const botsOutboundActive = new Map();
+
+function isBotsOutboundActive(convoId) {
+  return !!convoId && (botsOutboundActive.get(convoId) || 0) > 0;
+}
+
+function markBotsOutboundActive(convoId) {
+  if (!convoId) return;
+  botsOutboundActive.set(convoId, (botsOutboundActive.get(convoId) || 0) + 1);
+  if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
+}
+
+function clearBotsOutboundActive(convoId) {
+  if (!convoId) return;
+  const next = (botsOutboundActive.get(convoId) || 0) - 1;
+  if (next <= 0) botsOutboundActive.delete(convoId);
+  else botsOutboundActive.set(convoId, next);
+  if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
+}
 
 function bumpBotsOutboundEpoch(convoId) {
   if (!convoId) return 0;
@@ -16,6 +35,13 @@ function bumpBotsOutboundEpoch(convoId) {
 
 function botsOutboundEpochOf(convoId) {
   return botsOutboundEpoch.get(convoId) || 0;
+}
+
+function stopAllBotsOutbound() {
+  for (const id of [...botsOutboundActive.keys()]) {
+    if (typeof markBotsOutboundStopped === 'function') markBotsOutboundStopped(id);
+    bumpBotsOutboundEpoch(id);
+  }
 }
 
 /** True when the model used the silent skip token (not a real reply). */
@@ -545,15 +571,18 @@ function applyBotActions(convo, speakerBot, actions) {
       if (typeof renderSidebar === 'function') renderSidebar();
       if (activeId === group.id && typeof renderThread === 'function') renderThread(group);
       else requestBotNavigation(group.id);
-      if (!isConvoBusy(group.id) && typeof runBotsOutbound === 'function') {
-        const item = {
-          id: newId('q'),
-          editText: actions.groupPost,
-          displayText: actions.groupPost,
-          apiText: actions.groupPost,
-          fromBotId: speakerBot.id,
-          turn: defaultBotsTurn(),
-        };
+      const item = {
+        id: newId('q'),
+        editText: actions.groupPost,
+        displayText: actions.groupPost,
+        apiText: actions.groupPost,
+        fromBotId: speakerBot.id,
+        alreadyPosted: true,
+        turn: defaultBotsTurn(),
+      };
+      if (isConvoBusy(group.id)) {
+        queueBotsInject(group.id, item);
+      } else if (typeof runBotsOutbound === 'function') {
         void runBotsOutbound(group, item, null, group.title);
       }
     }
@@ -624,122 +653,136 @@ function appendBotsInjectMessage(convo, item) {
 }
 
 async function runBotsOutbound(convo, item, userMessage, previousTitle) {
-  clearBotsOutboundStopped(convo.id);
-  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
-  const epoch = bumpBotsOutboundEpoch(convo.id);
-  const members = participantBots(convo);
-  const primary = members[0] || null;
-  if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
-    if (activeId === convo.id) renderThread(convo);
-    return;
-  }
-  await maybeCompactBotsConvo(convo, primary);
-  if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
-    if (activeId === convo.id) renderThread(convo);
-    return;
-  }
-  clearBotsInjects(convo.id);
-  const queue = botsToPing(convo, item.editText || item.displayText || '', {
-    fromBotId: item.fromBotId || null,
-    replyToSpeakerId: item.replyToSpeakerId || null,
-  });
-  if (!queue.length && primary && !item.fromBotId && !item.replyToSpeakerId) queue.push(primary);
-  let hops = 0;
+  markBotsOutboundActive(convo.id);
+  // Edit-resubmit marks outboundStarting so the composer stays busy during abort.
+  // Hops must not see that flag or runAssistantTurn returns false immediately.
+  if (typeof clearOutboundStarting === 'function') clearOutboundStarting(convo.id);
   let stopped = false;
-  const messageCountAtStart = convo.messages.length;
-  while (queue.length && hops < BOT_GROUP_MAX_HOPS) {
+  let messageCountAtStart = convo.messages.length;
+  try {
+    clearBotsOutboundStopped(convo.id);
+    if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+    const epoch = bumpBotsOutboundEpoch(convo.id);
+    const members = participantBots(convo);
+    const primary = members[0] || null;
     if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
       stopped = true;
-      break;
-    }
-    // Apply injects that arrived between hops (or after a soft abort cleared the stream).
-    for (const inject of drainBotsInjects(convo.id)) {
-      const injected = appendBotsInjectMessage(convo, inject);
-      botsToPing(convo, inject.editText || inject.displayText || '', {
-        replyToSpeakerId: inject.replyToSpeakerId || null,
-      }).forEach((next) => {
-        if (!queue.some((queued) => queued.id === next.id)) queue.unshift(next);
-      });
-      if (injected && activeId === convo.id) {
-        chatThread.appendChild(
-          buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
-        );
-        scrollToBottom({ force: true });
+    } else {
+      await maybeCompactBotsConvo(convo, primary);
+      if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
+        stopped = true;
       }
     }
-    if (!queue.length) break;
-    const bot = queue.shift();
-    if (!bot) continue;
-    hops += 1;
-    const before = convo.messages.length;
-    await runAssistantTurn(convo, {
-      useAgent: item.turn.useAgent,
-      text: item.apiText,
-      skills: item.turn.skills,
-      deepResearch: item.turn.deepResearch,
-      deepResearchOutput: item.turn.deepResearchOutput,
-      forceTools: item.turn.forceTools,
-      dispatchedMessage: hops === 1 ? userMessage : null,
-      queueItem: hops === 1 ? item : null,
-      previousTitle,
-      speakerBotId: bot.id,
-      skipQueue: true,
+    if (!stopped) {
+    clearBotsInjects(convo.id);
+    const queue = botsToPing(convo, item.editText || item.displayText || '', {
+      fromBotId: item.fromBotId || null,
+      replyToSpeakerId: item.replyToSpeakerId || null,
     });
-    if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
-      stopped = true;
-      break;
-    }
-    const last = convo.messages[convo.messages.length - 1];
-    const producedAssistant = !!(
-      last
-      && last.role === 'assistant'
-      && convo.messages.length > before
-    );
-    if (producedAssistant && typeof isSilentNoReply === 'function' && isSilentNoReply(last.content)) {
-      convo.messages.pop();
-      saveStore();
-      if (activeId === convo.id) renderThread(convo);
-    } else if (
-      producedAssistant
-      && String(last.content || '').trim() !== 'No response.'
-      && last.error !== 'No response.'
+    if (!queue.length && primary && !item.fromBotId && !item.replyToSpeakerId) queue.push(primary);
+    let hops = 0;
+    messageCountAtStart = convo.messages.length;
+    while (
+      hops < BOT_GROUP_MAX_HOPS
+      && (queue.length || botsPendingInjects.has(convo.id))
     ) {
-      if (convo.botsHeldBy) {
-        for (let i = queue.length - 1; i >= 0; i -= 1) {
-          if (queue[i].id !== convo.botsHeldBy) queue.splice(i, 1);
+      if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
+        stopped = true;
+        break;
+      }
+      // Apply injects that arrived between hops (or after a soft abort cleared the stream).
+      for (const inject of drainBotsInjects(convo.id)) {
+        const injected = inject.alreadyPosted ? null : appendBotsInjectMessage(convo, inject);
+        botsToPing(convo, inject.editText || inject.displayText || '', {
+          fromBotId: inject.fromBotId || null,
+          replyToSpeakerId: inject.replyToSpeakerId || null,
+        }).forEach((next) => {
+          if (!queue.some((queued) => queued.id === next.id)) queue.unshift(next);
+        });
+        if (injected && activeId === convo.id) {
+          chatThread.appendChild(
+            buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
+          );
+          scrollToBottom({ force: true });
         }
-      } else {
-        botsToPing(convo, last.content, { fromBotId: bot.id }).forEach((next) => {
+      }
+      if (!queue.length) break;
+      const bot = queue.shift();
+      if (!bot) continue;
+      hops += 1;
+      const before = convo.messages.length;
+      await runAssistantTurn(convo, {
+        useAgent: item.turn.useAgent,
+        text: item.apiText,
+        skills: item.turn.skills,
+        deepResearch: item.turn.deepResearch,
+        deepResearchOutput: item.turn.deepResearchOutput,
+        forceTools: item.turn.forceTools,
+        dispatchedMessage: hops === 1 ? userMessage : null,
+        queueItem: hops === 1 ? item : null,
+        previousTitle,
+        speakerBotId: bot.id,
+        skipQueue: true,
+      });
+      if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
+        stopped = true;
+        break;
+      }
+      const last = convo.messages[convo.messages.length - 1];
+      const producedAssistant = !!(
+        last
+        && last.role === 'assistant'
+        && convo.messages.length > before
+      );
+      if (producedAssistant && typeof isSilentNoReply === 'function' && isSilentNoReply(last.content)) {
+        convo.messages.pop();
+        saveStore();
+        if (activeId === convo.id) renderThread(convo, { drainQueue: false });
+      } else if (
+        producedAssistant
+        && String(last.content || '').trim() !== 'No response.'
+        && last.error !== 'No response.'
+      ) {
+        if (convo.botsHeldBy) {
+          for (let i = queue.length - 1; i >= 0; i -= 1) {
+            if (queue[i].id !== convo.botsHeldBy) queue.splice(i, 1);
+          }
+        } else {
+          botsToPing(convo, last.content, { fromBotId: bot.id }).forEach((next) => {
+            if (!queue.some((queued) => queued.id === next.id)) queue.push(next);
+          });
+        }
+      }
+      // Mid-turn user injects (steer/interrupt while a bot was thinking).
+      const injects = drainBotsInjects(convo.id);
+      for (const inject of injects) {
+        const injected = inject.alreadyPosted ? null : appendBotsInjectMessage(convo, inject);
+        const pinged = botsToPing(convo, inject.editText || inject.displayText || '', {
+          fromBotId: inject.fromBotId || null,
+          replyToSpeakerId: inject.replyToSpeakerId || null,
+        });
+        const resume = [];
+        if (bot && !inject.replyToSpeakerId && !pinged.some((item) => item.id === bot.id)) resume.push(bot);
+        [...resume, ...pinged].forEach((next) => {
           if (!queue.some((queued) => queued.id === next.id)) queue.push(next);
         });
+        if (injected && activeId === convo.id) {
+          chatThread.appendChild(
+            buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
+          );
+          scrollToBottom({ force: true });
+        }
       }
     }
-    // Mid-turn user injects (steer/interrupt while a bot was thinking).
-    const injects = drainBotsInjects(convo.id);
-    for (const inject of injects) {
-      const injected = appendBotsInjectMessage(convo, inject);
-      const pinged = botsToPing(convo, inject.editText || inject.displayText || '', {
-        replyToSpeakerId: inject.replyToSpeakerId || null,
-      });
-      const resume = [];
-      if (bot && !inject.replyToSpeakerId && !pinged.some((item) => item.id === bot.id)) resume.push(bot);
-      [...resume, ...pinged].forEach((next) => {
-        if (!queue.some((queued) => queued.id === next.id)) queue.push(next);
-      });
-      if (injected && activeId === convo.id) {
-        chatThread.appendChild(
-          buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
-        );
-        scrollToBottom({ force: true });
-      }
     }
+    if (stopped) {
+      purgeTrailingNoResponseMessages(convo, messageCountAtStart);
+      saveStore();
+    }
+  } finally {
+    clearBotsOutboundActive(convo.id);
   }
-  if (stopped) {
-    purgeTrailingNoResponseMessages(convo, messageCountAtStart);
-    saveStore();
-  } else {
-    maybeSendNextQueued(convo.id);
-  }
+  if (!stopped) maybeSendNextQueued(convo.id);
   if (activeId === convo.id) renderThread(convo);
   if (typeof flushBotNavigation === 'function') flushBotNavigation();
 }
@@ -983,11 +1026,19 @@ async function deleteBotAndSession(botId) {
   }
 }
 
-function applyAppSurface(next, { skipRoute = false } = {}) {
+function persistAppSurface(next) {
   const surface = next === 'bots' ? 'bots' : 'chat';
   appSurface = surface;
-  try { localStorage.setItem(APP_SURFACE_KEY, surface); } catch { /* ignore */ }
   document.getElementById('chatShell')?.setAttribute('data-surface', surface);
+  if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(surface);
+  if (storageReady && settings.appSurface !== surface) {
+    saveSettings({ ...settings, appSurface: surface }, { immediate: false });
+  }
+}
+
+function applyAppSurface(next, { skipRoute = false } = {}) {
+  persistAppSurface(next);
+  const surface = appSurface;
   if (surface === 'bots' && mainView === 'projects') {
     mainView = 'chat';
     document.getElementById('projectsView')?.classList.add('is-hidden');
@@ -997,15 +1048,11 @@ function applyAppSurface(next, { skipRoute = false } = {}) {
   if (!convo || convoSurfaceOf(convo) !== surface) startDraft();
   syncProjectChrome();
   renderSidebar();
-  if (typeof paintWordmarkSurface === 'function') paintWordmarkSurface(surface);
   if (!skipRoute) syncUrlFromState({ replace: true });
 }
 
 function restoreAppSurface() {
-  try {
-    const stored = localStorage.getItem(APP_SURFACE_KEY);
-    if (stored === 'bots' || stored === 'chat') appSurface = stored;
-  } catch { /* ignore */ }
+  persistAppSurface(settings.appSurface === 'bots' ? 'bots' : 'chat');
 }
 
 function botsNotInGroup(convo) {
@@ -1101,7 +1148,6 @@ function addBotToActiveGroup(botId) {
   persistGroupParticipants(convo, ids);
 }
 
-const TRACE_SPLIT_KEY = 'tensorui.chat.traceSplit';
 const TRACE_ACTIVITY_SHARE_DEFAULT = 0.6;
 const TRACE_ACTIVITY_SHARE_MIN = 0.22;
 const TRACE_ACTIVITY_SHARE_MAX = 0.78;
@@ -1118,29 +1164,27 @@ function clampTraceActivityShare(value) {
 }
 
 function loadTraceSplitPrefs() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(TRACE_SPLIT_KEY) || 'null');
-    if (!raw || typeof raw !== 'object') return;
-    if (typeof raw.activityShare === 'number') {
-      traceActivityShare = clampTraceActivityShare(raw.activityShare);
-    }
-    traceActivityFolded = !!raw.activityFolded;
-    traceMembersFolded = !!raw.membersFolded;
-  } catch {
-    /* ignore */
-  }
+  traceActivityShare = clampTraceActivityShare(settings.traceActivityShare);
+  traceActivityFolded = !!settings.traceActivityFolded;
+  traceMembersFolded = !!settings.traceMembersFolded;
+  if (typeof applyTraceSplitLayout === 'function') applyTraceSplitLayout();
 }
 
 function saveTraceSplitPrefs() {
-  try {
-    localStorage.setItem(TRACE_SPLIT_KEY, JSON.stringify({
-      activityShare: traceActivityShare,
-      activityFolded: traceActivityFolded,
-      membersFolded: traceMembersFolded,
-    }));
-  } catch {
-    /* ignore */
+  if (!storageReady) return;
+  if (
+    settings.traceActivityShare === traceActivityShare
+    && !!settings.traceActivityFolded === !!traceActivityFolded
+    && !!settings.traceMembersFolded === !!traceMembersFolded
+  ) {
+    return;
   }
+  saveSettings({
+    ...settings,
+    traceActivityShare,
+    traceActivityFolded,
+    traceMembersFolded,
+  }, { immediate: false });
 }
 
 function applyTraceSplitLayout() {
@@ -1374,5 +1418,4 @@ function bindBotChrome() {
   bindTraceSplitChrome();
 }
 
-restoreAppSurface();
 bindBotChrome();

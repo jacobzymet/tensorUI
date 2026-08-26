@@ -1,8 +1,3 @@
-const STORAGE_KEY = 'tensorui.chat.v1';
-const SETTINGS_KEY = 'tensorui.chat.settings.v1';
-const SIDEBAR_COLLAPSED_KEY = 'tensorui.chat.sidebarCollapsed';
-const PRIVACY_MODE_KEY = 'tensorui.chat.privacyMode';
-const UPDATE_DISMISS_KEY = 'tensorui.update.dismissed';
 const TRACE_DESKTOP_MQ = window.matchMedia('(min-width: 821px)');
 
 /**
@@ -117,6 +112,10 @@ const DEFAULT_SETTINGS = {
   collapsedModelProviders: [],
   sidebarCollapsed: false,
   privacyMode: false,
+  appSurface: 'chat',
+  traceActivityShare: 0.6,
+  traceActivityFolded: false,
+  traceMembersFolded: false,
   updateDismissed: '',
   browserMigrationVersion: 1,
 };
@@ -620,10 +619,6 @@ const chatModelSearchWrap = document.getElementById('chatModelSearchWrap');
 const chatModelSearch = document.getElementById('chatModelSearch');
 const chatModelSearchCount = document.getElementById('chatModelSearchCount');
 const chatModelEmpty = document.getElementById('chatModelEmpty');
-const REMOTE_MODEL_KEY = 'tensorui_remote_model_id';
-const CHAT_MODEL_KEY = 'tensorui_chat_model';
-const RECENT_MODELS_KEY = 'tensorui_recent_models';
-const PINNED_MODELS_KEY = 'tensorui_pinned_models';
 const RECENT_MODELS_MAX = 12;
 const PINNED_MODELS_MAX = 48;
 /** Below this many models the filter field is more noise than help. */
@@ -741,6 +736,32 @@ function normalizeProject(project) {
   };
 }
 
+function normalizeOutboundItem(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const attachments = Array.isArray(raw.attachments) ? raw.attachments : [];
+  const displayText = String(raw.displayText || '').trim();
+  const editText = String(raw.editText || displayText);
+  if (!displayText && !editText && !attachments.length) return null;
+  const turn = raw.turn && typeof raw.turn === 'object' ? raw.turn : {};
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : newId('q'),
+    editText,
+    displayText: displayText || (attachments.length ? '(attachment)' : editText),
+    apiText: raw.apiText != null ? raw.apiText : (displayText || editText),
+    attachments,
+    replyQuote: typeof raw.replyQuote === 'string' ? raw.replyQuote : '',
+    replyToSpeakerId: typeof raw.replyToSpeakerId === 'string' ? raw.replyToSpeakerId : '',
+    replyToSpeakerHandle: typeof raw.replyToSpeakerHandle === 'string' ? raw.replyToSpeakerHandle : '',
+    turn: {
+      useAgent: !!turn.useAgent,
+      skills: turn.skills && typeof turn.skills === 'object' ? turn.skills : {},
+      deepResearch: !!turn.deepResearch,
+      deepResearchOutput: turn.deepResearchOutput === 'brief' ? 'brief' : 'long',
+      forceTools: Array.isArray(turn.forceTools) ? turn.forceTools : [],
+    },
+  };
+}
+
 function normalizeConversation(convo) {
   return {
     id: convo.id || newId('c'),
@@ -766,6 +787,9 @@ function normalizeConversation(convo) {
     groupMemory: typeof convo.groupMemory === 'string' ? convo.groupMemory : '',
     botsHeldBy: typeof convo.botsHeldBy === 'string' ? convo.botsHeldBy : null,
     sideThreadOf: typeof convo.sideThreadOf === 'string' ? convo.sideThreadOf : null,
+    outboundQueue: Array.isArray(convo.outboundQueue)
+      ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
+      : [],
   };
 }
 
@@ -831,83 +855,10 @@ function parseStorePayload(parsed) {
   return { projects: [], conversations: [], bots: [] };
 }
 
-function loadStoreFromLocal() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { projects: [], conversations: [], bots: [] };
-    return parseStorePayload(JSON.parse(raw));
-  } catch {
-    return { projects: [], conversations: [], bots: [] };
-  }
-}
-
-function readLegacyLocalValue(key) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function readLegacyLocalJson(key, fallback) {
-  try {
-    const raw = readLegacyLocalValue(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-const LEGACY_LOCAL_STORAGE_KEYS = [
-  STORAGE_KEY,
-  SETTINGS_KEY,
-  SIDEBAR_COLLAPSED_KEY,
-  PRIVACY_MODE_KEY,
-  UPDATE_DISMISS_KEY,
-  REMOTE_MODEL_KEY,
-  CHAT_MODEL_KEY,
-  RECENT_MODELS_KEY,
-  PINNED_MODELS_KEY,
-  'tensorui.settings.sidebarCollapsed',
-];
-
-function clearLegacyLocalStorage() {
-  try {
-    LEGACY_LOCAL_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // A locked-down browser may deny storage access; nothing was written by us.
-  }
-}
-
-function mergeLegacyStore(primary, legacy, preferLegacy = false) {
-  if (storeIsEmpty(legacy)) return primary;
-  if (storeIsEmpty(primary)) return legacy;
-  const first = preferLegacy ? legacy : primary;
-  const second = preferLegacy ? primary : legacy;
-  const projectsById = new Map(first.projects.map((item) => [item.id, item]));
-  const conversationsById = new Map(first.conversations.map((item) => [item.id, item]));
-  second.projects.forEach((item) => {
-    if (!projectsById.has(item.id)) projectsById.set(item.id, item);
-  });
-  second.conversations.forEach((item) => {
-    if (!conversationsById.has(item.id)) conversationsById.set(item.id, item);
-  });
-  const botsById = new Map((first.bots || []).map((item) => [item.id, item]));
-  (second.bots || []).forEach((item) => {
-    if (!botsById.has(item.id)) botsById.set(item.id, item);
-  });
-  return {
-    projects: [...projectsById.values()],
-    conversations: [...conversationsById.values()],
-    bots: [...botsById.values()],
-  };
-}
-
 let projects = [];
 let conversations = [];
 let bots = [];
 let dataInfo = null;
-let browserStorage = false;
 let storageReady = false;
 let saveStoreTimer = null;
 let saveSettingsTimer = null;
@@ -962,11 +913,63 @@ async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => tru
   return false;
 }
 
+function outboundQueueForStore(convoId) {
+  const queue = Array.isArray(outboundQueues.get(convoId))
+    ? outboundQueues.get(convoId).slice()
+    : [];
+  const stream = typeof activeStreams !== 'undefined' ? activeStreams.get(convoId) : null;
+  const pending = (stream?.pendingSteers || [])
+    .filter((entry) => entry?.item && !entry.applied)
+    .map((entry) => entry.item);
+  if (!pending.length) return queue;
+  const seen = new Set(pending.map((item) => item.id));
+  return pending.concat(queue.filter((item) => !seen.has(item.id)));
+}
+
+function conversationStoreRecord(convo) {
+  const record = { ...convo };
+  delete record.outboundQueue;
+  const queue = outboundQueueForStore(convo.id);
+  if (queue.length) record.outboundQueue = queue;
+  return record;
+}
+
+function restoreOutboundQueues(list) {
+  outboundQueues.clear();
+  for (const convo of list || []) {
+    const items = Array.isArray(convo.outboundQueue)
+      ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
+      : [];
+    if (items.length) outboundQueues.set(convo.id, items);
+    if (convo && Object.prototype.hasOwnProperty.call(convo, 'outboundQueue')) {
+      delete convo.outboundQueue;
+    }
+  }
+}
+
+function adoptPersistedOutboundQueue(convo) {
+  if (!convo?.id) return;
+  const persisted = Array.isArray(convo.outboundQueue)
+    ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
+    : [];
+  if (Object.prototype.hasOwnProperty.call(convo, 'outboundQueue')) {
+    delete convo.outboundQueue;
+  }
+  if (outboundQueues.has(convo.id)) return;
+  if (persisted.length) outboundQueues.set(convo.id, persisted);
+}
+
+function persistOutboundQueues() {
+  saveConversations({ immediate: true });
+}
+
 function storePayload() {
   return {
     version: 2,
     projects,
-    conversations: conversations.filter((convo) => !convo.incognito),
+    conversations: conversations
+      .filter((convo) => !convo.incognito)
+      .map(conversationStoreRecord),
     bots,
   };
 }
@@ -976,7 +979,6 @@ function diskEncryptionLocked() {
     dataInfo
     && dataInfo.encryption_enabled
     && !dataInfo.encryption_unlocked
-    && !browserStorage
   );
 }
 
@@ -1330,6 +1332,14 @@ function normalizeSettings(parsed) {
     collapsedModelProviders: normalizeModelIds(parsed.collapsedModelProviders, 64),
     sidebarCollapsed: parsed.sidebarCollapsed === true,
     privacyMode: parsed.privacyMode === true,
+    appSurface: parsed.appSurface === 'bots' ? 'bots' : 'chat',
+    traceActivityShare: (() => {
+      const n = Number(parsed.traceActivityShare);
+      if (!Number.isFinite(n)) return DEFAULT_SETTINGS.traceActivityShare;
+      return Math.min(0.78, Math.max(0.22, n));
+    })(),
+    traceActivityFolded: parsed.traceActivityFolded === true,
+    traceMembersFolded: parsed.traceMembersFolded === true,
     updateDismissed: typeof parsed.updateDismissed === 'string'
       ? parsed.updateDismissed.trim()
       : '',
@@ -1376,12 +1386,6 @@ function saveSettings(next, { immediate = true } = {}) {
 }
 
 let settings = { ...DEFAULT_SETTINGS };
-
-function storeIsEmpty(store) {
-  return !(store.projects && store.projects.length)
-    && !(store.conversations && store.conversations.length)
-    && !(store.bots && store.bots.length);
-}
 
 function refreshLocalDataPane() {
   const lede = document.getElementById('settingsDataLede');
@@ -1500,68 +1504,18 @@ async function postEncryption(path, body) {
     throw new Error(payload.error || 'Encryption request failed');
   }
   dataInfo = payload;
-  browserStorage = !!dataInfo.browser_storage;
   refreshLocalDataPane();
   refreshSettingsDataSummary();
   return dataInfo;
 }
 
-async function migrateLegacyBrowserState(store, rawPreferences, { preferLegacyStore = false } = {}) {
-  const rawPrefs = rawPreferences && typeof rawPreferences === 'object' ? rawPreferences : {};
-  const hasLegacy = LEGACY_LOCAL_STORAGE_KEYS.some((key) => readLegacyLocalValue(key) != null);
-  if (!hasLegacy && rawPrefs.browserMigrationVersion >= 1) {
-    return { store, preferences: normalizeSettings(rawPrefs) };
-  }
-
-  const legacyStore = loadStoreFromLocal();
-  const mergedStore = mergeLegacyStore(store, legacyStore, preferLegacyStore);
-  const legacySettings = readLegacyLocalJson(SETTINGS_KEY, {});
-  const legacySelected = readLegacyLocalValue(CHAT_MODEL_KEY)
-    || readLegacyLocalValue(REMOTE_MODEL_KEY)
-    || '';
-  const mergedRaw = { ...legacySettings, ...rawPrefs };
-  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'selectedChatModel')) {
-    mergedRaw.selectedChatModel = legacySelected;
-  }
-  mergedRaw.recentModelIds = normalizeModelIds([
-    ...(Array.isArray(rawPrefs.recentModelIds) ? rawPrefs.recentModelIds : []),
-    ...readLegacyLocalJson(RECENT_MODELS_KEY, []),
-  ], RECENT_MODELS_MAX);
-  mergedRaw.pinnedModelIds = normalizeModelIds([
-    ...(Array.isArray(rawPrefs.pinnedModelIds) ? rawPrefs.pinnedModelIds : []),
-    ...readLegacyLocalJson(PINNED_MODELS_KEY, []),
-  ], PINNED_MODELS_MAX);
-  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'sidebarCollapsed')) {
-    mergedRaw.sidebarCollapsed = readLegacyLocalValue(SIDEBAR_COLLAPSED_KEY) === '1';
-  }
-  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'privacyMode')) {
-    mergedRaw.privacyMode = readLegacyLocalValue(PRIVACY_MODE_KEY) === '1';
-  }
-  if (!Object.prototype.hasOwnProperty.call(rawPrefs, 'updateDismissed')) {
-    mergedRaw.updateDismissed = readLegacyLocalValue(UPDATE_DISMISS_KEY) || '';
-  }
-  mergedRaw.browserMigrationVersion = 1;
-  const preferences = normalizeSettings(mergedRaw);
-
-  const storeResponse = await fetch('/api/data/store', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      version: 2,
-      projects: mergedStore.projects,
-      conversations: mergedStore.conversations,
-      bots: mergedStore.bots || [],
-    }),
-  });
-  if (!storeResponse.ok) throw new Error('Could not migrate browser chat data to disk');
-  const preferencesResponse = await fetch('/api/data/preferences', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(preferences),
-  });
-  if (!preferencesResponse.ok) throw new Error('Could not migrate browser preferences to disk');
-  clearLegacyLocalStorage();
-  return { store: mergedStore, preferences };
+function normalizeLoadedStore(store, rawPreferences) {
+  return {
+    store,
+    preferences: normalizeSettings(
+      rawPreferences && typeof rawPreferences === 'object' ? rawPreferences : {}
+    ),
+  };
 }
 
 async function initLocalData() {
@@ -1571,21 +1525,16 @@ async function initLocalData() {
   } catch {
     dataInfo = null;
   }
-  browserStorage = !!dataInfo?.browser_storage;
-  const migratingBrowserMode = browserStorage;
-  if (browserStorage && dataInfo) {
+  if (dataInfo?.browser_storage) {
     try {
       const response = await fetch('/api/data', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ browser_storage: false }),
       });
-      if (!response.ok) throw new Error('Could not switch legacy browser storage to disk');
-      dataInfo = await response.json();
-      browserStorage = false;
+      if (response.ok) dataInfo = await response.json();
     } catch {
-      dataInfo = null;
-      browserStorage = false;
+      /* Disk is the only storage mode; ignore a failed rewrite of an old flag. */
     }
   }
 
@@ -1618,13 +1567,11 @@ async function initLocalData() {
         const store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [], bots: [] };
         const prefRes = await fetch('/api/data/preferences');
         const rawPrefs = prefRes.ok ? await prefRes.json() : {};
-        const migrated = await migrateLegacyBrowserState(store, rawPrefs, {
-          preferLegacyStore: migratingBrowserMode,
-        });
-        projects = migrated.store.projects;
-        conversations = migrated.store.conversations;
-        bots = migrated.store.bots || [];
-        settings = migrated.preferences;
+        const loaded = normalizeLoadedStore(store, rawPrefs);
+        projects = loaded.store.projects;
+        conversations = loaded.store.conversations;
+        bots = loaded.store.bots || [];
+        settings = loaded.preferences;
       }
     } catch {
       projects = [];
@@ -1635,7 +1582,10 @@ async function initLocalData() {
   }
 
   hydrateModelPickerState();
+  restoreOutboundQueues(conversations);
   storageReady = true;
+  if (typeof restoreAppSurface === 'function') restoreAppSurface();
+  if (typeof loadTraceSplitPrefs === 'function') loadTraceSplitPrefs();
   if (conversations._sortOrderMigrated) {
     delete conversations._sortOrderMigrated;
     saveStore();
@@ -1731,13 +1681,17 @@ async function loadDiskDataAfterUnlock() {
   const store = parseStorePayload(await storeRes.json());
   const prefRes = await fetch('/api/data/preferences');
   const rawPrefs = prefRes.ok ? await prefRes.json() : {};
-  const migrated = await migrateLegacyBrowserState(store, rawPrefs);
-  projects = migrated.store.projects;
-  conversations = migrated.store.conversations;
-  bots = migrated.store.bots || [];
-  settings = migrated.preferences;
+  const loaded = normalizeLoadedStore(store, rawPrefs);
+  projects = loaded.store.projects;
+  conversations = loaded.store.conversations;
+  bots = loaded.store.bots || [];
+  settings = loaded.preferences;
   hydrateModelPickerState();
+  restoreOutboundQueues(conversations);
+  if (typeof restoreAppSurface === 'function') restoreAppSurface();
+  if (typeof loadTraceSplitPrefs === 'function') loadTraceSplitPrefs();
   hideUnlockSession();
+  if (typeof pollState === 'function') await pollState();
   refreshUiFromMemoryStore();
 }
 

@@ -32,8 +32,14 @@ function refreshSettingsDataSummary() {
   if (clearAll) clearAll.disabled = chatCount === 0 && projectCount === 0;
 }
 
+const outboundStarting = new Set();
+
 function isConvoBusy(convoId) {
-  return !!convoId && activeStreams.has(convoId);
+  return !!convoId && (
+    activeStreams.has(convoId)
+    || outboundStarting.has(convoId)
+    || (typeof isBotsOutboundActive === 'function' && isBotsOutboundActive(convoId))
+  );
 }
 
 function activeStream() {
@@ -82,6 +88,43 @@ function isBotsOutboundStopped(convoId) {
   return !!convoId && botsOutboundStopFlags.has(convoId);
 }
 
+const cancelInFlight = new Map();
+
+function markOutboundStarting(convoId) {
+  if (!convoId) return;
+  outboundStarting.add(convoId);
+  if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
+}
+
+function clearOutboundStarting(convoId) {
+  if (!convoId) return;
+  outboundStarting.delete(convoId);
+  if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
+}
+
+function scheduleCancel(convoId, turnId) {
+  if (!convoId) return Promise.resolve();
+  const prev = cancelInFlight.get(convoId) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => fetch('/api/chat/cancel', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      conversation_id: convoId,
+      ...(turnId ? { turn_id: turnId } : {}),
+    }),
+  }).then(() => {}).catch(() => {}));
+  cancelInFlight.set(convoId, next);
+  next.finally(() => {
+    if (cancelInFlight.get(convoId) === next) cancelInFlight.delete(convoId);
+  });
+  return next;
+}
+
+function waitForCancel(convoId) {
+  const pending = convoId ? cancelInFlight.get(convoId) : null;
+  return pending ? pending.catch(() => {}) : Promise.resolve();
+}
+
 function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
   if (cancelServer && !soft) markBotsOutboundStopped(convoId);
   if (cancelServer && !soft && typeof bumpBotsOutboundEpoch === 'function') {
@@ -106,16 +149,11 @@ function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
   } else if (cancelServer && !soft) {
     noteLiveTurnUserCancel(convoId, null);
   }
-  if (cancelServer && convoId) {
-    fetch('/api/chat/cancel', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        conversation_id: convoId,
-        ...(stream?.turnId ? { turn_id: stream.turnId } : {}),
-      }),
-    }).catch(() => {});
-  }
+  const cancelDone = cancelServer && convoId
+    ? scheduleCancel(convoId, stream?.turnId || null)
+    : Promise.resolve();
+  syncComposerStreamUi();
+  return cancelDone;
 }
 
 /** Abort the live hop without ending the bots outbound loop. */
@@ -125,10 +163,7 @@ function softAbortStream(convoId) {
 
 function abortAllStreams({ cancelServer = true } = {}) {
   for (const id of [...activeStreams.keys()]) abortStream(id, { cancelServer });
-}
-
-function abortActiveSend() {
-  abortAllStreams();
+  if (typeof stopAllBotsOutbound === 'function') stopAllBotsOutbound();
 }
 
 function syncComposerStreamUi() {
@@ -175,6 +210,7 @@ function clearOutboundQueue(convoId) {
   }
   outboundQueues.delete(convoId);
   if (activeId === convoId) renderOutboundQueue(conversations.find((c) => c.id === convoId));
+  persistOutboundQueues();
 }
 
 function canSteerLiveStream(stream = activeStream()) {
@@ -354,6 +390,7 @@ function enqueueOutbound(convo, item) {
   }
   updateComposerHint();
   syncComposerStreamUi();
+  persistOutboundQueues();
 }
 
 function removeQueuedOutbound(convoId, queueId) {
@@ -374,6 +411,7 @@ function removeQueuedOutbound(convoId, queueId) {
     if (row) row.remove();
   }
   updateComposerHint();
+  persistOutboundQueues();
   maybeSendNextQueued(convoId);
 }
 
@@ -413,6 +451,7 @@ function steerQueuedOutbound(convoId, queueId) {
   if (!text) {
     queue.unshift(item);
     outboundQueues.set(convoId, queue);
+    persistOutboundQueues();
     if (activeId === convoId) {
       const convo = conversations.find((c) => c.id === convoId);
       if (convo) renderOutboundQueue(convo);
@@ -424,6 +463,7 @@ function steerQueuedOutbound(convoId, queueId) {
   if (!stream.pendingSteers) stream.pendingSteers = [];
   const entry = { item, text, posted: false, applied: false };
   stream.pendingSteers.push(entry);
+  persistOutboundQueues();
   renderPendingSteerBubble(convoId, entry);
   void flushPendingSteers(stream);
 }
@@ -476,7 +516,7 @@ async function postSteerToAgent(stream, entry) {
 
 async function flushPendingSteers(stream) {
   if (!stream?.steerId || !Array.isArray(stream.pendingSteers)) return;
-  for (const entry of stream.pendingSteers) {
+  for (const entry of stream.pendingSteers.slice()) {
     if (entry.posted || entry.applied) continue;
     try {
       await postSteerToAgent(stream, entry);
@@ -484,8 +524,26 @@ async function flushPendingSteers(stream) {
     } catch (error) {
       entry.posted = false;
       showAttachHint(error?.message || 'Could not steer this turn');
+      if (!entry.applied) restoreSteerToQueue(stream, entry);
     }
   }
+}
+
+function restoreSteerToQueue(stream, entry) {
+  if (!stream?.pendingSteers || !entry?.item) return;
+  const idx = stream.pendingSteers.indexOf(entry);
+  if (idx >= 0) stream.pendingSteers.splice(idx, 1);
+  const convoId = [...activeStreams.entries()].find(([, live]) => live === stream)?.[0];
+  if (!convoId) return;
+  const row = chatThread?.querySelector(
+    '.msg-steering[data-steer-queue-id="' + CSS.escape(entry.item.id) + '"]'
+  );
+  if (row) row.remove();
+  getOutboundQueue(convoId).unshift(entry.item);
+  persistOutboundQueues();
+  const convo = conversations.find((c) => c.id === convoId);
+  if (convo && activeId === convoId) renderOutboundQueue(convo);
+  updateComposerHint();
 }
 
 function cancelPendingSteer(convoId, queueId) {
@@ -500,10 +558,13 @@ function cancelPendingSteer(convoId, queueId) {
     );
     if (row) row.remove();
   }
-  if (entry?.item && !entry.applied) {
+  if (entry?.item && !entry.applied && !entry.posted) {
     getOutboundQueue(convoId).unshift(entry.item);
+    persistOutboundQueues();
     const convo = conversations.find((c) => c.id === convoId);
     if (convo && activeId === convoId) renderOutboundQueue(convo);
+  } else if (entry?.posted && !entry.applied) {
+    showAttachHint('That steer already reached this turn.');
   }
   updateComposerHint();
 }
@@ -554,12 +615,18 @@ function reclaimUnappliedSteers(convoId, stream) {
   const pending = stream?.pendingSteers;
   if (!pending?.length) return;
   const queue = getOutboundQueue(convoId);
+  const failed = !!(stream.cancelled || stream.hardStopped || stream.errorMessage);
   for (let i = pending.length - 1; i >= 0; i -= 1) {
     const entry = pending[i];
     if (entry.applied || !entry.item) continue;
+    // Posted steers on a finished turn were consumed server-side; re-queueing
+    // them would send a duplicate user turn. Reclaim only if they never left
+    // or the turn died before the model could use them.
+    if (entry.posted && !failed) continue;
     queue.unshift(entry.item);
   }
   stream.pendingSteers = [];
+  persistOutboundQueues();
   if (activeId === convoId) {
     chatThread.querySelectorAll('.msg-steering').forEach((el) => el.remove());
     const convo = conversations.find((c) => c.id === convoId);
@@ -703,13 +770,12 @@ function saveQueuedMessageEdit(row, rawText) {
   closeMentionMenu();
   refreshQueuedBubble(row, item, { paused: false });
   updateComposerHint();
+  persistOutboundQueues();
   maybeSendNextQueued(activeId);
   focusComposer();
 }
 
 function dispatchOutboundTurn(convo, item) {
-  if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
-  if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   const previousTitle = convo.title;
   const userMessage = {
     role: 'user',
@@ -774,10 +840,12 @@ function maybeSendNextQueued(convoId) {
   const convo = conversations.find((item) => item.id === convoId);
   if (!convo) {
     outboundQueues.delete(convoId);
+    persistOutboundQueues();
     return;
   }
   const next = queue.shift();
   outboundQueues.set(convoId, queue);
+  persistOutboundQueues();
   dispatchOutboundTurn(convo, next);
   if (activeId === convoId) renderOutboundQueue(convo);
   updateComposerHint();
@@ -789,12 +857,23 @@ function clearAllChats() {
   if (chats.length === 0) return;
   const n = chats.length;
   if (!confirm('Delete all ' + n + ' chat' + (n === 1 ? '' : 's') + '? This cannot be undone.')) return;
-  abortActiveSend();
   const keep = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
+  const dropIds = new Set(chats.map((convo) => convo.id));
+  for (const id of dropIds) {
+    abortStream(id);
+    outboundQueues.delete(id);
+    stickByConvo.delete(id);
+  }
+  if (editingQueueId && dropIds.has(activeId)) {
+    editingQueueId = null;
+    if (editingRow) {
+      editingRow = null;
+      mentionInput = composerInput;
+      closeMentionMenu();
+    }
+  }
   conversations = keep;
   if (activeId && !conversations.some((item) => item.id === activeId)) activeId = null;
-  outboundQueues.clear();
-  editingQueueId = null;
   saveStore();
   startDraft();
   renderSidebar();
@@ -825,13 +904,25 @@ function clearAllChatsAndProjects() {
   if (!requireUnlockedData()) return;
   if (conversations.length === 0 && projects.length === 0) return;
   if (!confirm('Delete all chats and projects from local data? This cannot be undone.')) return;
-  abortActiveSend();
+  const drop = conversations.filter((convo) => !(typeof isBotsConvo === 'function' && isBotsConvo(convo)));
+  const dropIds = new Set(drop.map((convo) => convo.id));
+  for (const id of dropIds) {
+    abortStream(id);
+    outboundQueues.delete(id);
+    stickByConvo.delete(id);
+  }
+  if (editingQueueId && dropIds.has(activeId)) {
+    editingQueueId = null;
+    if (editingRow) {
+      editingRow = null;
+      mentionInput = composerInput;
+      closeMentionMenu();
+    }
+  }
   conversations = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
   projects = [];
   activeId = null;
   activeProjectId = null;
-  outboundQueues.clear();
-  editingQueueId = null;
   saveStore();
   startDraft();
   renderSidebar();

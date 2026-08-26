@@ -36,6 +36,9 @@ impl App {
         config.providers.migrate();
         config.ui.normalize_fonts();
         config.keep_ui_private();
+        if config.data.storage.is_browser() {
+            config.data.storage = StorageMode::Disk;
+        }
         let changed = config != before;
         let data_root = config_path
             .parent()
@@ -581,6 +584,11 @@ impl App {
     }
 
     pub fn set_storage_mode(&mut self, mode: StorageMode) {
+        let mode = if mode.is_browser() {
+            StorageMode::Disk
+        } else {
+            mode
+        };
         if self.config.data.storage != mode {
             self.config.data.storage = mode;
             self.persist_config();
@@ -753,12 +761,6 @@ impl App {
         passphrase: &str,
         passphrase_confirm: &str,
     ) -> Result<(), String> {
-        if self.storage_mode().is_browser() {
-            return Err(
-                "Switch off browser localStorage first — encryption applies to on-disk data."
-                    .into(),
-            );
-        }
         if passphrase != passphrase_confirm {
             return Err("Passphrases do not match.".into());
         }
@@ -938,6 +940,19 @@ mod tests {
 
     fn test_app(root: &std::path::Path) -> App {
         App::new(Config::default(), root.join("config.toml")).unwrap()
+    }
+
+    #[test]
+    fn browser_storage_config_is_rewritten_to_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut config = Config::default();
+        config.data.storage = StorageMode::Browser;
+        let app = App::new(config, config_path.clone()).unwrap();
+        assert_eq!(app.storage_mode(), StorageMode::Disk);
+        let saved = std::fs::read_to_string(config_path).unwrap();
+        assert!(!saved.contains("browser"));
+        assert!(saved.contains("disk") || !saved.contains("storage"));
     }
 
     #[test]
