@@ -19,6 +19,12 @@ pub fn public_ui_url(bind: SocketAddr) -> String {
     format!("http://{PUBLIC_UI_HOST}:{}", bind.port())
 }
 
+/// OS-resolver URL for the same listener. Chrome maps `*.localhost` to loopback
+/// without DNS (RFC 6761); Windows `getaddrinfo` / reqwest do not.
+pub fn loopback_ui_url(bind: SocketAddr) -> String {
+    format!("http://{bind}")
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -286,5 +292,13 @@ mod tests {
         assert_eq!(public_ui_url(bind), "http://tensormi.localhost:3930");
         let custom: SocketAddr = "127.0.0.1:4000".parse().unwrap();
         assert_eq!(public_ui_url(custom), "http://tensormi.localhost:4000");
+    }
+
+    #[test]
+    fn loopback_ui_url_uses_bind_address() {
+        let bind: SocketAddr = "127.0.0.1:3930".parse().unwrap();
+        assert_eq!(loopback_ui_url(bind), "http://127.0.0.1:3930");
+        let v6: SocketAddr = "[::1]:4000".parse().unwrap();
+        assert_eq!(loopback_ui_url(v6), "http://[::1]:4000");
     }
 }

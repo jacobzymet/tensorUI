@@ -59,7 +59,7 @@ fn main() -> Result<()> {
     let listener = match runtime.block_on(TcpListener::bind(bind)) {
         Ok(listener) => listener,
         Err(error) if error.kind() == ErrorKind::AddrInUse => {
-            return greet_running_instance(&url, bind);
+            return greet_running_instance(bind);
         }
         Err(error) => return Err(error).with_context(|| format!("could not bind {bind}")),
     };
@@ -84,7 +84,7 @@ fn main() -> Result<()> {
         runtime.block_on(async { server.await? })
     } else {
         // Native desktop window on the main thread; server keeps running on Tokio.
-        let window_result = desktop::run_window(&url, runtime.handle());
+        let window_result = desktop::run_window(&url, bind, runtime.handle());
         server.abort();
         match runtime.block_on(server) {
             Ok(Ok(())) | Err(_) => {}
@@ -101,8 +101,8 @@ fn main() -> Result<()> {
 
 const FOCUS_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn greet_running_instance(url: &str, bind: SocketAddr) -> Result<()> {
-    match focus_running_instance(url) {
+fn greet_running_instance(bind: SocketAddr) -> Result<()> {
+    match focus_running_instance(bind) {
         Some(_) => println!("TensorMI Harness is already running — focusing the open window."),
         None => bail!(
             "{bind} is already in use by another program — pass --bind to choose a different address"
@@ -111,10 +111,12 @@ fn greet_running_instance(url: &str, bind: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-fn focus_running_instance(url: &str) -> Option<()> {
+fn focus_running_instance(bind: SocketAddr) -> Option<()> {
+    let url = config::loopback_ui_url(bind);
     let client = tensorui::http::app_blocking_client(FOCUS_TIMEOUT);
     // Bootstrap the per-process HttpOnly session cookie exactly as a browser
     // navigation does before calling the authenticated local API.
+    // Probe via the bind address — Chrome maps *.localhost itself; reqwest uses OS DNS.
     client.get(format!("{url}/")).send().ok()?;
     let response = client.post(format!("{url}/api/focus")).send().ok()?;
     if response.status().as_u16() != 200 {

@@ -14,7 +14,8 @@
 .chat-background {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  /* Above the starfield so the photo + overlay fully cover it. */
+  z-index: 1;
   pointer-events: none;
   overflow: hidden;
   opacity: 0;
@@ -661,7 +662,7 @@ html[data-theme="light"] .agent-process-note {
 }
 .chat-main > *:not(.chat-starfield):not(.chat-background) {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 .chat-topbar {
   flex: 0 0 auto;

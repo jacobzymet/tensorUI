@@ -113,6 +113,7 @@ fn reject_unsafe_destination(path: &Path) -> Result<()> {
             if metadata.nlink() != 1 {
                 bail!("refusing hard-linked destination {}", path.display());
             }
+            let _ = metadata;
             Ok(())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

@@ -1,6 +1,7 @@
 //! Native desktop shell: local Axum server + OS webview window (not a browser tab).
 
 use std::{
+    net::SocketAddr,
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
@@ -240,8 +241,9 @@ fn spawn_quit_listeners(runtime: &tokio::runtime::Handle, proxy: EventLoopProxy<
 }
 
 /// Block on the main thread with a native window until the user closes it.
-pub fn run_window(url: &str, runtime: &tokio::runtime::Handle) -> Result<()> {
-    wait_until_ready(url)?;
+pub fn run_window(url: &str, bind: SocketAddr, runtime: &tokio::runtime::Handle) -> Result<()> {
+    // Chrome maps `*.localhost` to loopback itself; reqwest uses Windows DNS, which does not.
+    wait_until_ready(&crate::config::loopback_ui_url(bind))?;
     QUIT_REQUESTED.store(false, Ordering::SeqCst);
 
     let mut event_loop = EventLoopBuilder::<DesktopEvent>::with_user_event().build();
