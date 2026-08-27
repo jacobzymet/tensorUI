@@ -11,7 +11,9 @@ use std::{
     time::Duration,
 };
 
+use dom_smoothie::{Config, Readability, TextMode};
 use futures_util::{StreamExt, future::join_all};
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
@@ -205,23 +207,6 @@ pub enum DeepResearchOutput {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum WebSearchKind {
-    #[default]
-    Web,
-    News,
-}
-
-impl WebSearchKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Web => "web",
-            Self::News => "news",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
 pub enum WebSearchDepth {
     #[default]
     Off,
@@ -336,6 +321,8 @@ pub struct AgentSkills {
     pub web_search_depth: WebSearchDepth,
     #[serde(default)]
     pub web_search_backend: WebSearchBackend,
+    #[serde(default)]
+    pub web_search_searxng: String,
     #[serde(default = "default_web_search_max_results")]
     pub web_search_max_results: usize,
     #[serde(default = "default_web_search_region")]
@@ -359,6 +346,7 @@ impl Default for AgentSkills {
             web_search: false,
             web_search_depth: WebSearchDepth::default(),
             web_search_backend: WebSearchBackend::default(),
+            web_search_searxng: String::new(),
             web_search_max_results: default_web_search_max_results(),
             web_search_region: default_web_search_region(),
             web_search_safesearch: WebSearchSafeSearch::default(),
@@ -1697,6 +1685,11 @@ fn openai_tools_payload(
                         "query": {
                             "type": "string",
                             "description": "Search terms"
+                        },
+                        "recency": {
+                            "type": "string",
+                            "enum": ["any", "day", "week", "month", "year"],
+                            "description": "Optional freshness filter"
                         }
                     },
                     "required": ["query"]
@@ -2135,8 +2128,8 @@ async fn execute_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "web_search requires a non-empty \"query\" string.".to_string())?;
-            let (search_skills, kind) = search_call_overrides(skills, &call.arguments);
-            let (result, note) = run_web_search(query, &search_skills, kind).await?;
+            let search_skills = search_call_overrides(skills, &call.arguments);
+            let (result, note) = run_web_search(query, &search_skills).await?;
             let ui_result = result.clone();
             let mut model_result = result;
             if skills.fetch_url {
@@ -2260,11 +2253,12 @@ async fn fetch_single_url(
     Ok(format_page_window(url, &full_text, offset, max_chars))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SearchHit {
     title: String,
     url: String,
     snippet: String,
+    featured: bool,
 }
 
 fn parse_enum_arg<T: for<'de> Deserialize<'de>>(args: &Value, key: &str) -> Option<T> {
@@ -2275,43 +2269,43 @@ fn parse_enum_arg<T: for<'de> Deserialize<'de>>(args: &Value, key: &str) -> Opti
     serde_json::from_value(json!(raw.to_ascii_lowercase())).ok()
 }
 
-fn search_call_overrides(skills: &AgentSkills, args: &Value) -> (AgentSkills, WebSearchKind) {
+fn search_call_overrides(skills: &AgentSkills, args: &Value) -> AgentSkills {
     let mut next = skills.clone();
-    if let Some(backend) = parse_enum_arg::<WebSearchBackend>(args, "backend") {
-        next.web_search_backend = backend;
-    }
     if let Some(recency) = parse_enum_arg::<WebSearchRecency>(args, "recency") {
         next.web_search_recency = recency;
     }
-    let kind = parse_enum_arg::<WebSearchKind>(args, "kind").unwrap_or_default();
-    (next, kind)
+    next
 }
 
-async fn run_web_search(
-    query: &str,
-    skills: &AgentSkills,
-    kind: WebSearchKind,
-) -> Result<(String, String), String> {
+async fn run_web_search(query: &str, skills: &AgentSkills) -> Result<(String, String), String> {
     let result_count = skills.search_result_count();
-    let (hits, engine) = search::search_web(query, skills, kind).await?;
-    let kind_label = kind.label();
+    let (hits, engine) = search::search_web(query, skills).await?;
     if hits.is_empty() {
         return Ok((
             format!("No results found for {query:?}."),
-            format!("via {kind_label} · {engine}"),
+            format!("via web · {engine}"),
         ));
     }
     let mut out = format!(
-        "{} search results for {query:?} ({engine}, {}, {}):\n",
-        if kind == WebSearchKind::News {
-            "News"
-        } else {
-            "Web"
-        },
+        "Web search results for {query:?} ({engine}, {}, {}):\n",
         skills.search_region(),
         skills.web_search_safesearch.as_str(),
     );
-    for (index, hit) in hits.iter().take(result_count).enumerate() {
+    let featured: Vec<&SearchHit> = hits.iter().filter(|hit| hit.featured).collect();
+    let rest: Vec<&SearchHit> = hits.iter().filter(|hit| !hit.featured).collect();
+    if !featured.is_empty() {
+        out.push_str("\nDirect answer:\n");
+        for hit in &featured {
+            out.push_str(&format!("\n{}\n", hit.title));
+            if !hit.url.is_empty() {
+                out.push_str(&format!("   URL: {}\n", hit.url));
+            }
+            if !hit.snippet.is_empty() {
+                out.push_str(&format!("   {}\n", hit.snippet));
+            }
+        }
+    }
+    for (index, hit) in rest.iter().take(result_count).enumerate() {
         out.push_str(&format!(
             "\n{}. {}\n   URL: {}\n   {}\n",
             index + 1,
@@ -2320,8 +2314,9 @@ async fn run_web_search(
             hit.snippet
         ));
     }
-    append_scraped_pages(&mut out, &hits, skills).await;
-    Ok((out, format!("via {kind_label} · {engine}")))
+    let scrape_hits: Vec<SearchHit> = rest.into_iter().cloned().collect();
+    append_scraped_pages(&mut out, &scrape_hits, skills).await;
+    Ok((out, format!("via web · {engine}")))
 }
 
 async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &AgentSkills) {
@@ -2385,6 +2380,9 @@ fn scrapeable_url(url: &str) -> bool {
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return false;
     }
+    if search::reject_result_url(url) {
+        return false;
+    }
     let path = lower.split('?').next().unwrap_or(&lower);
     const SKIP_EXT: &[&str] = &[
         ".pdf", ".zip", ".gz", ".tgz", ".rar", ".7z", ".exe", ".dmg", ".apk", ".mp3", ".mp4",
@@ -2431,7 +2429,7 @@ async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
         .await
         .map_err(|error| format!("read failed: {error}"))?;
     let html = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_PAGE_BYTES as usize)]);
-    Ok(html_to_full_text(&html))
+    Ok(html_to_full_text(&html, Some(url)))
 }
 
 async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
@@ -2439,39 +2437,104 @@ async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> 
     Ok(truncate_chars(&full, max_chars))
 }
 
-fn html_to_full_text(html: &str) -> String {
-    let mut cleaned = remove_tag_blocks(html, "script");
-    cleaned = remove_tag_blocks(&cleaned, "style");
-    cleaned = remove_tag_blocks(&cleaned, "noscript");
-    cleaned = remove_tag_blocks(&cleaned, "svg");
-    cleaned = remove_tag_blocks(&cleaned, "template");
-
-    for marker in [
-        "</p>",
-        "</div>",
-        "</section>",
-        "</article>",
-        "</li>",
-        "</tr>",
-        "</h1>",
-        "</h2>",
-        "</h3>",
-        "</h4>",
-        "</h5>",
-        "</h6>",
-        "</blockquote>",
-        "<br>",
-        "<br/>",
-        "<br />",
-        "<hr>",
-        "<hr/>",
-        "<hr />",
-    ] {
-        cleaned = cleaned.replace(marker, "\n");
-        cleaned = cleaned.replace(&marker.to_ascii_uppercase(), "\n");
+fn html_to_full_text(html: &str, page_url: Option<&str>) -> String {
+    if let Some(text) = readability_main_text(html, page_url)
+        && text.chars().count() >= 80
+    {
+        return text;
     }
+    scraper_main_text(html)
+}
 
-    let text = strip_tags(&cleaned);
+fn readability_main_text(html: &str, page_url: Option<&str>) -> Option<String> {
+    let cfg = Config {
+        text_mode: TextMode::Formatted,
+        char_threshold: 80,
+        ..Config::default()
+    };
+    let mut reader = Readability::new(html, page_url, Some(cfg)).ok()?;
+    let article = reader.parse().ok()?;
+    let mut parts = Vec::new();
+    let title = collapse_ws(&article.title);
+    if !title.is_empty() {
+        parts.push(title);
+    }
+    if let Some(byline) = article.byline {
+        let byline = collapse_ws(&byline);
+        if !byline.is_empty() {
+            parts.push(byline);
+        }
+    }
+    let body = normalize_extracted_text(&article.text_content);
+    if !body.is_empty() {
+        parts.push(body);
+    }
+    let joined = parts.join("\n\n");
+    if joined.trim().is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+fn scraper_main_text(html: &str) -> String {
+    let document = Html::parse_document(html);
+    let mut best = String::new();
+    for selector in ["article", "main", "[role=main]", "body"] {
+        let Ok(sel) = Selector::parse(selector) else {
+            continue;
+        };
+        for el in document.select(&sel) {
+            let text = element_block_text(el);
+            if text.chars().count() > best.chars().count() {
+                best = text;
+            }
+        }
+        if best.chars().count() >= 80 {
+            break;
+        }
+    }
+    best
+}
+
+fn element_block_text(el: scraper::ElementRef<'_>) -> String {
+    let Ok(block_sel) = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th") else {
+        return normalize_extracted_text(&el.text().collect::<String>());
+    };
+    let mut lines = Vec::new();
+    for node in el.select(&block_sel) {
+        if node
+            .ancestors()
+            .filter_map(scraper::ElementRef::wrap)
+            .any(|ancestor| {
+                matches!(
+                    ancestor.value().name(),
+                    "nav"
+                        | "footer"
+                        | "header"
+                        | "aside"
+                        | "script"
+                        | "style"
+                        | "form"
+                        | "noscript"
+                )
+            })
+        {
+            continue;
+        }
+        let text = collapse_ws(&node.text().collect::<String>());
+        if !text.is_empty() {
+            lines.push(text);
+        }
+    }
+    if lines.is_empty() {
+        normalize_extracted_text(&el.text().collect::<String>())
+    } else {
+        lines.join("\n")
+    }
+}
+
+fn normalize_extracted_text(text: &str) -> String {
     let mut lines = Vec::new();
     for line in text.lines() {
         let collapsed = collapse_ws(line);
@@ -2481,68 +2544,21 @@ fn html_to_full_text(html: &str) -> String {
             }
             continue;
         }
-        let lower = collapsed.to_ascii_lowercase();
-        if lower == "skip to content"
-            || lower == "skip to main content"
-            || lower == "advertisement"
-            || lower.starts_with("cookie") && lower.len() < 80
-        {
-            continue;
-        }
         lines.push(collapsed);
     }
-
-    while lines.first().is_some_and(|l| l.is_empty()) {
+    while lines.first().is_some_and(|line| line.is_empty()) {
         lines.remove(0);
     }
-    while lines.last().is_some_and(|l| l.is_empty()) {
+    while lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
-
     lines.join("\n")
 }
 
 #[cfg(test)]
 fn html_to_readable_text(html: &str, max_chars: usize) -> String {
-    let joined = html_to_full_text(html);
+    let joined = html_to_full_text(html, None);
     truncate_chars(&joined, max_chars)
-}
-
-fn remove_tag_blocks(html: &str, tag: &str) -> String {
-    let open = format!("<{tag}");
-    let close = format!("</{tag}>");
-    let mut rest = html;
-    let mut out = String::with_capacity(html.len());
-    while let Some(start) = find_ignore_ascii_case(rest, &open) {
-        out.push_str(&rest[..start]);
-        let after_open = &rest[start..];
-        match find_ignore_ascii_case(after_open, &close) {
-            Some(rel) => rest = &after_open[rel + close.len()..],
-            None => return out,
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    let n = needle.as_bytes();
-    let h = haystack.as_bytes();
-    if h.len() < n.len() {
-        return None;
-    }
-    'outer: for i in 0..=(h.len() - n.len()) {
-        for (a, b) in h[i..i + n.len()].iter().zip(n.iter()) {
-            if !a.eq_ignore_ascii_case(b) {
-                continue 'outer;
-            }
-        }
-        return Some(i);
-    }
-    None
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
@@ -2554,31 +2570,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn strip_tags(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
-        }
-    }
-    html_unescape(&out)
-}
-
 fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
 }
 
 /* Redirect decoder used only by the retired direct parser.
@@ -2762,6 +2755,19 @@ mod tests {
     }
 
     #[test]
+    fn extracts_article_and_drops_nav_chrome() {
+        let html = r#"<html><body>
+        <nav>RoyaltyKing Charles III Queen Camilla Prince William Princess Catherine Celebrity Style Royal Style</nav>
+        <article><p>Elon Musk spoke at a Tesla event about vehicle production. The company posted delivery numbers for the quarter.</p><p>More reporting on the factory expansion followed later in the day.</p><p>Analysts said the update was the first detailed look at the plan this month.</p></article>
+        <footer>All rights reserved Hello Magazine</footer>
+        </body></html>"#;
+        let text = html_to_readable_text(html, 2000);
+        assert!(text.contains("Tesla event"));
+        assert!(!text.contains("King Charles"));
+        assert!(!text.contains("Celebrity Style"));
+    }
+
+    #[test]
     fn scrape_plan_defaults_to_snippets_only() {
         assert_eq!(WebSearchDepth::default(), WebSearchDepth::Off);
         assert!(WebSearchDepth::Off.scrape_plan().is_none());
@@ -2774,6 +2780,12 @@ mod tests {
         assert!(scrapeable_url("https://example.com/story"));
         assert!(!scrapeable_url("https://example.com/file.pdf"));
         assert!(!scrapeable_url("ftp://example.com/a"));
+        assert!(!scrapeable_url(
+            "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB"
+        ));
+        assert!(!scrapeable_url(
+            "https://www.hellomagazine.com/tags/elon-musk/"
+        ));
     }
 
     #[test]
@@ -2822,22 +2834,29 @@ mod tests {
             "recency": "week",
             "kind": "news"
         });
-        let (next, kind) = search_call_overrides(&skills, &args);
-        assert_eq!(next.web_search_backend, WebSearchBackend::Google);
+        let next = search_call_overrides(&skills, &args);
+        assert_eq!(next.web_search_backend, WebSearchBackend::Auto);
         assert_eq!(next.web_search_recency, WebSearchRecency::Week);
-        assert_eq!(kind, WebSearchKind::News);
+    }
+
+    #[test]
+    fn web_search_does_not_infer_news_from_query() {
+        let skills = AgentSkills::default();
+        let args = json!({ "query": "latest elon musk news" });
+        let next = search_call_overrides(&skills, &args);
+        assert_eq!(next.web_search_recency, WebSearchRecency::Any);
     }
 
     #[test]
     fn web_search_never_queries_yandex() {
         // Saved "yandex" still deserializes; search.rs has no Yandex path.
-        let (next, _) =
-            search_call_overrides(&AgentSkills::default(), &json!({ "backend": "yandex" }));
-        assert_eq!(next.web_search_backend, WebSearchBackend::Yandex);
+        let skills: AgentSkills =
+            serde_json::from_value(json!({ "web_search_backend": "yandex" })).unwrap();
+        assert_eq!(skills.web_search_backend, WebSearchBackend::Yandex);
     }
 
     #[test]
-    fn web_search_tool_is_query_only() {
+    fn web_search_tool_exposes_recency_not_kind() {
         let skills = AgentSkills {
             web_search: true,
             ..AgentSkills::default()
@@ -2850,11 +2869,11 @@ mod tests {
         let props = &search["function"]["parameters"]["properties"];
         assert!(props.get("query").is_some());
         assert!(props.get("backend").is_none());
-        assert!(props.get("recency").is_none());
+        assert!(props.get("recency").is_some());
         assert!(props.get("kind").is_none());
         let description = search["function"]["description"].as_str().unwrap();
         assert!(description.contains("snippets"));
-        assert!(!description.contains("kind=news"));
+        assert!(!description.contains("kind"));
     }
 
     #[test]

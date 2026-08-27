@@ -59,7 +59,6 @@ function syncIdentityTitles(privacyOn) {
 
 const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
 const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
-const WEB_SEARCH_BACKENDS = ['auto', 'duckduckgo', 'bing', 'wikipedia'];
 const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
 const WEB_SEARCH_RECENCIES = ['any', 'day', 'week', 'month', 'year'];
 const DEEP_RESEARCH_MODES = ['off', 'long', 'brief'];
@@ -87,7 +86,7 @@ const DEFAULT_SETTINGS = {
   enterSends: true,
   skillWebSearch: true,
   webSearchDepth: 'off', // off | auto | light | standard | deep
-  webSearchBackend: 'auto',
+  webSearchSearxng: '',
   webSearchResults: 6,
   webSearchRegion: 'us-en',
   webSearchSafeSearch: 'moderate',
@@ -1253,6 +1252,25 @@ let editingQueueId = null;
 /** Remember pin state per conversation across switches. */
 const stickByConvo = new Map();
 
+function normalizeSearxngUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const withScheme = /:\/\//.test(value)
+      ? value
+      : (/^(localhost|127\.|\[::1\]|\[::\])/i.test(value) ? 'http://' : 'https://') + value;
+    const url = new URL(withScheme);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    if (url.username || url.password) return '';
+    url.hash = '';
+    url.search = '';
+    let path = url.pathname.replace(/\/+$/, '');
+    return url.origin + path;
+  } catch {
+    return '';
+  }
+}
+
 function normalizeSettings(parsed) {
   if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
   const maxChars = Number(parsed.attachmentMaxChars);
@@ -1277,9 +1295,7 @@ function normalizeSettings(parsed) {
     webSearchDepth: WEB_SEARCH_DEPTHS.includes(parsed.webSearchDepth)
       ? parsed.webSearchDepth
       : DEFAULT_SETTINGS.webSearchDepth,
-    webSearchBackend: WEB_SEARCH_BACKENDS.includes(parsed.webSearchBackend)
-      ? parsed.webSearchBackend
-      : DEFAULT_SETTINGS.webSearchBackend,
+    webSearchSearxng: normalizeSearxngUrl(parsed.webSearchSearxng),
     webSearchResults: Number.isFinite(searchResults)
       ? Math.min(20, Math.max(1, Math.round(searchResults)))
       : DEFAULT_SETTINGS.webSearchResults,

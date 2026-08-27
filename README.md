@@ -24,7 +24,7 @@ On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`).
 
 ## Run
 
-Official release archives are a single `tensorui` executable. Web search runs in the Rust process (DuckDuckGo, with international Bing as an Auto fallback); no Python helper is required.
+Official release archives are a single `tensorui` executable. Web search runs in the Rust process (DuckDuckGo HTML and Lite, plus an optional SearXNG instance); no Python helper is required.
 
 ```
 cargo run
@@ -121,4 +121,4 @@ The Rust binary embeds Chat and Server HTML, the Chat CSS/JavaScript modules, `o
 cargo build --release
 ```
 
-That command builds the full application, including native web search (DuckDuckGo, with international Bing as a fallback when Auto is selected).
+That command builds the full application, including native web search (DuckDuckGo HTML and Lite, plus an optional SearXNG instance).

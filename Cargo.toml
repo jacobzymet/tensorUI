@@ -26,6 +26,7 @@ toml = "0.9"
 tao = "0.37"
 wry = "0.56"
 zeroize = { version = "1.9.0", features = ["derive"] }
+dom_smoothie = "0.18.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

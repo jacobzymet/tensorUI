@@ -1,1 +1,1 @@
-Search the public web. Pass {"query": "..."}. Returns ranked titles, URLs, and snippets. Keep useful quoted phrases. Use fetch_url to read a specific page.
+Search the public web. Pass {"query": "..."}. Optional recency: "any", "day", "week", "month", or "year". Returns a direct answer when available, then ranked titles, URLs, and snippets. Keep useful quoted phrases. Use fetch_url to read a specific page.

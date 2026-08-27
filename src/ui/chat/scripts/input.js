@@ -738,9 +738,9 @@ function resolveTurnSkills(mentionIds) {
       web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
         ? settings.webSearchDepth
         : DEFAULT_SETTINGS.webSearchDepth,
-      web_search_backend: WEB_SEARCH_BACKENDS.includes(settings.webSearchBackend)
-        ? settings.webSearchBackend
-        : 'auto',
+      web_search_searxng: typeof settings.webSearchSearxng === 'string'
+        ? settings.webSearchSearxng.trim()
+        : '',
       web_search_max_results: Math.min(20, Math.max(1, Number(settings.webSearchResults) || 6)),
       web_search_region: /^[a-z]{2}-[a-z]{2}$/.test(settings.webSearchRegion)
         ? settings.webSearchRegion

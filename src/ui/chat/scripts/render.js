@@ -730,9 +730,7 @@ function isThinkingOpen(text) {
 }
 
 function skillLabel(name, args) {
-  if (name === 'web_search') {
-    return String(args?.kind || '').toLowerCase() === 'news' ? 'News search' : 'Web search';
-  }
+  if (name === 'web_search') return 'Web search';
   if (name === 'fetch_url') return 'Fetch URL';
   if (name === 'ask_user') return 'Clarifying questions';
   if (name === 'activate_skill' || name === 'read_skill') return 'Activate skill';
@@ -740,9 +738,7 @@ function skillLabel(name, args) {
 }
 
 function skillLiveVerb(name, args) {
-  if (name === 'web_search') {
-    return String(args?.kind || '').toLowerCase() === 'news' ? 'Scanning news' : 'Searching';
-  }
+  if (name === 'web_search') return 'Searching';
   if (name === 'fetch_url') return 'Fetching';
   if (name === 'ask_user') return 'Waiting';
   if (name === 'activate_skill' || name === 'read_skill') return 'Loading skill';
@@ -750,11 +746,10 @@ function skillLiveVerb(name, args) {
 }
 
 function skillToolIcon(name, args) {
-  const news = name === 'web_search' && String(args?.kind || '').toLowerCase() === 'news';
-  if (name === 'web_search' && !news) {
+  if (name === 'web_search') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
   }
-  if (name === 'web_search' || name === 'fetch_url') {
+  if (name === 'fetch_url') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/><path d="M3 12h18"/></svg>';
   }
   if (name === 'activate_skill' || name === 'read_skill') {

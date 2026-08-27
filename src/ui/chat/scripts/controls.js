@@ -1044,7 +1044,7 @@ function fillSettingsFormFromState() {
   document.getElementById('settingEnterSends').checked = settings.enterSends;
   document.getElementById('settingSkillWebSearch').checked = settings.skillWebSearch;
   document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'off';
-  document.getElementById('settingWebSearchBackend').value = settings.webSearchBackend || 'auto';
+  document.getElementById('settingWebSearchSearxng').value = settings.webSearchSearxng || '';
   document.getElementById('settingWebSearchResults').value = String(settings.webSearchResults || 6);
   document.getElementById('settingWebSearchRegion').value = settings.webSearchRegion || 'us-en';
   document.getElementById('settingWebSearchSafeSearch').value = settings.webSearchSafeSearch || 'moderate';
@@ -1088,7 +1088,7 @@ function readSettingsForm() {
     enterSends: document.getElementById('settingEnterSends').checked,
     skillWebSearch: document.getElementById('settingSkillWebSearch').checked,
     webSearchDepth: document.getElementById('settingWebSearchDepth').value,
-    webSearchBackend: document.getElementById('settingWebSearchBackend').value,
+    webSearchSearxng: document.getElementById('settingWebSearchSearxng').value.trim(),
     webSearchResults: searchResultsRaw,
     webSearchRegion: searchRegionRaw,
     webSearchSafeSearch: document.getElementById('settingWebSearchSafeSearch').value,

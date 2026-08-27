@@ -29,8 +29,21 @@ thread_local! {
 
 /// Attach Chrome-like navigation headers so page fetches look like a normal document load.
 pub fn apply_browser_navigation_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    apply_browser_navigation_headers_lang(req, BROWSER_ACCEPT_LANG)
+}
+
+/// Same as [`apply_browser_navigation_headers`], with a caller-chosen Accept-Language.
+pub fn apply_browser_navigation_headers_lang(
+    req: reqwest::RequestBuilder,
+    accept_language: &str,
+) -> reqwest::RequestBuilder {
+    let accept_language = if accept_language.trim().is_empty() {
+        BROWSER_ACCEPT_LANG
+    } else {
+        accept_language
+    };
     req.header("Accept", BROWSER_ACCEPT)
-        .header("Accept-Language", BROWSER_ACCEPT_LANG)
+        .header("Accept-Language", accept_language)
         .header("Upgrade-Insecure-Requests", "1")
         .header("Sec-Fetch-Dest", "document")
         .header("Sec-Fetch-Mode", "navigate")
@@ -138,7 +151,6 @@ pub fn public_client() -> Client {
 }
 
 static SEARCH_CLIENT: OnceLock<Client> = OnceLock::new();
-static BING_CLIENT: OnceLock<Client> = OnceLock::new();
 
 fn with_search_tls(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
     #[cfg(target_os = "macos")]
@@ -163,21 +175,6 @@ pub fn search_client() -> Client {
             )
             .build()
             .expect("reqwest search client")
-        })
-        .clone()
-}
-
-pub fn bing_client() -> Client {
-    BING_CLIENT
-        .get_or_init(|| {
-            with_search_tls(
-                Client::builder()
-                    .connect_timeout(Duration::from_secs(2))
-                    .timeout(Duration::from_secs(8))
-                    .user_agent(BROWSER_UA),
-            )
-            .build()
-            .expect("reqwest bing client")
         })
         .clone()
 }

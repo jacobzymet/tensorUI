@@ -1,1 +1,1 @@
-Tool web_search — ranked web results (up to {{max_results}}, region {{region}}, SafeSearch {{safesearch}}, recency {{recency}}). Returns titles, URLs, and snippets. {{depth_note}} Pass {"query": "search terms"}. Keep useful quoted phrases.
+Tool web_search — ranked web results (up to {{max_results}}, region {{region}}, SafeSearch {{safesearch}}, recency {{recency}}). Returns a direct answer when a source provides one, plus titles, URLs, and snippets. {{depth_note}} Pass {"query": "search terms"}. Override freshness with recency when needed. Keep useful quoted phrases.

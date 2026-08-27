@@ -578,7 +578,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable web search</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Search DuckDuckGo first (then international Bing if DDG is blocked), and optionally fetch page text from top results so the model can dig past headlines.
+                    Search DuckDuckGo HTML and Lite. Optionally add your own SearXNG instance under Advanced.
                   </span>
                 </span>
               </label>
@@ -589,15 +589,10 @@
                 </button>
                 <div id="webSearchOptions" class="capability-advanced-panel is-collapsed" hidden>
                   <div class="settings-row">
-                    <label class="field-label" for="settingWebSearchBackend">Search engine</label>
+                    <label class="field-label" for="settingWebSearchSearxng">SearXNG instance</label>
                     <div>
-                      <select class="field-select" id="settingWebSearchBackend">
-                        <option value="auto">Auto (DuckDuckGo, then Bing international)</option>
-                        <option value="duckduckgo">DuckDuckGo</option>
-                        <option value="bing">Bing (international)</option>
-                        <option value="wikipedia">Wikipedia</option>
-                      </select>
-                      <p class="field-hint">Auto searches DuckDuckGo first. If DDG is blocked, it falls back to Bing. Wikipedia is separate. DuckDuckGo-only skips the fallback.</p>
+                      <input class="field-input" id="settingWebSearchSearxng" type="url" placeholder="https://searx.example.com" spellcheck="false" autocomplete="off">
+                      <p class="field-hint">Optional. When set, search also queries this SearXNG instance (JSON if enabled, otherwise HTML). Local instances such as <code>http://127.0.0.1:8080</code> are allowed. Leave blank to use DuckDuckGo only.</p>
                     </div>
                   </div>
                   <div class="settings-row">
