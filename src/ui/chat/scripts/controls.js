@@ -1118,37 +1118,38 @@ function settingsFormIsDirty() {
     || JSON.stringify(readSettingsForm()) !== JSON.stringify(normalizeSettings(settings));
 }
 
-const SETTINGS_SAVE_CHECK =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
-
 function syncSettingsSaveButton({ saved = false, saving = false, failed = false } = {}) {
   const btn = document.getElementById('btnSettingsSave');
-  if (!btn) return;
+  const label = document.getElementById('btnSettingsSaveLabel');
+  if (!btn || !label) return;
+  const check = btn.querySelector('.settings-save-check');
   const dirty = settingsFormIsDirty();
-  if (saving) {
-    btn.disabled = true;
-    btn.classList.remove('is-saved');
-    btn.innerHTML = '<span>Saving…</span>';
+  const mode = saving ? 'saving'
+    : failed ? 'failed'
+      : (saved && !dirty) ? 'saved'
+        : dirty ? 'dirty' : 'idle';
+  if (btn.dataset.saveMode === mode) return;
+  btn.dataset.saveMode = mode;
+
+  btn.classList.toggle('is-saved', mode === 'saved');
+  check?.classList.toggle('is-hidden', mode !== 'saved');
+  btn.disabled = mode === 'saving' || mode === 'saved' || mode === 'idle';
+  if (mode === 'saving') {
+    label.textContent = 'Saving…';
     btn.setAttribute('aria-label', 'Saving settings');
     return;
   }
-  if (failed) {
-    btn.disabled = false;
-    btn.classList.remove('is-saved');
-    btn.innerHTML = '<span>Retry save</span>';
+  if (mode === 'failed') {
+    label.textContent = 'Retry save';
     btn.setAttribute('aria-label', 'Settings could not be saved; retry');
     return;
   }
-  if (saved && !dirty) {
-    btn.disabled = true;
-    btn.classList.add('is-saved');
-    btn.innerHTML = SETTINGS_SAVE_CHECK + '<span>Saved</span>';
+  if (mode === 'saved') {
+    label.textContent = 'Saved';
     btn.setAttribute('aria-label', 'Settings saved');
     return;
   }
-  btn.classList.remove('is-saved');
-  btn.innerHTML = '<span id="btnSettingsSaveLabel">Save</span>';
-  btn.disabled = !dirty;
+  label.textContent = 'Save';
   btn.setAttribute('aria-label', dirty ? 'Save settings' : 'No changes to save');
 }
 

@@ -20,11 +20,15 @@ TensorMI Harness does **not** run an inference server. You point it at a base UR
 - [Rust](https://www.rust-lang.org/tools/install) (for building from source)
 - An OpenAI-compatible or Anthropic Messages–compatible API endpoint
 
-On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`).
+On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`). Building from source also needs the matching `-dev` packages:
+
+```
+sudo apt install pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+```
 
 ## Run
 
-Official release archives are a single `tensorui` executable. Web search runs in the Rust process (DuckDuckGo HTML and Lite, plus an optional SearXNG instance); no Python helper is required.
+Official release archives are a single `tensorui` executable. Web search uses DuckDuckGo HTML and Lite. A configured SearXNG instance is tried first, with DuckDuckGo as fallback.
 
 ```
 cargo run
@@ -121,4 +125,4 @@ The Rust binary embeds Chat and Server HTML, the Chat CSS/JavaScript modules, `o
 cargo build --release
 ```
 
-That command builds the full application, including native web search (DuckDuckGo HTML and Lite, plus an optional SearXNG instance).
+That command builds the full application, including native web search (DuckDuckGo HTML and Lite, with optional SearXNG tried first).

@@ -3166,6 +3166,9 @@ encryptionIndicator?.addEventListener('click', () => {
 });
 document.getElementById('btnSettingsCancel').addEventListener('click', closeSettings);
 document.getElementById('btnSettingsClose').addEventListener('click', closeSettings);
+document.getElementById('btnSettingsSave').addEventListener('mousedown', (event) => {
+  if (event.button === 0) event.preventDefault();
+});
 document.getElementById('btnSettingsSave').addEventListener('click', commitSettings);
 document.getElementById('settingChatBackgroundUrl')?.addEventListener('input', (event) => {
   pendingChatBackgroundImage = event.target.value.trim();
@@ -3913,6 +3916,7 @@ btnUpdateDismiss?.addEventListener('click', () => {
 (async () => {
   await initLocalData();
   applyStoredSidebarCollapsed();
+  document.documentElement.classList.add('ui-ready');
   applyStoredPrivacyMode();
   applyChatBackground(settings);
   updateGreeting();

@@ -198,7 +198,92 @@
                 <p class="empty-eyebrow is-hidden" id="emptyEyebrow">Project</p>
                 <h1 class="empty-greeting" id="greeting">Hello</h1>
                 <p class="empty-sub" id="modelHint">—</p>
-                <!-- #composerCard is relocated here while the thread is empty -->
+                <div class="composer-shell" id="composerShell">
+                  <div class="composer-card" id="composerCard">
+                    <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
+                    <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
+                    <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
+                    <textarea
+                      id="composerInput"
+                      class="composer-textarea"
+                      placeholder="How can I help you today? Type @ to mention"
+                      rows="1"
+                      autofocus
+                    ></textarea>
+                    <div class="composer-actions">
+                      <div class="composer-tools">
+                        <div class="composer-plus-wrap" id="composerPlusWrap">
+                          <button type="button" class="btn-plus" id="btnPlus" aria-haspopup="menu" aria-expanded="false" aria-controls="plusMenu" title="Add files and capabilities">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                          </button>
+                        </div>
+                        <input type="file" id="attachFileInput" multiple accept="image/*,.pdf,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.yml,.yaml,.toml,.ini,.log,.sql,.sh,.bat,.ps1,text/*" hidden>
+                        <div class="composer-think-wrap" id="composerThinkWrap">
+                          <button type="button" class="btn-think" id="btnThink" aria-haspopup="menu" aria-expanded="false" title="Thinking intensity — how hard reasoning models should think">
+                            <span class="btn-think-label" id="btnThinkLabel">
+                              <span class="btn-think-verb">Think</span>
+                              <span class="btn-think-effort is-hidden" id="btnThinkEffort"></span>
+                            </span>
+                            <span class="btn-think-caret" aria-hidden="true">▾</span>
+                          </button>
+                          <div class="think-menu is-hidden" id="thinkMenu" role="menu" aria-label="Thinking intensity">
+                            <div class="think-menu-label">Intensity</div>
+                            <button type="button" role="menuitemradio" data-effort="auto">Auto <span class="hint">default</span></button>
+                            <button type="button" role="menuitemradio" data-effort="off">Off <span class="hint">no think</span></button>
+                            <button type="button" role="menuitemradio" data-effort="low">Low <span class="hint">faster</span></button>
+                            <button type="button" role="menuitemradio" data-effort="medium">Medium</button>
+                            <button type="button" role="menuitemradio" data-effort="high">High <span class="hint">slower</span></button>
+                            <button type="button" role="menuitemradio" data-effort="max">Max</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="composer-buttons">
+                        <button type="button" class="btn btn-outline is-hidden" id="btnStop" aria-label="Stop generating" title="Stop generating">
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
+                        </button>
+                        <button type="button" class="btn-mic is-hidden" id="btnMic" aria-label="Voice input" aria-pressed="false" title="Voice input" hidden>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M8 22h8"/></svg>
+                        </button>
+                        <button type="button" class="btn btn-outline btn-branch" id="btnBranch" aria-label="Branch into a new chat" title="Send in a new chat that keeps this conversation's context" disabled>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.25"/><circle cx="18" cy="5" r="2.25"/><circle cx="6" cy="19" r="2.25"/><path d="M6 7.25v9.5"/><path d="M8.25 5h5.5a4 4 0 0 1 4 4v0"/></svg>
+                          <span class="btn-branch-label">Branch</span>
+                        </button>
+                        <button type="button" class="btn btn-primary btn-send" id="btnSend" aria-label="Send message" title="Send message" disabled>
+                          <svg class="send-action-icon send-action-icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+                          <svg class="send-action-icon send-action-icon-queue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h12"/><path d="M3 12h8"/><path d="M3 18h8"/><path d="M17 11v8"/><path d="M13 15h8"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="plus-menu is-hidden" id="plusMenu" role="menu" aria-label="Add files and capabilities"></div>
+                  </div>
+                  <div class="composer-model-tab">
+                    <div class="composer-tab-capabilities">
+                      <div class="composer-modes" id="composerModes" aria-live="polite"></div>
+                      <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
+                    </div>
+                    <div class="chat-model-select-wrap" id="chatModelSelectWrap">
+                      <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
+                      <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
+                      <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                      <div id="chatModelMenu" class="chat-model-menu is-hidden">
+                        <div class="chat-model-search is-hidden" id="chatModelSearchWrap">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                          <input type="text" id="chatModelSearch" class="chat-model-search-input" placeholder="Search models" autocomplete="off" autocorrect="off" spellcheck="false" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="chatModelList" aria-label="Search models">
+                          <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
+                        </div>
+                        <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
+                          <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
+                          <button type="button" class="chat-model-tab" id="chatModelTabPins" role="tab" aria-selected="false" data-model-tab="pins">Pins</button>
+                          <button type="button" class="chat-model-tab is-hidden" id="chatModelTabLocal" role="tab" aria-selected="false" data-model-tab="local">Local</button>
+                          <button type="button" class="chat-model-tab is-hidden" id="chatModelTabCloud" role="tab" aria-selected="false" data-model-tab="cloud">Cloud</button>
+                        </div>
+                        <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
+                        <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="composer-hint is-hidden" id="composerHint"></p>
+                </div>
               </div>
             </div>
             <div class="thread-wrap is-hidden" id="threadWrap">
@@ -273,93 +358,6 @@
 
   <div id="selectionReplyBar" class="selection-reply-bar is-hidden" role="toolbar" aria-label="Selection actions" hidden>
     <button type="button" id="btnSelectionReply">Reply</button>
-  </div>
-
-  <div class="composer-shell" id="composerShell">
-    <div class="composer-card" id="composerCard">
-      <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
-      <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
-      <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
-      <textarea
-        id="composerInput"
-        class="composer-textarea"
-        placeholder="How can I help you today? Type @ to mention"
-        rows="1"
-        autofocus
-      ></textarea>
-      <div class="composer-actions">
-        <div class="composer-tools">
-          <div class="composer-plus-wrap" id="composerPlusWrap">
-            <button type="button" class="btn-plus" id="btnPlus" aria-haspopup="menu" aria-expanded="false" aria-controls="plusMenu" title="Add files and capabilities">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            </button>
-          </div>
-          <input type="file" id="attachFileInput" multiple accept="image/*,.pdf,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.yml,.yaml,.toml,.ini,.log,.sql,.sh,.bat,.ps1,text/*" hidden>
-          <div class="composer-think-wrap" id="composerThinkWrap">
-            <button type="button" class="btn-think" id="btnThink" aria-haspopup="menu" aria-expanded="false" title="Thinking intensity — how hard reasoning models should think">
-              <span class="btn-think-label" id="btnThinkLabel">
-                <span class="btn-think-verb">Think</span>
-                <span class="btn-think-effort is-hidden" id="btnThinkEffort"></span>
-              </span>
-              <span class="btn-think-caret" aria-hidden="true">▾</span>
-            </button>
-            <div class="think-menu is-hidden" id="thinkMenu" role="menu" aria-label="Thinking intensity">
-              <div class="think-menu-label">Intensity</div>
-              <button type="button" role="menuitemradio" data-effort="auto">Auto <span class="hint">default</span></button>
-              <button type="button" role="menuitemradio" data-effort="off">Off <span class="hint">no think</span></button>
-              <button type="button" role="menuitemradio" data-effort="low">Low <span class="hint">faster</span></button>
-              <button type="button" role="menuitemradio" data-effort="medium">Medium</button>
-              <button type="button" role="menuitemradio" data-effort="high">High <span class="hint">slower</span></button>
-              <button type="button" role="menuitemradio" data-effort="max">Max</button>
-            </div>
-          </div>
-        </div>
-        <div class="composer-buttons">
-          <button type="button" class="btn btn-outline is-hidden" id="btnStop" aria-label="Stop generating" title="Stop generating">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
-          </button>
-          <button type="button" class="btn-mic is-hidden" id="btnMic" aria-label="Voice input" aria-pressed="false" title="Voice input" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M8 22h8"/></svg>
-          </button>
-          <button type="button" class="btn btn-outline btn-branch" id="btnBranch" aria-label="Branch into a new chat" title="Send in a new chat that keeps this conversation's context" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.25"/><circle cx="18" cy="5" r="2.25"/><circle cx="6" cy="19" r="2.25"/><path d="M6 7.25v9.5"/><path d="M8.25 5h5.5a4 4 0 0 1 4 4v0"/></svg>
-            <span class="btn-branch-label">Branch</span>
-          </button>
-          <button type="button" class="btn btn-primary btn-send" id="btnSend" aria-label="Send message" title="Send message" disabled>
-            <svg class="send-action-icon send-action-icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
-            <svg class="send-action-icon send-action-icon-queue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h12"/><path d="M3 12h8"/><path d="M3 18h8"/><path d="M17 11v8"/><path d="M13 15h8"/></svg>
-          </button>
-        </div>
-      </div>
-      <div class="plus-menu is-hidden" id="plusMenu" role="menu" aria-label="Add files and capabilities"></div>
-    </div>
-    <div class="composer-model-tab">
-      <div class="composer-tab-capabilities">
-        <div class="composer-modes" id="composerModes" aria-live="polite"></div>
-        <div class="composer-mentions" id="composerMentions" aria-live="polite"></div>
-      </div>
-      <div class="chat-model-select-wrap" id="chatModelSelectWrap">
-        <button type="button" id="chatModelSelect" class="chat-model-select" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="chatModelMenu">Model</button>
-        <span id="chatModelOriginPill" class="chat-model-origin-pill is-hidden" aria-hidden="true"></span>
-        <svg class="chat-model-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-        <div id="chatModelMenu" class="chat-model-menu is-hidden">
-          <div class="chat-model-search is-hidden" id="chatModelSearchWrap">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input type="text" id="chatModelSearch" class="chat-model-search-input" placeholder="Search models" autocomplete="off" autocorrect="off" spellcheck="false" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="chatModelList" aria-label="Search models">
-            <span class="chat-model-search-count" id="chatModelSearchCount" aria-hidden="true"></span>
-          </div>
-          <div class="chat-model-tabs" id="chatModelTabs" role="tablist" aria-label="Model lists">
-            <button type="button" class="chat-model-tab is-active" id="chatModelTabRecents" role="tab" aria-selected="true" data-model-tab="recents">Recents</button>
-            <button type="button" class="chat-model-tab" id="chatModelTabPins" role="tab" aria-selected="false" data-model-tab="pins">Pins</button>
-            <button type="button" class="chat-model-tab is-hidden" id="chatModelTabLocal" role="tab" aria-selected="false" data-model-tab="local">Local</button>
-            <button type="button" class="chat-model-tab is-hidden" id="chatModelTabCloud" role="tab" aria-selected="false" data-model-tab="cloud">Cloud</button>
-          </div>
-          <div id="chatModelList" class="chat-model-list" role="listbox" aria-label="Models"></div>
-          <p class="chat-model-empty is-hidden" id="chatModelEmpty" role="status"></p>
-        </div>
-      </div>
-    </div>
-    <p class="composer-hint is-hidden" id="composerHint"></p>
   </div>
 
   <div id="settingsModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -578,7 +576,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable web search</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Search DuckDuckGo HTML and Lite. Optionally add your own SearXNG instance under Advanced.
+                    Search DuckDuckGo HTML and Lite. A SearXNG instance under Advanced is tried first when set.
                   </span>
                 </span>
               </label>
@@ -592,7 +590,7 @@
                     <label class="field-label" for="settingWebSearchSearxng">SearXNG instance</label>
                     <div>
                       <input class="field-input" id="settingWebSearchSearxng" type="url" placeholder="https://searx.example.com" spellcheck="false" autocomplete="off">
-                      <p class="field-hint">Optional. When set, search also queries this SearXNG instance (JSON if enabled, otherwise HTML). Local instances such as <code>http://127.0.0.1:8080</code> are allowed. Leave blank to use DuckDuckGo only.</p>
+                      <p class="field-hint">Optional. When set, search uses this instance first (JSON if enabled, otherwise HTML) and falls back to DuckDuckGo if it fails. Local instances such as <code>http://127.0.0.1:8080</code> are allowed. Leave blank to use DuckDuckGo only.</p>
                     </div>
                   </div>
                   <div class="settings-row">
@@ -874,6 +872,7 @@
         <div class="dialog-actions">
           <button type="button" class="btn btn-ghost" id="btnSettingsCancel">Close</button>
           <button type="button" class="btn btn-primary" id="btnSettingsSave" disabled>
+            <svg class="settings-save-check is-hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
             <span id="btnSettingsSaveLabel">Save</span>
           </button>
         </div>

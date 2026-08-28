@@ -1225,6 +1225,13 @@ html[data-theme="light"] .agent-process-note {
   gap: var(--space-xs);
   /* optical centering — sit a little above true middle */
   padding-bottom: clamp(1rem, 8vh, 4.5rem);
+}
+/* Settle the greeting cluster only — including the composer made it
+   slide in from a low/left first paint when returning from Server. */
+.empty-state-inner > .orb-mark,
+.empty-state-inner > .empty-eyebrow,
+.empty-state-inner > .empty-greeting,
+.empty-state-inner > .empty-sub {
   animation: empty-state-settle 480ms var(--ease-settle) both;
 }
 @keyframes empty-state-settle {

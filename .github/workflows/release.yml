@@ -43,6 +43,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install WebKitGTK
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            pkg-config \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev
+
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 

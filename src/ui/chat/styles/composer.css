@@ -37,6 +37,13 @@
   align-items: center;
   gap: 0;
 }
+/* Safety: if the shell is ever a body sibling again, don't flash it
+   left-aligned under the 100vh chat column before JS docks it. */
+body > .composer-shell {
+  visibility: hidden;
+  position: absolute;
+  pointer-events: none;
+}
 .composer-card {
   position: relative;
   z-index: 2;

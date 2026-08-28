@@ -2329,11 +2329,11 @@ fn search_call_overrides(skills: &AgentSkills, args: &Value) -> AgentSkills {
 
 async fn run_web_search(query: &str, skills: &AgentSkills) -> Result<(String, String), String> {
     let result_count = skills.search_result_count();
-    let (hits, engine) = search::search_web(query, skills).await?;
+    let (hits, engine, note) = search::search_web(query, skills).await?;
     if hits.is_empty() {
         return Ok((
             format!("No results found for {query:?}."),
-            format!("via web · {engine}"),
+            format!("via web · {note}"),
         ));
     }
     let mut out = format!(
@@ -2366,7 +2366,7 @@ async fn run_web_search(query: &str, skills: &AgentSkills) -> Result<(String, St
     }
     let scrape_hits: Vec<SearchHit> = rest.into_iter().cloned().collect();
     append_scraped_pages(&mut out, &scrape_hits, skills).await;
-    Ok((out, format!("via web · {engine}")))
+    Ok((out, format!("via web · {note}")))
 }
 
 async fn append_scraped_pages(out: &mut String, hits: &[SearchHit], skills: &AgentSkills) {

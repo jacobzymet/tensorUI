@@ -1,4 +1,4 @@
-//! Native web search: DuckDuckGo HTML + Lite, optional SearXNG.
+//! Native web search: optional SearXNG first, then DuckDuckGo HTML + Lite.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,19 +12,21 @@ use super::{AgentSkills, SearchHit, WebSearchRecency, WebSearchSafeSearch};
 use crate::http;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+const SEARXNG_TIMEOUT: Duration = Duration::from_secs(8);
 const DDG_LITE: &str = "https://lite.duckduckgo.com/lite/";
 const DDG_HTML: &str = "https://html.duckduckgo.com/html/";
 
 pub(super) async fn search_web(
     query: &str,
     skills: &AgentSkills,
-) -> Result<(Vec<SearchHit>, String), String> {
+) -> Result<(Vec<SearchHit>, String, String), String> {
     let query = collapse_ws(query);
     if query.is_empty() {
         return Err("web_search requires a non-empty \"query\" string.".into());
     }
     let limit = skills.search_result_count();
     let mut errors: Vec<String> = Vec::new();
+    let searx_requested = !skills.web_search_searxng.trim().is_empty();
     let searx_endpoint = match parse_searxng_endpoint(&skills.web_search_searxng) {
         Ok(url) => url,
         Err(error) => {
@@ -33,24 +35,25 @@ pub(super) async fn search_web(
         }
     };
 
-    let lite_f = ddg_lite_hits(&query, skills);
-    let html_get_f = ddg_html_get_hits(&query, skills);
-    let html_post_f = ddg_html_post_hits(&query, skills);
-    let searx_f = async {
-        match &searx_endpoint {
-            Some(url) => searxng_hits(url, &query, skills, limit).await,
-            None => Ok(Vec::new()),
-        }
-    };
-
-    let (lite, html_get, html_post, searx) = tokio::join!(lite_f, html_get_f, html_post_f, searx_f);
-
     let mut by_source: Vec<(String, Vec<SearchHit>)> = Vec::new();
-    push_source(&mut by_source, &mut errors, "duckduckgo-lite", lite);
-    push_source(&mut by_source, &mut errors, "duckduckgo", html_get);
-    push_source(&mut by_source, &mut errors, "duckduckgo-post", html_post);
-    if searx_endpoint.is_some() {
-        push_source(&mut by_source, &mut errors, "searxng", searx);
+    if let Some(url) = &searx_endpoint {
+        match searxng_hits(url, &query, skills, limit).await {
+            Ok(hits) if !hits.is_empty() => {
+                by_source.push(("searxng".into(), hits));
+            }
+            Ok(_) => errors.push("searxng: no usable links".into()),
+            Err(error) => errors.push(format!("searxng: {error}")),
+        }
+    }
+    let searx_error = errors
+        .iter()
+        .find(|line| line.starts_with("searxng:"))
+        .cloned();
+
+    let mut fell_back = false;
+    if by_source.is_empty() {
+        fell_back = searx_requested;
+        by_source = search_duckduckgo(&query, skills, &mut errors).await;
     }
 
     if by_source.is_empty() {
@@ -59,7 +62,7 @@ pub(super) async fn search_web(
         } else {
             errors.join("; ")
         };
-        let hint = if searx_endpoint.is_none() {
+        let hint = if !searx_requested {
             " DuckDuckGo HTML/Lite may be blocked — set a SearXNG instance URL in Agent Capabilities if you have one."
         } else {
             ""
@@ -67,16 +70,51 @@ pub(super) async fn search_web(
         return Err(format!("Web search failed ({detail}).{hint}"));
     }
 
-    let engine = by_source
-        .iter()
-        .map(|(name, _)| name.as_str())
-        .collect::<Vec<_>>()
-        .join("+");
+    let used_searx = by_source.iter().any(|(name, _)| name == "searxng");
+    let engine = if used_searx { "SearXNG" } else { "DuckDuckGo" };
+    let note = if fell_back {
+        let why = searx_error
+            .as_deref()
+            .map(strip_searxng_prefix)
+            .unwrap_or_else(|| "unavailable".into());
+        format!("{engine} · SearXNG failed ({why})")
+    } else {
+        engine.to_string()
+    };
     let merged = merge_sources(by_source, &query, limit);
     if merged.is_empty() {
         return Err(format!("Search returned no pages matching {query:?}."));
     }
-    Ok((merged, engine))
+    Ok((merged, engine.to_string(), note))
+}
+
+fn strip_searxng_prefix(line: &str) -> String {
+    let stripped = line.strip_prefix("searxng: ").unwrap_or(line).trim();
+    const MAX: usize = 90;
+    let count = stripped.chars().count();
+    if count <= MAX {
+        stripped.to_string()
+    } else {
+        let mut out: String = stripped.chars().take(MAX).collect();
+        out.push('…');
+        out
+    }
+}
+
+async fn search_duckduckgo(
+    query: &str,
+    skills: &AgentSkills,
+    errors: &mut Vec<String>,
+) -> Vec<(String, Vec<SearchHit>)> {
+    let lite_f = ddg_lite_hits(query, skills);
+    let html_get_f = ddg_html_get_hits(query, skills);
+    let html_post_f = ddg_html_post_hits(query, skills);
+    let (lite, html_get, html_post) = tokio::join!(lite_f, html_get_f, html_post_f);
+    let mut by_source = Vec::new();
+    push_source(&mut by_source, errors, "duckduckgo-lite", lite);
+    push_source(&mut by_source, errors, "duckduckgo", html_get);
+    push_source(&mut by_source, errors, "duckduckgo-post", html_post);
+    by_source
 }
 
 fn query_looks_like_news(query: &str) -> bool {
@@ -201,7 +239,7 @@ async fn ddg_lite_hits(query: &str, skills: &AgentSkills) -> Result<Vec<SearchHi
             .query(&query_refs),
         skills,
     );
-    let html = send_html(request, true).await?;
+    let html = send_html(request, true, REQUEST_TIMEOUT).await?;
     Ok(parse_ddg_lite_html(&html))
 }
 
@@ -217,7 +255,7 @@ async fn ddg_html_post_hits(query: &str, skills: &AgentSkills) -> Result<Vec<Sea
             .form(&form),
         skills,
     );
-    let html = send_html(post, true).await?;
+    let html = send_html(post, true, REQUEST_TIMEOUT).await?;
     Ok(parse_ddg_html(&html))
 }
 
@@ -233,7 +271,7 @@ async fn ddg_html_get_hits(query: &str, skills: &AgentSkills) -> Result<Vec<Sear
             .query(&query_refs),
         skills,
     );
-    let html = send_html(get, true).await?;
+    let html = send_html(get, true, REQUEST_TIMEOUT).await?;
     Ok(parse_ddg_html(&html))
 }
 
@@ -285,12 +323,19 @@ async fn searxng_hits(
     skills: &AgentSkills,
     limit: usize,
 ) -> Result<Vec<SearchHit>, String> {
-    match searxng_json_hits(endpoint, query, skills, limit).await {
-        Ok(hits) if !hits.is_empty() => return Ok(hits),
-        Ok(_) => {}
-        Err(_) => {}
+    let (json, html) = tokio::join!(
+        searxng_json_hits(endpoint, query, skills, limit),
+        searxng_html_hits(endpoint, query, skills),
+    );
+    match (json, html) {
+        (Ok(hits), _) if !hits.is_empty() => Ok(hits),
+        (_, Ok(hits)) if !hits.is_empty() => Ok(hits),
+        (Err(json_err), Err(html_err)) if json_err == html_err => Err(json_err),
+        (Err(json_err), Err(html_err)) => Err(format!("{json_err}; html: {html_err}")),
+        (Ok(_), Err(html_err)) => Err(html_err),
+        (Err(json_err), Ok(_)) => Err(json_err),
+        (Ok(_), Ok(_)) => Err("no usable links".into()),
     }
-    searxng_html_hits(endpoint, query, skills).await
 }
 
 fn searxng_query_params(
@@ -347,7 +392,7 @@ fn searxng_request(
     let client = http::search_client();
     let req = client
         .get(endpoint.as_str())
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(SEARXNG_TIMEOUT)
         .header("Referer", format!("{origin}/"))
         .query(&query_refs);
     nav_headers(req, skills)
@@ -359,7 +404,7 @@ async fn searxng_json_hits(
     skills: &AgentSkills,
     limit: usize,
 ) -> Result<Vec<SearchHit>, String> {
-    let body = send_json(searxng_request(endpoint, query, skills, true)).await?;
+    let body = send_json(searxng_request(endpoint, query, skills, true), SEARXNG_TIMEOUT).await?;
     Ok(parse_searxng_json(&body, limit))
 }
 
@@ -368,7 +413,7 @@ async fn searxng_html_hits(
     query: &str,
     skills: &AgentSkills,
 ) -> Result<Vec<SearchHit>, String> {
-    let html = send_html(searxng_request(endpoint, query, skills, false), false).await?;
+    let html = send_html(searxng_request(endpoint, query, skills, false), false, SEARXNG_TIMEOUT).await?;
     Ok(parse_searxng_html(&html))
 }
 
@@ -474,8 +519,12 @@ fn query_is_mostly_latin(query: &str) -> bool {
     latin * 100 / letters.len() >= 60
 }
 
-async fn send_html(request: reqwest::RequestBuilder, ddg_captcha: bool) -> Result<String, String> {
-    let response = timeout(REQUEST_TIMEOUT, request.send())
+async fn send_html(
+    request: reqwest::RequestBuilder,
+    ddg_captcha: bool,
+    wait: Duration,
+) -> Result<String, String> {
+    let response = timeout(wait, request.send())
         .await
         .map_err(|_| "Search request timed out".to_string())?
         .map_err(|error| format!("Search request failed: {error}"))?;
@@ -502,8 +551,8 @@ fn is_ddg_challenge(html: &str) -> bool {
         || lower.contains("error-lite+")
 }
 
-async fn send_json(request: reqwest::RequestBuilder) -> Result<Value, String> {
-    let response = timeout(REQUEST_TIMEOUT, request.send())
+async fn send_json(request: reqwest::RequestBuilder, wait: Duration) -> Result<Value, String> {
+    let response = timeout(wait, request.send())
         .await
         .map_err(|_| "Search request timed out".to_string())?
         .map_err(|error| format!("Search request failed: {error}"))?;
@@ -1502,13 +1551,14 @@ mod tests {
     #[ignore = "hits the network"]
     async fn live_search_returns_hits() {
         let skills = AgentSkills::default();
-        let (hits, engine) = search_web("latest Grok news", &skills)
+        let (hits, engine, note) = search_web("latest Grok news", &skills)
             .await
             .expect("search");
-        assert!(!hits.is_empty(), "engine={engine}");
+        assert!(!hits.is_empty(), "engine={engine} note={note}");
+        let blob = format!("{engine} {note}").to_ascii_lowercase();
         assert!(
-            engine.contains("duckduckgo") || engine.contains("searxng"),
-            "expected DuckDuckGo or SearXNG, got {engine}"
+            blob.contains("duckduckgo") || blob.contains("searx"),
+            "expected DuckDuckGo or SearXNG, got engine={engine} note={note}"
         );
         assert!(hits.iter().all(|hit| !hit.title.contains("class=")));
         assert!(

@@ -84,6 +84,29 @@ mod tests {
     }
 
     #[test]
+    fn chat_composer_is_in_the_empty_state_on_first_paint() {
+        let after_inner = CHAT_HTML
+            .split("id=\"emptyStateInner\"")
+            .nth(1)
+            .and_then(|rest| rest.split("id=\"threadWrap\"").next())
+            .expect("empty-state markup should wrap the landing composer");
+        assert!(
+            after_inner.contains("id=\"composerShell\""),
+            "composer must live in #emptyStateInner so / first-paints centered"
+        );
+        let after_shell = CHAT_HTML
+            .split("id=\"chatShell\"")
+            .nth(1)
+            .and_then(|rest| rest.split("</main>").nth(1))
+            .expect("markup after the chat shell");
+        assert!(
+            !after_shell.contains("id=\"composerShell\""),
+            "composer must not be a body sibling of .chat-shell"
+        );
+        assert!(CHAT_CSS.contains("body > .composer-shell"));
+    }
+
+    #[test]
     fn custom_backgrounds_remove_the_composer_scrim() {
         let custom_background_scrim = CHAT_CSS
             .split(".chat-main[data-background-tone] .chat-composer-dock::before {")

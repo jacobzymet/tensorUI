@@ -2505,7 +2505,9 @@ function showEmptyState() {
   // Drop the previous thread's nodes — sendMessage appends to whatever is
   // here, so leaving them would splice the old conversation into the new one.
   chatThread.innerHTML = '';
-  emptyStateInner.appendChild(composerShell);
+  if (composerShell.parentElement !== emptyStateInner) {
+    emptyStateInner.appendChild(composerShell);
+  }
   syncProjectChrome();
 }
 
@@ -2524,7 +2526,9 @@ function showThread(convo) {
     convoTitleEl.setAttribute('tabindex', '0');
     convoTitleEl.title = 'Rename chat';
   }
-  composerDock.appendChild(composerShell);
+  if (composerShell.parentElement !== composerDock) {
+    composerDock.appendChild(composerShell);
+  }
   syncProjectChrome();
 }
 

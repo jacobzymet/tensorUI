@@ -624,6 +624,9 @@ button { font-family: inherit; }
     border-color var(--dur-short) var(--ease-settle),
     box-shadow var(--dur-short) var(--ease-settle);
 }
+html:not(.ui-ready) .chat-sidebar {
+  transition: none;
+}
 .chat-shell.sidebar-collapsed .chat-sidebar {
   flex-basis: 0;
   width: 0;
