@@ -10,8 +10,6 @@ pub const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 pub const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 pub const OPTIONAL_FONTS_JS: &str = include_str!("../ui/optional-fonts.js");
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/browser-favicon.png");
-pub const UI_MARK_DARK_PNG: &[u8] = include_bytes!("../../assets/icon-darkmode.png");
-pub const UI_MARK_LIGHT_PNG: &[u8] = include_bytes!("../../assets/icon-lightmode.png");
 
 #[cfg(test)]
 mod tests {

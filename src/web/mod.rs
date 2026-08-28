@@ -37,7 +37,7 @@ use crate::{
 pub(crate) use embed::APP_ICON_PNG;
 use embed::{
     CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, OPTIONAL_FONTS_JS, ORB_JS, PURIFY_JS,
-    SETTINGS_HTML, UI_MARK_DARK_PNG, UI_MARK_LIGHT_PNG,
+    SETTINGS_HTML,
 };
 
 const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
@@ -365,13 +365,9 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/purify.min.js", get(purify_script))
         .route("/optional-fonts.js", get(optional_fonts_script))
         .route("/browser-favicon.png", get(app_icon_png))
-        .route("/icon-darkmode.png", get(ui_mark_dark))
-        .route("/icon-lightmode.png", get(ui_mark_light))
         .route("/favicon.ico", get(app_icon_png))
-        // Back-compat aliases for older cached HTML.
+        // Back-compat alias for older cached HTML.
         .route("/ti.png", get(app_icon_png))
-        .route("/ti-transparent-bg-white.png", get(ui_mark_dark))
-        .route("/ti-transparent-bg-black.png", get(ui_mark_light))
         .merge(api)
         .layer(middleware::from_fn_with_state(
             security,
@@ -501,14 +497,6 @@ async fn optional_fonts_script() -> impl IntoResponse {
 
 async fn app_icon_png() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/png")], APP_ICON_PNG)
-}
-
-async fn ui_mark_dark() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "image/png")], UI_MARK_DARK_PNG)
-}
-
-async fn ui_mark_light() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "image/png")], UI_MARK_LIGHT_PNG)
 }
 
 #[derive(Debug, Deserialize)]
