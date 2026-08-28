@@ -1,15 +1,20 @@
 //! Agent mode: OpenAI-compatible `tool_calls` + `role: tool` (Anthropic via translator).
 //! XML `<tool_call>` in content is accepted only as a fallback for local models.
 
+pub mod browser;
 pub mod chat;
 pub mod fs;
+pub mod media;
 pub mod search;
 pub mod skills;
 pub mod terminal;
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Mutex, OnceLock,
+    },
     time::Duration,
 };
 
@@ -160,6 +165,20 @@ impl Drop for SteerSessionGuard {
     fn drop(&mut self) {
         if let Ok(mut map) = steer_sessions().lock() {
             map.remove(&self.id);
+        }
+    }
+}
+
+struct EphemeralBrowserGuard {
+    id: Option<String>,
+}
+
+impl Drop for EphemeralBrowserGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            tokio::spawn(async move {
+                let _ = browser::close_session(&id).await;
+            });
         }
     }
 }
@@ -399,6 +418,11 @@ pub struct AgentSkills {
     pub terminal: bool,
     #[serde(default = "default_terminal_timeout_secs")]
     pub terminal_timeout_secs: u64,
+    #[serde(default)]
+    pub browser: bool,
+    /// Set by the server from the live conversation id. Ignored if the client sends it.
+    #[serde(default, skip_deserializing)]
+    pub session_id: String,
 }
 
 impl Default for AgentSkills {
@@ -420,13 +444,15 @@ impl Default for AgentSkills {
             workspace_root: String::new(),
             terminal: false,
             terminal_timeout_secs: default_terminal_timeout_secs(),
+            browser: false,
+            session_id: String::new(),
         }
     }
 }
 
 impl AgentSkills {
     pub fn any_enabled(&self) -> bool {
-        self.web_search || self.fetch_url || self.filesystem || self.terminal
+        self.web_search || self.fetch_url || self.filesystem || self.terminal || self.browser
     }
 
     fn fetch_url_char_limit(&self) -> usize {
@@ -581,6 +607,16 @@ fn is_recoverable_tool(name: &str) -> bool {
             | "str_replace"
             | "delete_file"
             | "run_terminal"
+            | "browser_navigate"
+            | "browser_snapshot"
+            | "browser_click"
+            | "browser_type"
+            | "browser_press"
+            | "browser_wait"
+            | "browser_screenshot"
+            | "browser_evaluate"
+            | "browser_close"
+            | "show_image"
     )
 }
 
@@ -645,6 +681,13 @@ async fn run_agent_loop(
 ) -> Result<(), StreamFail> {
     request.apply_deep_research();
     request.normalize_force_tools();
+    let ephemeral_browser = request.skills.browser && request.skills.session_id.trim().is_empty();
+    if ephemeral_browser {
+        request.skills.session_id = format!("ephemeral_{}", new_tool_call_id());
+    }
+    let _browser_guard = EphemeralBrowserGuard {
+        id: ephemeral_browser.then(|| request.skills.session_id.clone()),
+    };
     inject_agent_system_prompt(
         &mut request.messages,
         &request.skills,
@@ -1094,6 +1137,8 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
             skills.filesystem
         }
         "run_terminal" => skills.terminal,
+        name if browser::is_browser_tool(name) => skills.browser,
+        "show_image" => true,
         _ => false,
     }
 }
@@ -1102,6 +1147,7 @@ fn tool_risk(name: &str) -> &'static str {
     match name {
         "write_file" | "str_replace" | "delete_file" => "write",
         "run_terminal" => "terminal",
+        name if browser::is_browser_tool(name) => "browser",
         _ => "safe",
     }
 }
@@ -1112,7 +1158,7 @@ fn needs_approval(name: &str, mode: ApprovalMode) -> bool {
     }
     match mode {
         ApprovalMode::Manual => true,
-        ApprovalMode::AutoSafe => matches!(tool_risk(name), "write" | "terminal"),
+        ApprovalMode::AutoSafe => matches!(tool_risk(name), "write" | "terminal" | "browser"),
     }
 }
 
@@ -1138,6 +1184,8 @@ fn tool_call_summary(call: &ToolCall) -> String {
             .unwrap_or("")
             .to_string(),
         "run_terminal" => terminal::tool_summary(&call.arguments),
+        "show_image" => media::tool_summary(&call.arguments),
+        name if browser::is_browser_tool(name) => browser::tool_summary(name, &call.arguments),
         _ => fs::tool_summary(&call.name, &call.arguments),
     }
 }
@@ -1198,6 +1246,7 @@ fn agent_system_block(
         .to_string(),
         trim_prompt(agent::CORE).to_string(),
         trim_prompt(agent::STEER).to_string(),
+        trim_prompt(agent::IMAGES).to_string(),
     ];
     if !force_tools.is_empty() {
         lines.push(fill(
@@ -1271,6 +1320,9 @@ fn agent_system_block(
     if skills.terminal {
         let timeout = terminal::clamp_timeout_secs(skills.terminal_timeout_secs).to_string();
         lines.push(fill(agent::TERMINAL, &[("timeout", &timeout)]));
+    }
+    if skills.browser {
+        lines.push(trim_prompt(agent::BROWSER).to_string());
     }
     if !user_skills.is_empty() {
         lines.push(trim_prompt(agent::SKILLS_ACTIVATE).to_string());
@@ -1710,6 +1762,11 @@ fn preview_tool_arguments(raw: &str) -> Value {
         "url",
         "pattern",
         "cwd",
+        "ref",
+        "text",
+        "key",
+        "expression",
+        "selector",
     ] {
         if let Some(value) = json_string_field(raw, key) {
             map.insert(key.to_string(), json!(value));
@@ -1978,6 +2035,81 @@ fn openai_tools_payload(
             &["command"],
         ));
     }
+    if skills.browser {
+        tools_out.push(function_tool(
+            "browser_navigate",
+            trim_prompt(tools::BROWSER_NAVIGATE),
+            json!({ "url": { "type": "string", "description": "Absolute http(s) URL" } }),
+            &["url"],
+        ));
+        tools_out.push(function_tool(
+            "browser_snapshot",
+            trim_prompt(tools::BROWSER_SNAPSHOT),
+            json!({}),
+            &[],
+        ));
+        tools_out.push(function_tool(
+            "browser_click",
+            trim_prompt(tools::BROWSER_CLICK),
+            json!({ "ref": { "type": "string", "description": "Snapshot ref such as e12" } }),
+            &["ref"],
+        ));
+        tools_out.push(function_tool(
+            "browser_type",
+            trim_prompt(tools::BROWSER_TYPE),
+            json!({
+                "ref": { "type": "string" },
+                "text": { "type": "string" },
+                "submit": { "type": "boolean", "description": "If true, submit the form / press Enter after typing" }
+            }),
+            &["ref", "text"],
+        ));
+        tools_out.push(function_tool(
+            "browser_press",
+            trim_prompt(tools::BROWSER_PRESS),
+            json!({
+                "key": { "type": "string", "description": "Enter, Tab, Escape, ArrowDown, …" },
+                "ref": { "type": "string" }
+            }),
+            &["key"],
+        ));
+        tools_out.push(function_tool(
+            "browser_wait",
+            trim_prompt(tools::BROWSER_WAIT),
+            json!({
+                "time_ms": { "type": "integer", "description": "Milliseconds to wait (50–30000)" },
+                "selector": { "type": "string", "description": "Optional CSS selector to wait for" }
+            }),
+            &[],
+        ));
+        tools_out.push(function_tool(
+            "browser_screenshot",
+            trim_prompt(tools::BROWSER_SCREENSHOT),
+            json!({ "path": { "type": "string", "description": "Optional workspace-relative PNG path" } }),
+            &[],
+        ));
+        tools_out.push(function_tool(
+            "browser_evaluate",
+            trim_prompt(tools::BROWSER_EVALUATE),
+            json!({ "expression": { "type": "string", "description": "JavaScript expression to evaluate" } }),
+            &["expression"],
+        ));
+        tools_out.push(function_tool(
+            "browser_close",
+            trim_prompt(tools::BROWSER_CLOSE),
+            json!({}),
+            &[],
+        ));
+    }
+    tools_out.push(function_tool(
+        "show_image",
+        trim_prompt(tools::SHOW_IMAGE),
+        json!({
+            "path": { "type": "string", "description": "Workspace-relative image file" },
+            "url": { "type": "string", "description": "Absolute http(s) image URL" }
+        }),
+        &[],
+    ));
     if !user_skills.is_empty() {
         let names: Vec<String> = user_skills.iter().map(|skill| skill.name.clone()).collect();
         tools_out.push(json!({
@@ -2170,6 +2302,12 @@ async fn send_tool_result(
     });
     if let Some(note) = &outcome.note {
         payload["note"] = json!(note);
+    }
+    if let Some(image) = &outcome.image {
+        payload["image"] = json!(image);
+    }
+    if let Some(image_id) = &outcome.image_id {
+        payload["image_id"] = json!(image_id);
     }
     send_sse(tx, sse_agent(payload)).await
 }
@@ -2488,6 +2626,9 @@ struct ToolOutcome {
     ui_text: String,
     /// Short UI-facing note (e.g. search backend fallback).
     note: Option<String>,
+    /// Optional data-URL image the UI can show and the model can embed via image_id.
+    image: Option<String>,
+    image_id: Option<String>,
     /// False when the tool failed softly and the model should try another approach.
     ok: bool,
 }
@@ -2499,6 +2640,8 @@ impl ToolOutcome {
             ui_text: text.clone(),
             text,
             note: None,
+            image: None,
+            image_id: None,
             ok: true,
         }
     }
@@ -2512,6 +2655,8 @@ impl ToolOutcome {
             text: text.into(),
             ui_text: ui_text.into(),
             note: Some(note.into()),
+            image: None,
+            image_id: None,
             ok: true,
         }
     }
@@ -2522,9 +2667,27 @@ impl ToolOutcome {
             ui_text: text.clone(),
             text,
             note: Some("retry with a different query".into()),
+            image: None,
+            image_id: None,
             ok: false,
         }
     }
+}
+
+fn next_reply_image_id() -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("img_{n}")
+}
+
+fn with_reply_image(mut outcome: ToolOutcome, data_url: String) -> ToolOutcome {
+    let id = next_reply_image_id();
+    outcome.image = Some(data_url);
+    outcome.image_id = Some(id.clone());
+    outcome.text.push_str(&format!(
+        "\n\nImage {id} is ready for the user-visible reply. Include it on its own line as markdown: ![short caption]({id})"
+    ));
+    outcome
 }
 
 async fn execute_tool(
@@ -2598,6 +2761,30 @@ async fn execute_tool(
             )
             .await?,
         )),
+        name if browser::is_browser_tool(name) => {
+            let out = browser::execute(
+                name,
+                &call.arguments,
+                &skills.session_id,
+                &skills.workspace_root,
+            )
+            .await?;
+            let mut outcome = ToolOutcome::text(out.text);
+            if let Some(data_url) = out.image_data_url {
+                outcome = with_reply_image(outcome, data_url);
+            }
+            Ok(outcome)
+        }
+        "show_image" => {
+            let (bytes, mime) = media::load_image(&call.arguments, &skills.workspace_root).await?;
+            let data_url = media::to_data_url(&bytes, mime);
+            let summary = format!(
+                "Loaded {} ({} bytes). Include it in your user-visible reply as markdown.",
+                mime,
+                bytes.len()
+            );
+            Ok(with_reply_image(ToolOutcome::text(summary), data_url))
+        }
         "activate_skill" | "read_skill" => {
             let key = call
                 .arguments
@@ -3250,7 +3437,8 @@ mod tests {
             .iter()
             .filter_map(|t| t.pointer("/function/name").and_then(|v| v.as_str()))
             .collect();
-        assert_eq!(names, ["web_search", "fetch_url"]);
+        assert_eq!(names, ["web_search", "fetch_url", "show_image"]);
+        assert!(capability_allowed("show_image", &skills, &[]));
     }
 
     #[test]
@@ -3419,6 +3607,30 @@ mod tests {
         assert!(!needs_approval("ask_user", ApprovalMode::Manual));
         assert_eq!(tool_risk("run_terminal"), "terminal");
         assert_eq!(tool_risk("read_file"), "safe");
+    }
+
+    #[test]
+    fn browser_capability_is_gated() {
+        let off = AgentSkills::default();
+        let on = AgentSkills {
+            browser: true,
+            ..AgentSkills::default()
+        };
+        assert!(!capability_allowed("browser_navigate", &off, &[]));
+        assert!(capability_allowed("browser_navigate", &on, &[]));
+        assert!(capability_allowed("browser_snapshot", &on, &[]));
+        assert!(on.any_enabled());
+        assert!(needs_approval("browser_navigate", ApprovalMode::AutoSafe));
+        assert_eq!(tool_risk("browser_click"), "browser");
+        let tools = openai_tools_payload(&on, &[], false);
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(|v| v.as_str()))
+            .collect();
+        assert!(names.contains(&"browser_navigate"));
+        assert!(names.contains(&"browser_snapshot"));
+        assert!(names.contains(&"browser_close"));
+        assert!(names.contains(&"show_image"));
     }
 
     #[test]

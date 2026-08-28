@@ -1057,6 +1057,7 @@ function fillSettingsFormFromState() {
   document.getElementById('settingSkillDeepResearch').checked = settings.skillDeepResearch !== false;
   document.getElementById('settingSkillFilesystem').checked = !!settings.skillFilesystem;
   document.getElementById('settingSkillTerminal').checked = !!settings.skillTerminal;
+  document.getElementById('settingSkillBrowser').checked = !!settings.skillBrowser;
   document.getElementById('settingTerminalTimeout').value = String(settings.terminalTimeoutSecs || 30);
   syncApprovalModeControls();
   syncTerminalSkillControls();
@@ -1105,6 +1106,7 @@ function readSettingsForm() {
     skillDeepResearch: document.getElementById('settingSkillDeepResearch').checked,
     skillFilesystem: document.getElementById('settingSkillFilesystem').checked,
     skillTerminal: document.getElementById('settingSkillTerminal').checked,
+    skillBrowser: document.getElementById('settingSkillBrowser').checked,
     terminalTimeoutSecs: Number(document.getElementById('settingTerminalTimeout').value),
     approvalMode: document.querySelector('#approvalModeToggle [data-approval-mode].is-active')?.dataset.approvalMode
       || settings.approvalMode

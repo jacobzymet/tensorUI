@@ -566,6 +566,19 @@
 .agent-final-answer {
   min-width: 0;
 }
+.msg-bubble .agent-final-answer img,
+.msg-bubble p img {
+  display: block;
+  max-width: min(100%, 36rem);
+  width: auto;
+  height: auto;
+  max-height: 28rem;
+  object-fit: contain;
+  margin: 0.7rem 0;
+  border-radius: 0.55rem;
+  border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+  background: color-mix(in oklch, var(--color-graphite) 55%, black);
+}
 /* Inline web citations: linked claim + site favicon. */
 .msg-bubble a.md-cite {
   color: var(--color-accent);

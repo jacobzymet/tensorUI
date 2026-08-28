@@ -55,6 +55,7 @@ pub mod agent {
         include_str!("../../prompts/agent/intro-deep-research.md");
     pub const CORE: &str = include_str!("../../prompts/agent/core.md");
     pub const STEER: &str = include_str!("../../prompts/agent/steer.md");
+    pub const IMAGES: &str = include_str!("../../prompts/agent/images.md");
     pub const REQUIRED_TOOLS: &str = include_str!("../../prompts/agent/required-tools.md");
     pub const POLICY_DEEP_RESEARCH: &str =
         include_str!("../../prompts/agent/policy-deep-research.md");
@@ -73,6 +74,7 @@ pub mod agent {
     pub const CITATIONS: &str = include_str!("../../prompts/agent/citations.md");
     pub const FILESYSTEM: &str = include_str!("../../prompts/agent/filesystem.md");
     pub const TERMINAL: &str = include_str!("../../prompts/agent/terminal.md");
+    pub const BROWSER: &str = include_str!("../../prompts/agent/browser.md");
     pub const SKILLS_ACTIVATE: &str = include_str!("../../prompts/agent/skills-activate.md");
     pub const SKILLS_CATALOG_INTRO: &str =
         include_str!("../../prompts/agent/skills-catalog-intro.md");
@@ -117,6 +119,16 @@ pub mod tools {
     pub const STR_REPLACE: &str = include_str!("../../prompts/tools/str-replace.md");
     pub const DELETE_FILE: &str = include_str!("../../prompts/tools/delete-file.md");
     pub const RUN_TERMINAL: &str = include_str!("../../prompts/tools/run-terminal.md");
+    pub const BROWSER_NAVIGATE: &str = include_str!("../../prompts/tools/browser-navigate.md");
+    pub const BROWSER_SNAPSHOT: &str = include_str!("../../prompts/tools/browser-snapshot.md");
+    pub const BROWSER_CLICK: &str = include_str!("../../prompts/tools/browser-click.md");
+    pub const BROWSER_TYPE: &str = include_str!("../../prompts/tools/browser-type.md");
+    pub const BROWSER_PRESS: &str = include_str!("../../prompts/tools/browser-press.md");
+    pub const BROWSER_WAIT: &str = include_str!("../../prompts/tools/browser-wait.md");
+    pub const BROWSER_SCREENSHOT: &str = include_str!("../../prompts/tools/browser-screenshot.md");
+    pub const BROWSER_EVALUATE: &str = include_str!("../../prompts/tools/browser-evaluate.md");
+    pub const BROWSER_CLOSE: &str = include_str!("../../prompts/tools/browser-close.md");
+    pub const SHOW_IMAGE: &str = include_str!("../../prompts/tools/show-image.md");
 }
 
 /// Chat UI templates served as `/prompts.js` (`window.TENSORUI_PROMPTS`).

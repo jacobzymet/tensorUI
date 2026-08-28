@@ -771,9 +771,12 @@ async fn chat_completions(
         ));
     }
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
-        Ok(request) if agent::should_run_agent(&request, &user_skills) => {
+        Ok(mut request) if agent::should_run_agent(&request, &user_skills) => {
             if request.messages.is_empty() {
                 return Err(ApiError::bad_request("messages must not be empty"));
+            }
+            if let Some(id) = conversation_id.as_deref() {
+                request.skills.session_id = id.to_string();
             }
             agent::stream_agent(
                 &api_base,

@@ -1300,6 +1300,10 @@ function toolDetailFromPayload(payload) {
   if (args.path) return String(args.path);
   if (args.pattern) return String(args.pattern);
   if (args.url) return String(args.url);
+  if (args.ref) return String(args.ref);
+  if (args.expression) return String(args.expression);
+  if (args.key) return String(args.key);
+  if (args.selector) return String(args.selector);
   if (args.query) return String(args.query);
   if (args.name) return String(args.name);
   if (args.id) return String(args.id);
@@ -1373,6 +1377,7 @@ function timelineSignature(timeline) {
         part.approvalRisk || '',
         part.executing ? '1' : '0',
         part.body || '',
+        part.image ? String(part.image.length) : '',
       ].join('\0');
     }
     if (part.type === 'clarify') {
@@ -1400,6 +1405,7 @@ function renderStreamingAnswerHtml(text) {
 
 function paintStreamIntoView(convo, stream, replyText, streaming) {
   if (stream?.hardStopped) return;
+  setMarkdownImages(stream.images);
   stream.partial = replyText;
   const extracted = applyMemoryUpdateProtocol(replyText, { streaming });
   const { cleaned } = extracted;
@@ -1634,6 +1640,7 @@ async function runAssistantTurn(convo, {
     workspace_root: sessionWorkspaceRoot(),
     terminal: !!settings.skillTerminal,
     terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
+    browser: !!settings.skillBrowser,
   };
   if (deepResearch) {
     useAgent = true;
@@ -1932,6 +1939,7 @@ function beginLiveStream(convo, {
     turnForceTools,
     partial: '',
     timeline: [],
+    images: Object.create(null),
     errorMessage: null,
     processNotesCollapsed: true,
     dom: null,
@@ -2093,6 +2101,17 @@ async function driveAssistantSse(convo, stream, response) {
         scheduleJustSettledClear(last);
         if (note) last.note = note;
         last.approval = payload.ok === false && /denied/i.test(resultText) ? 'denied' : '';
+        if (payload.image && /^data:image\//i.test(String(payload.image))) {
+          last.image = String(payload.image);
+        }
+        if (payload.image_id) {
+          const imageId = String(payload.image_id);
+          last.imageId = imageId;
+          if (last.image) {
+            if (!stream.images) stream.images = Object.create(null);
+            stream.images[imageId] = last.image;
+          }
+        }
       } else {
         stream.timeline.push({
           type: 'tool',
@@ -2100,10 +2119,22 @@ async function driveAssistantSse(convo, stream, response) {
           detail: '',
           result: resultText,
           note,
+          ...(payload.image && /^data:image\//i.test(String(payload.image))
+            ? { image: String(payload.image) }
+            : {}),
+          ...(payload.image_id ? { imageId: String(payload.image_id) } : {}),
           live: false,
           justSettled: true,
         });
         scheduleJustSettledClear(stream.timeline[stream.timeline.length - 1]);
+      }
+      if (
+        payload.image_id
+        && payload.image
+        && /^data:image\//i.test(String(payload.image))
+      ) {
+        if (!stream.images) stream.images = Object.create(null);
+        stream.images[String(payload.image_id)] = String(payload.image);
       }
       if (stream.dom) {
         setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
@@ -2401,6 +2432,7 @@ async function driveAssistantSse(convo, stream, response) {
           ...(part.note ? { note: part.note } : {}),
           ...(part.kind ? { kind: part.kind } : {}),
           ...(Number.isFinite(part.durationMs) ? { durationMs: Math.round(part.durationMs) } : {}),
+          ...(part.image ? { image: part.image } : {}),
           live: false,
         }
         : part.type === 'clarify'
@@ -2477,6 +2509,9 @@ async function driveAssistantSse(convo, stream, response) {
       message.speakerHandle = speakerBot.handle;
     }
     if (persistedParts) message.parts = persistedParts;
+    if (stream.images && Object.keys(stream.images).length) {
+      message.images = { ...stream.images };
+    }
     if (memoryNotices.length) message.memoryNotices = memoryNotices;
     if (stream.errorMessage && !visibleAnswer) {
       message.error = stream.errorMessage;

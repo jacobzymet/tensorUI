@@ -731,11 +731,13 @@ function resolveTurnSkills(mentionIds) {
     || mentioned.has('fetch_url');
   const filesystem = !!settings.agentMode && !!settings.skillFilesystem;
   const terminalCap = !!settings.agentMode && !!settings.skillTerminal;
+  const browserCap = !!settings.agentMode && !!settings.skillBrowser;
   const useAgent = deep
     || webSearch
     || fetchUrl
     || filesystem
     || terminalCap
+    || browserCap
     || (!!settings.agentMode && userSkills.some((skill) => skill.enabled));
   const skills = {
       web_search: webSearch,
@@ -772,6 +774,7 @@ function resolveTurnSkills(mentionIds) {
       workspace_root: sessionWorkspaceRoot(),
       terminal: terminalCap,
       terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
+      browser: browserCap,
   };
   if (deep) {
     skills.web_search_depth = 'deep';

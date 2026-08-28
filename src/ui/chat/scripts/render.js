@@ -367,41 +367,47 @@ function renderMemoryNoticesHtml(message) {
 }
 
 function renderAssistantMessage(message, { streaming = false, collapseTimeline = null, notesCollapsed = true } = {}) {
-  const memoryHtml = renderMemoryNoticesHtml(message);
-  if (streaming) {
-    const partsHtml = renderCommittedParts(message.parts);
-    const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed });
-    const bodyHtml = message.content
-      ? renderAssistantHtml(message.content, { streaming: true })
-      : '';
-    return partsHtml + sealedHtml + bodyHtml + memoryHtml;
-  }
-
-  const { timelineParts, answerHtml, stepCount, processNotesHtml } =
-    collectTimelineAndAnswer(message, { notesCollapsed });
-  const timelineHtml = renderCommittedParts(timelineParts);
-  const answerBlock = answerHtml
-    ? '<div class="agent-final-answer">' + answerHtml + '</div>'
-    : '';
-  const finalHtml = (processNotesHtml || '') + answerBlock + memoryHtml;
-
-  if (!timelineHtml) {
-    if (processNotesHtml || memoryHtml) return finalHtml;
-    return message.content
-      ? renderAssistantHtml(message.content, { streaming: false }) + memoryHtml
-      : finalHtml;
-  }
-
-  if (isDesktopTraceLayout()) {
-    if (finalHtml) return finalHtml;
-    if (message?.error) {
-      return '<div class="agent-final-answer msg-error">' + escapeHtml(message.error) + '</div>';
+  const previousImages = markdownImages;
+  setMarkdownImages(message && message.images);
+  try {
+    const memoryHtml = renderMemoryNoticesHtml(message);
+    if (streaming) {
+      const partsHtml = renderCommittedParts(message.parts);
+      const sealedHtml = renderSealedAnswerHtml(message.parts, { notesCollapsed });
+      const bodyHtml = message.content
+        ? renderAssistantHtml(message.content, { streaming: true })
+        : '';
+      return partsHtml + sealedHtml + bodyHtml + memoryHtml;
     }
-    return '<div class="agent-final-answer msg-error">No response.</div>';
-  }
 
-  const collapsed = collapseTimeline !== null ? !!collapseTimeline : true;
-  return renderTimelineFold(timelineHtml, stepCount, { collapsed }) + finalHtml;
+    const { timelineParts, answerHtml, stepCount, processNotesHtml } =
+      collectTimelineAndAnswer(message, { notesCollapsed });
+    const timelineHtml = renderCommittedParts(timelineParts);
+    const answerBlock = answerHtml
+      ? '<div class="agent-final-answer">' + answerHtml + '</div>'
+      : '';
+    const finalHtml = (processNotesHtml || '') + answerBlock + memoryHtml;
+
+    if (!timelineHtml) {
+      if (processNotesHtml || memoryHtml) return finalHtml;
+      return message.content
+        ? renderAssistantHtml(message.content, { streaming: false }) + memoryHtml
+        : finalHtml;
+    }
+
+    if (isDesktopTraceLayout()) {
+      if (finalHtml) return finalHtml;
+      if (message?.error) {
+        return '<div class="agent-final-answer msg-error">' + escapeHtml(message.error) + '</div>';
+      }
+      return '<div class="agent-final-answer msg-error">No response.</div>';
+    }
+
+    const collapsed = collapseTimeline !== null ? !!collapseTimeline : true;
+    return renderTimelineFold(timelineHtml, stepCount, { collapsed }) + finalHtml;
+  } finally {
+    markdownImages = previousImages;
+  }
 }
 
 function settleAssistantRow(row, message, { animateCollapse = false } = {}) {
@@ -742,6 +748,16 @@ function skillLabel(name, args) {
   if (name === 'str_replace') return 'Edit file';
   if (name === 'delete_file') return 'Delete file';
   if (name === 'run_terminal') return 'Terminal';
+  if (name === 'browser_navigate') return 'Open page';
+  if (name === 'browser_snapshot') return 'Page snapshot';
+  if (name === 'browser_click') return 'Click';
+  if (name === 'browser_type') return 'Type in page';
+  if (name === 'browser_press') return 'Press key';
+  if (name === 'browser_wait') return 'Wait';
+  if (name === 'browser_screenshot') return 'Screenshot';
+  if (name === 'browser_evaluate') return 'Run in page';
+  if (name === 'browser_close') return 'Close browser';
+  if (name === 'show_image') return 'Show image';
   return name || 'Skill';
 }
 
@@ -755,6 +771,8 @@ function toolBodyFromArgs(name, args) {
     return (oldText ? ('- ' + oldText) : '') + (oldText && newText ? '\n\n' : '') + (newText ? ('+ ' + newText) : '');
   }
   if (name === 'run_terminal') return String(a.command || '');
+  if (name === 'browser_evaluate') return String(a.expression || '');
+  if (name === 'browser_type') return String(a.text || '');
   return '';
 }
 
@@ -778,6 +796,24 @@ function skillLiveVerb(name, args) {
   }
   if (name === 'run_terminal') {
     if (executing) return 'Running';
+    if (approval === 'allowed') return 'Queued';
+    return 'Drafting';
+  }
+  if (String(name || '').startsWith('browser_')) {
+    if (executing) {
+      if (name === 'browser_navigate') return 'Opening';
+      if (name === 'browser_snapshot') return 'Reading page';
+      if (name === 'browser_click') return 'Clicking';
+      if (name === 'browser_type') return 'Typing';
+      if (name === 'browser_screenshot') return 'Capturing';
+      if (name === 'browser_close') return 'Closing';
+      return 'Browsing';
+    }
+    if (approval === 'allowed') return 'Queued';
+    return 'Drafting';
+  }
+  if (name === 'show_image') {
+    if (executing) return 'Loading image';
     if (approval === 'allowed') return 'Queued';
     return 'Drafting';
   }
@@ -821,6 +857,12 @@ function skillToolIcon(name, args) {
   }
   if (name === 'run_terminal') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>';
+  }
+  if (name === 'show_image') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-4.5-4.5L9 18"/></svg>';
+  }
+  if (String(name || '').startsWith('browser_')) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><circle cx="7" cy="6" r="0.6" fill="currentColor"/><circle cx="9.5" cy="6" r="0.6" fill="currentColor"/></svg>';
   }
   if (name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir' || name === 'glob' || name === 'grep') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
@@ -1233,9 +1275,14 @@ async function submitToolApproval(id, allow) {
 }
 
 function skillDetailLabel(name) {
-  if (name === 'fetch_url') return 'URL';
+  if (name === 'fetch_url' || name === 'browser_navigate') return 'URL';
   if (name === 'activate_skill' || name === 'read_skill') return 'Skill';
   if (name === 'run_terminal') return 'Command';
+  if (name === 'browser_click' || name === 'browser_type' || name === 'browser_press' || name === 'browser_wait') {
+    return 'Target';
+  }
+  if (name === 'browser_evaluate') return 'Expression';
+  if (name === 'browser_screenshot' || name === 'show_image') return 'Path';
   if (name === 'glob' || name === 'grep') return 'Pattern';
   if (name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir') {
     return 'Path';
@@ -1277,6 +1324,7 @@ function agentStepHtml({
   executing: executingFlag,
   args,
   body,
+  image,
 }) {
   let kindLabel = skillLabel(name, { kind });
   const resultText = String(result || '');
@@ -1298,13 +1346,15 @@ function agentStepHtml({
   const risk = String(approvalRisk || '');
   const riskLabel = risk === 'terminal'
     ? 'Runs a command'
+    : risk === 'browser'
+      ? 'Controls a browser'
     : risk === 'write'
       ? 'Modifies files'
       : risk === 'safe'
         ? 'Read-only'
         : '';
   const riskHtml = waitingApproval && riskLabel
-    ? '<div class="agent-step-risk' + (risk === 'safe' ? ' is-safe' : risk === 'terminal' ? ' is-terminal' : '') + '">' + escapeHtml(riskLabel) + '</div>'
+    ? '<div class="agent-step-risk' + (risk === 'safe' ? ' is-safe' : (risk === 'terminal' || risk === 'browser') ? ' is-terminal' : '') + '">' + escapeHtml(riskLabel) + '</div>'
     : '';
   const approveHtml = waitingApproval
     ? '<div class="agent-step-approve">' +
@@ -1315,6 +1365,10 @@ function agentStepHtml({
   const bodyText = String(body || toolBodyFromArgs(name, args) || '').slice(0, 20000);
   const bodyHtml = bodyText
     ? '<div class="agent-step-body' + (live ? ' is-live' : '') + '"><pre class="agent-step-body-stream">' + escapeHtml(bodyText) + '</pre></div>'
+    : '';
+  const shot = String(image || '');
+  const shotHtml = /^data:image\//i.test(shot)
+    ? '<div class="agent-step-shot"><img src="' + escapeHtml(shot) + '" alt="Browser screenshot"></div>'
     : '';
   return wrapTimelineStep(
     '<div class="agent-step-card"' + (live ? ' aria-busy="true"' : '') + '>' +
@@ -1334,6 +1388,7 @@ function agentStepHtml({
           + '<span class="agent-step-detail-value">' + escapeHtml(detail) + '</span></div>'
         : '') +
       bodyHtml +
+      shotHtml +
       (live && !resultText && executing
         ? '<div class="agent-step-await" aria-hidden="true"><span class="agent-step-await-bar"></span></div>'
         : '') +
@@ -2467,14 +2522,33 @@ if (window.DOMPurify) {
 
 function renderMarkdown(text) {
   if (!text) return '';
+  const source = applyMarkdownImageRefs(String(text));
   if (!window.marked || !window.DOMPurify) {
-    return '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
+    return '<p>' + escapeHtml(source).replace(/\n/g, '<br>') + '</p>';
   }
-  const raw = window.marked.parse(String(text), { async: false });
+  const raw = window.marked.parse(source, { async: false });
   return window.DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },
     ADD_ATTR: ['target', 'align', 'loading', 'decoding', 'referrerpolicy'],
+    ADD_DATA_URI_TAGS: ['img'],
   });
+}
+
+let markdownImages = Object.create(null);
+
+function setMarkdownImages(map) {
+  markdownImages = map && typeof map === 'object' ? map : Object.create(null);
+}
+
+function applyMarkdownImageRefs(text) {
+  return String(text || '').replace(
+    /!\[([^\]]*)\]\(\s*(img_\d+)(?:\s+"[^"]*")?\s*\)/gi,
+    (all, alt, id) => {
+      const src = markdownImages[id];
+      if (!src || !/^data:image\//i.test(src)) return all;
+      return '![' + alt + '](' + src + ')';
+    }
+  );
 }
 
 /** Hide broken citation favicons so the claim link still reads cleanly. */

@@ -318,6 +318,20 @@
 .agent-step-result.is-short {
   white-space: pre-wrap;
 }
+.agent-step-shot {
+  margin-top: 0.55rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
+  background: color-mix(in oklch, var(--color-graphite) 70%, black);
+}
+.agent-step-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 18rem;
+  object-fit: contain;
+}
 .agent-step-result > summary {
   display: flex;
   align-items: flex-start;

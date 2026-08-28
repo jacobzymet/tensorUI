@@ -99,6 +99,7 @@ const DEFAULT_SETTINGS = {
   approvalMode: 'manual',
   skillFilesystem: false,
   skillTerminal: false,
+  skillBrowser: false,
   terminalTimeoutSecs: 30,
   terminalHeightVh: 0.25,
   agentMode: false,
@@ -1383,6 +1384,7 @@ function normalizeSettings(parsed) {
       : DEFAULT_SETTINGS.approvalMode,
     skillFilesystem: parsed.skillFilesystem === true,
     skillTerminal: parsed.skillTerminal === true,
+    skillBrowser: parsed.skillBrowser === true,
     terminalTimeoutSecs: (() => {
       const n = Number(parsed.terminalTimeoutSecs);
       if (!Number.isFinite(n)) return DEFAULT_SETTINGS.terminalTimeoutSecs;
