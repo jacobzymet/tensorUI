@@ -790,6 +790,13 @@ html[data-theme="light"] .agent-process-note {
 .chat-model-select-wrap.is-open .chat-model-select-caret {
   transform: rotate(180deg);
 }
+.chat-model-select-mark {
+  flex: 0 0 auto;
+  width: 0.92rem;
+  height: 0.92rem;
+  color: var(--color-muted);
+  pointer-events: none;
+}
 .chat-model-select {
   width: auto;
   max-width: 12rem;
@@ -849,7 +856,7 @@ html[data-theme="light"] .agent-process-note {
   width: min(22rem, calc(100vw - 1rem));
   min-width: 0;
   max-width: none;
-  max-height: min(23rem, 60vh);
+  max-height: min(23rem, 60vh, calc(100dvh - 1rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1081,6 +1088,15 @@ html[data-theme="light"] .agent-process-note {
   gap: 0.4rem;
   min-width: 0;
   flex: 1 1 auto;
+}
+.chat-model-option-mark {
+  flex: 0 0 auto;
+  width: 0.92rem;
+  height: 0.92rem;
+  color: var(--color-muted);
+}
+.chat-model-option.is-selected .chat-model-option-mark {
+  color: var(--color-accent);
 }
 .chat-model-option-name {
   flex: 0 1 auto;

@@ -214,8 +214,8 @@ function modelMenuHasCloud() {
 }
 
 function fallbackModelMenuTab() {
-  const selected = modelMenuOptions.find((option) => option.value === selectedChatModel);
-  if (selected && modelLooksLocal(selected) && modelMenuHasLocal()) return 'local';
+  if (pinnedModelIds.length) return 'pins';
+  if (recentModelIds.length) return 'recents';
   if (modelMenuHasCloud()) return 'cloud';
   if (modelMenuHasLocal()) return 'local';
   return 'recents';
@@ -388,6 +388,7 @@ function renderModelOptionHtml(option, index, { showProvider, terms }) {
     + '<button type="button" class="chat-model-option-main" data-model-pick="'
     + escapeModelAttr(option.value) + '">'
     + '<span class="chat-model-option-lead">'
+    + MODEL_MARK_ICON
     + '<span class="chat-model-option-name">' + highlightModelText(option.label, terms) + '</span>'
     + defaultBadge
     + '</span>'
@@ -496,21 +497,57 @@ function applyModelFilter({ keepActive = false } = {}) {
   if (modelMenuIsOpen()) positionModelMenu();
 }
 
+function modelMenuViewport() {
+  const view = window.visualViewport;
+  if (view) {
+    return {
+      top: view.offsetTop,
+      left: view.offsetLeft,
+      width: view.width,
+      height: view.height,
+    };
+  }
+  return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
+}
+
 function positionModelMenu() {
   if (!chatModelMenu || !chatModelSelectWrap) return;
   const rect = chatModelSelectWrap.getBoundingClientRect();
-  // CSS owns a stable menu width; model and provider text never resize it.
-  const menuWidth = chatModelMenu.offsetWidth || Math.min(352, window.innerWidth - 16);
-  const maxLeft = window.innerWidth - menuWidth - 8;
-  // Center on the trigger, clamping only near viewport edges.
+  const view = modelMenuViewport();
+  const pad = 8;
+  const gap = 6;
+  const viewRight = view.left + view.width;
+  const viewBottom = view.top + view.height;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  // Match CSS max-height: min(23rem, 60vh), then shrink to the open side.
+  const preferred = Math.min(23 * rem, view.height * 0.6);
+
+  const menuWidth = Math.min(
+    chatModelMenu.offsetWidth || 352,
+    Math.max(0, view.width - pad * 2)
+  );
+  const maxLeft = viewRight - menuWidth - pad;
   const idealLeft = rect.left + (rect.width - menuWidth) / 2;
-  const left = Math.min(Math.max(8, idealLeft), maxLeft);
-  const menuHeight = chatModelMenu.offsetHeight || Math.min(368, window.innerHeight * 0.6);
-  const spaceBelow = window.innerHeight - rect.bottom - 8;
-  const openAbove = spaceBelow < Math.min(menuHeight, 260) && rect.top > spaceBelow;
-  const top = openAbove
-    ? Math.max(8, rect.top - menuHeight - 6)
-    : rect.bottom + 6;
+  const left = Math.min(Math.max(view.left + pad, idealLeft), Math.max(view.left + pad, maxLeft));
+
+  const spaceBelow = viewBottom - rect.bottom - pad - gap;
+  const spaceAbove = rect.top - view.top - pad - gap;
+  const openAbove = spaceBelow < preferred && spaceAbove > spaceBelow;
+  const available = Math.max(0, openAbove ? spaceAbove : spaceBelow);
+  const maxHeight = Math.max(8, Math.min(preferred, available));
+  chatModelMenu.style.maxHeight = Math.round(maxHeight) + 'px';
+
+  const menuHeight = Math.min(chatModelMenu.offsetHeight || maxHeight, maxHeight);
+  let top;
+  if (openAbove) {
+    top = Math.max(view.top + pad, rect.top - gap - menuHeight);
+  } else {
+    top = rect.bottom + gap;
+    if (top + menuHeight > viewBottom - pad) {
+      top = Math.max(view.top + pad, viewBottom - pad - menuHeight);
+    }
+  }
+
   chatModelMenu.style.top = Math.round(top) + 'px';
   chatModelMenu.style.left = Math.round(left) + 'px';
   chatModelMenu.style.width = Math.round(menuWidth) + 'px';
@@ -532,6 +569,7 @@ function closeModelMenu({ restoreFocus = false } = {}) {
   if (restoreFocus) chatModelSelect.focus();
   const finish = () => {
     chatModelMenu.classList.add('is-hidden');
+    chatModelMenu.style.maxHeight = '';
     if (chatModelMenu.parentElement !== chatModelSelectWrap) {
       chatModelSelectWrap.appendChild(chatModelMenu);
     }
@@ -595,7 +633,10 @@ function openModelMenu() {
   // trigger keeps focus and its own arrow-key handler stays in charge.
   if (searchable) chatModelSearch.focus();
   void chatModelMenu.offsetWidth;
-  requestAnimationFrame(() => chatModelMenu.classList.add('is-open'));
+  requestAnimationFrame(() => {
+    positionModelMenu();
+    chatModelMenu.classList.add('is-open');
+  });
 }
 
 function chooseModelOption(value) {
@@ -3715,12 +3756,15 @@ document.addEventListener('click', (event) => {
   if (chatModelMenu.contains(event.target)) return;
   closeModelMenu();
 });
-window.addEventListener('resize', () => {
+function repositionOpenModelMenu() {
   if (modelMenuIsOpen()) positionModelMenu();
-});
-document.addEventListener('scroll', () => {
-  if (modelMenuIsOpen()) positionModelMenu();
-}, true);
+}
+window.addEventListener('resize', repositionOpenModelMenu);
+document.addEventListener('scroll', repositionOpenModelMenu, true);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', repositionOpenModelMenu);
+  window.visualViewport.addEventListener('scroll', repositionOpenModelMenu);
+}
 composerInput.addEventListener('input', () => {
   if (voiceListening) stopVoiceInput({ silent: true });
   mentionInput = composerInput;
