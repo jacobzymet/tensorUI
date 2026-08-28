@@ -12,7 +12,7 @@ use std::{
 };
 
 use dom_smoothie::{Config, Readability, TextMode};
-use futures_util::{StreamExt, future::join_all};
+use futures_util::{StreamExt, future::join_all, stream};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -30,6 +30,7 @@ use crate::{
 /// After this many tool calls in one turn, surface a once-only UI notice that
 /// the model may be looping. There is no hard tool-round ceiling — Stop is the
 /// escape hatch.
+const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const TOOL_LOOP_NOTICE_AFTER: usize = 25;
 const DEEP_RESEARCH_TOOL_LOOP_NOTICE_AFTER: usize = 40;
 const DEEP_RESEARCH_MIN_RESULTS: usize = 10;
@@ -441,7 +442,7 @@ struct ToolCall {
 struct StreamedTurn {
     content: String,
     reasoning: String,
-    tool: Option<ToolCall>,
+    tools: Vec<ToolCall>,
 }
 
 impl StreamedTurn {
@@ -463,33 +464,59 @@ impl StreamedTurn {
 fn append_openai_tool_exchange(
     messages: &mut Vec<Value>,
     turn: &StreamedTurn,
-    call: &ToolCall,
-    result: &str,
+    results: &[(ToolCall, String)],
 ) {
+    if results.is_empty() {
+        return;
+    }
     let content = if turn.content.trim().is_empty() {
         Value::Null
     } else {
         Value::String(turn.content.clone())
     };
-    let arguments = serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into());
+    let tool_calls: Vec<Value> = results
+        .iter()
+        .map(|(call, _)| {
+            let arguments = serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into());
+            json!({
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": arguments
+                }
+            })
+        })
+        .collect();
     messages.push(json!({
         "role": "assistant",
         "content": content,
-        "tool_calls": [{
-            "id": call.id,
-            "type": "function",
-            "function": {
-                "name": call.name,
-                "arguments": arguments
-            }
-        }]
+        "tool_calls": tool_calls
     }));
-    messages.push(json!({
-        "role": "tool",
-        "tool_call_id": call.id,
-        "name": call.name,
-        "content": result
-    }));
+    for (call, result) in results {
+        messages.push(json!({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "name": call.name,
+            "content": result
+        }));
+    }
+}
+
+fn is_lookup_tool(name: &str) -> bool {
+    matches!(name, "web_search" | "fetch_url")
+}
+
+fn lookup_retry_guidance(name: &str, err: &str) -> String {
+    if name == "web_search" {
+        format!(
+            "{err}\n\nSearch did not return results. You may try one simpler query, or continue without live sources."
+        )
+    } else {
+        format!(
+            "{err}\n\nFetch failed. Try a different URL from prior search results, or search again."
+        )
+    }
 }
 
 fn new_tool_call_id() -> String {
@@ -675,81 +702,49 @@ async fn run_agent_loop(
         )
         .await?;
 
-        if let Some(call) = turn.tool.clone() {
-            if force_final && call.name != "ask_user" {
-                tool_rounds += 1;
+        if !turn.tools.is_empty() {
+            let calls = turn.tools.clone();
+            send_content_clear(tx, &turn).await?;
+
+            if force_final && !calls.iter().any(|call| call.name == "ask_user") {
+                tool_rounds += calls.len();
                 let err = crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_FORCE_FINAL);
-                let mut clear = json!({ "phase": "content_clear" });
-                if !turn.content.trim().is_empty() {
-                    clear["text"] = json!(turn.content);
+                let mut results = Vec::new();
+                for call in &calls {
+                    send_tool_call(tx, call).await?;
+                    let outcome = ToolOutcome::soft_failure(err);
+                    send_tool_result(tx, call, &outcome).await?;
+                    results.push((call.clone(), err.to_string()));
                 }
-                if !turn.reasoning.trim().is_empty() {
-                    clear["reasoning"] = json!(turn.reasoning);
-                }
-                send_sse(tx, sse_agent(clear)).await?;
-                send_sse(
-                    tx,
-                    sse_agent(json!({
-                        "phase": "tool_call",
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    })),
-                )
-                .await?;
-                send_sse(
-                    tx,
-                    sse_agent(json!({
-                        "phase": "tool_result",
-                        "name": call.name,
-                        "ok": false,
-                        "preview": err,
-                        "result": err,
-                    })),
-                )
-                .await?;
-                append_openai_tool_exchange(&mut request.messages, &turn, &call, err);
+                append_openai_tool_exchange(&mut request.messages, &turn, &results);
                 continue;
             }
-            if call.name == "ask_user" {
+
+            if let Some(ask_idx) = calls.iter().position(|call| call.name == "ask_user") {
                 if !request.deep_research {
                     return Err(StreamFail::Other(
                         "Capability 'ask_user' is only available in deep research.".into(),
                     ));
                 }
-                tool_rounds += 1;
-                let mut clear = json!({ "phase": "content_clear" });
-                if !turn.content.trim().is_empty() {
-                    clear["text"] = json!(turn.content);
-                }
-                if !turn.reasoning.trim().is_empty() {
-                    clear["reasoning"] = json!(turn.reasoning);
-                }
-                send_sse(tx, sse_agent(clear)).await?;
-
-                let questions = normalize_ask_user_questions(&call.arguments);
+                tool_rounds += calls.len();
+                let ask = &calls[ask_idx];
+                let questions = normalize_ask_user_questions(&ask.arguments);
                 if questions.is_empty() {
-                    let err = ask_user_format_error(&call.arguments);
-                    send_sse(
-                        tx,
-                        sse_agent(json!({
-                            "phase": "tool_call",
-                            "name": "ask_user",
-                            "arguments": call.arguments,
-                        })),
-                    )
-                    .await?;
-                    send_sse(
-                        tx,
-                        sse_agent(json!({
-                            "phase": "tool_result",
-                            "name": "ask_user",
-                            "ok": false,
-                            "preview": err,
-                            "result": err,
-                        })),
-                    )
-                    .await?;
-                    append_openai_tool_exchange(&mut request.messages, &turn, &call, &err);
+                    let err = ask_user_format_error(&ask.arguments);
+                    let mut results = Vec::new();
+                    for call in &calls {
+                        send_tool_call(tx, call).await?;
+                        let text = if call.name == "ask_user" {
+                            err.clone()
+                        } else {
+                            "ask_user failed this turn; retry this tool after clarifying questions."
+                                .into()
+                        };
+                        let outcome = ToolOutcome::soft_failure(&text);
+                        send_tool_result(tx, call, &outcome).await?;
+                        results.push((call.clone(), text));
+                    }
+                    append_openai_tool_exchange(&mut request.messages, &turn, &results);
                     continue;
                 }
 
@@ -787,55 +782,45 @@ async fn run_agent_loop(
                     })),
                 )
                 .await?;
-                append_openai_tool_exchange(&mut request.messages, &turn, &call, &summary);
+                let mut results = Vec::new();
+                for (index, call) in calls.iter().enumerate() {
+                    let text = if index == ask_idx {
+                        summary.clone()
+                    } else {
+                        "Clarifying questions were asked this turn. Call this tool again after the user answers.".into()
+                    };
+                    results.push((call.clone(), text));
+                }
+                append_openai_tool_exchange(&mut request.messages, &turn, &results);
                 continue;
             }
 
             if await_clarify {
                 let err = "Deep research requires ask_user first (1–2 clarifying questions) before web_search or fetch_url.";
-                tool_rounds += 1;
-                let mut clear = json!({ "phase": "content_clear" });
-                if !turn.content.trim().is_empty() {
-                    clear["text"] = json!(turn.content);
+                tool_rounds += calls.len();
+                let mut results = Vec::new();
+                for call in &calls {
+                    send_tool_call(tx, call).await?;
+                    let outcome = ToolOutcome::soft_failure(err);
+                    send_tool_result(tx, call, &outcome).await?;
+                    results.push((call.clone(), err.to_string()));
                 }
-                if !turn.reasoning.trim().is_empty() {
-                    clear["reasoning"] = json!(turn.reasoning);
-                }
-                send_sse(tx, sse_agent(clear)).await?;
-                send_sse(
-                    tx,
-                    sse_agent(json!({
-                        "phase": "tool_call",
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    })),
-                )
-                .await?;
-                send_sse(
-                    tx,
-                    sse_agent(json!({
-                        "phase": "tool_result",
-                        "name": call.name,
-                        "ok": false,
-                        "preview": err,
-                        "result": err,
-                    })),
-                )
-                .await?;
-                append_openai_tool_exchange(&mut request.messages, &turn, &call, err);
+                append_openai_tool_exchange(&mut request.messages, &turn, &results);
                 continue;
             }
 
-            if !capability_allowed(&call.name, &request.skills, user_skills) {
-                return Err(StreamFail::Other(format!(
-                    "Capability '{}' is not enabled.",
-                    call.name
-                )));
+            for call in &calls {
+                if !capability_allowed(&call.name, &request.skills, user_skills) {
+                    return Err(StreamFail::Other(format!(
+                        "Capability '{}' is not enabled.",
+                        call.name
+                    )));
+                }
+                pending_force.remove(&call.name);
             }
-            pending_force.remove(&call.name);
             force_retries = 0;
 
-            tool_rounds += 1;
+            tool_rounds += calls.len();
             let loop_after = if request.deep_research {
                 DEEP_RESEARCH_TOOL_LOOP_NOTICE_AFTER
             } else {
@@ -854,72 +839,29 @@ async fn run_agent_loop(
                 )
                 .await?;
             }
-            // Authoritative seal: mid-stream forwarding can miss preface text when
-            // content and tool_calls share a delta. Always re-emit the resolved
-            // non-tool content so the UI keeps "I'll search for…" narration.
-            let mut clear = json!({ "phase": "content_clear" });
-            if !turn.content.trim().is_empty() {
-                clear["text"] = json!(turn.content);
-            }
-            if !turn.reasoning.trim().is_empty() {
-                clear["reasoning"] = json!(turn.reasoning);
-            }
-            send_sse(tx, sse_agent(clear)).await?;
-            send_sse(
-                tx,
-                sse_agent(json!({
-                    "phase": "tool_call",
-                    "name": call.name,
-                    "arguments": call.arguments,
-                })),
-            )
-            .await?;
 
-            let outcome = match execute_tool(&call, &request.skills, user_skills).await {
-                Ok(outcome) => outcome,
-                Err(err) if call.name == "web_search" || call.name == "fetch_url" => {
-                    // Never abort the whole turn on a single lookup miss — feed it
-                    // back so the model can reformulate and continue researching.
-                    let guidance = if call.name == "web_search" {
-                        format!(
-                            "{err}\n\nSearch did not return results. You may try one simpler query, or continue without live sources."
-                        )
-                    } else {
-                        format!(
-                            "{err}\n\nFetch failed. Try a different URL from prior search results, or search again."
-                        )
-                    };
-                    ToolOutcome::soft_failure(guidance)
+            for call in &calls {
+                send_tool_call(tx, call).await?;
+            }
+
+            let executed = execute_tool_batch(calls, &request.skills, user_skills).await?;
+            let mut results = Vec::new();
+            for (call, outcome) in executed {
+                if call.name == "web_search" && outcome.ok {
+                    deep_searches += 1;
                 }
-                Err(err) => return Err(StreamFail::Other(err)),
-            };
-            if call.name == "web_search" && outcome.ok {
-                deep_searches += 1;
+                send_tool_result(tx, &call, &outcome).await?;
+                let mut model_result = outcome.text;
+                if request.deep_research {
+                    model_result.push_str(&deep_research_continue_note(
+                        request.deep_research_output,
+                        deep_searches,
+                        search_cap,
+                    ));
+                }
+                results.push((call, model_result));
             }
-            let preview = outcome.ui_text.chars().take(240).collect::<String>();
-            // Cap the UI payload; the model still receives the full `result` below.
-            let ui_result: String = outcome.ui_text.chars().take(32_000).collect();
-            let mut payload = json!({
-                "phase": "tool_result",
-                "name": call.name,
-                "ok": outcome.ok,
-                "preview": preview,
-                "result": ui_result,
-            });
-            if let Some(note) = &outcome.note {
-                payload["note"] = json!(note);
-            }
-            send_sse(tx, sse_agent(payload)).await?;
-
-            let mut model_result = outcome.text;
-            if request.deep_research {
-                model_result.push_str(&deep_research_continue_note(
-                    request.deep_research_output,
-                    deep_searches,
-                    search_cap,
-                ));
-            }
-            append_openai_tool_exchange(&mut request.messages, &turn, &call, &model_result);
+            append_openai_tool_exchange(&mut request.messages, &turn, &results);
             continue;
         }
 
@@ -1254,7 +1196,7 @@ struct AccumToolCall {
 }
 
 /// With `--jinja`, llama-server may lift `<tool_call>` into native `delta.tool_calls`;
-/// we re-synthesize XML for `extract_tool_call`. Once a tool starts we stop
+/// we re-synthesize XML for `extract_tool_calls`. Once a tool starts we stop
 /// forwarding further content deltas, after first forwarding any preface text
 /// (including content that shares a delta with `tool_calls`).
 struct StreamOnceTools<'a> {
@@ -1367,7 +1309,7 @@ async fn stream_once(
     drop(byte_stream);
 
     let turn = resolve_streamed_turn(&reasoning, &content, &native_tools);
-    if turn.content.trim().is_empty() && turn.reasoning.trim().is_empty() && turn.tool.is_none() {
+    if turn.content.trim().is_empty() && turn.reasoning.trim().is_empty() && turn.tools.is_empty() {
         return Err(StreamFail::Other(
             "Model returned no message content.".into(),
         ));
@@ -1753,23 +1695,29 @@ fn openai_tools_payload(
     tools_out
 }
 
-fn tool_call_from_native(slots: &[Option<AccumToolCall>]) -> Option<ToolCall> {
-    let call = slots.iter().flatten().find(|c| !c.name.is_empty())?;
-    let arguments = if call.arguments.trim().is_empty() {
-        json!({})
-    } else {
-        serde_json::from_str::<Value>(&call.arguments)
-            .unwrap_or_else(|_| json!({ "raw": call.arguments }))
-    };
-    Some(ToolCall {
-        id: if call.id.trim().is_empty() {
-            new_tool_call_id()
-        } else {
-            call.id.clone()
-        },
-        name: call.name.clone(),
-        arguments,
-    })
+fn tool_calls_from_native(slots: &[Option<AccumToolCall>]) -> Vec<ToolCall> {
+    slots
+        .iter()
+        .flatten()
+        .filter(|call| !call.name.is_empty())
+        .map(|call| {
+            let arguments = if call.arguments.trim().is_empty() {
+                json!({})
+            } else {
+                serde_json::from_str::<Value>(&call.arguments)
+                    .unwrap_or_else(|_| json!({ "raw": call.arguments }))
+            };
+            ToolCall {
+                id: if call.id.trim().is_empty() {
+                    new_tool_call_id()
+                } else {
+                    call.id.clone()
+                },
+                name: call.name.clone(),
+                arguments,
+            }
+        })
+        .collect()
 }
 
 fn resolve_streamed_turn(
@@ -1778,9 +1726,11 @@ fn resolve_streamed_turn(
     native_tools: &[Option<AccumToolCall>],
 ) -> StreamedTurn {
     let visible = strip_think_blocks(content);
-    let tool = tool_call_from_native(native_tools).or_else(|| extract_tool_call(&visible));
-    let content = if tool.is_some() {
-        // Drop fallback XML from the assistant text channel when we resolved a tool.
+    let mut tools = tool_calls_from_native(native_tools);
+    if tools.is_empty() {
+        tools = extract_tool_calls(&visible);
+    }
+    let content = if !tools.is_empty() {
         strip_tool_call_xml(&visible)
     } else {
         content.to_string()
@@ -1788,7 +1738,7 @@ fn resolve_streamed_turn(
     StreamedTurn {
         content,
         reasoning: reasoning.to_string(),
-        tool,
+        tools,
     }
 }
 
@@ -1809,6 +1759,57 @@ fn strip_tool_call_xml(text: &str) -> String {
 
 fn sse_agent(payload: Value) -> Vec<u8> {
     format!("event: agent\ndata: {payload}\n\n").into_bytes()
+}
+
+async fn send_content_clear(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    turn: &StreamedTurn,
+) -> Result<(), StreamFail> {
+    let mut clear = json!({ "phase": "content_clear" });
+    if !turn.content.trim().is_empty() {
+        clear["text"] = json!(turn.content);
+    }
+    if !turn.reasoning.trim().is_empty() {
+        clear["reasoning"] = json!(turn.reasoning);
+    }
+    send_sse(tx, sse_agent(clear)).await
+}
+
+async fn send_tool_call(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    call: &ToolCall,
+) -> Result<(), StreamFail> {
+    send_sse(
+        tx,
+        sse_agent(json!({
+            "phase": "tool_call",
+            "id": call.id,
+            "name": call.name,
+            "arguments": call.arguments,
+        })),
+    )
+    .await
+}
+
+async fn send_tool_result(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    call: &ToolCall,
+    outcome: &ToolOutcome,
+) -> Result<(), StreamFail> {
+    let preview = outcome.ui_text.chars().take(240).collect::<String>();
+    let ui_result: String = outcome.ui_text.chars().take(32_000).collect();
+    let mut payload = json!({
+        "phase": "tool_result",
+        "id": call.id,
+        "name": call.name,
+        "ok": outcome.ok,
+        "preview": preview,
+        "result": ui_result,
+    });
+    if let Some(note) = &outcome.note {
+        payload["note"] = json!(note);
+    }
+    send_sse(tx, sse_agent(payload)).await
 }
 
 async fn wait_for_clarify_answers(
@@ -2050,11 +2051,24 @@ fn strip_think_blocks(text: &str) -> String {
     out
 }
 
-fn extract_tool_call(text: &str) -> Option<ToolCall> {
-    let start = text.rfind("<tool_call>")?;
-    let after = start + "<tool_call>".len();
-    let end = text[after..].find("</tool_call>")? + after;
-    let raw = text[after..end].trim();
+fn extract_tool_calls(text: &str) -> Vec<ToolCall> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<tool_call>") {
+        let after = start + "<tool_call>".len();
+        let Some(rel) = rest[after..].find("</tool_call>") else {
+            break;
+        };
+        let raw = rest[after..after + rel].trim();
+        if let Some(call) = parse_tool_call_json(raw) {
+            out.push(call);
+        }
+        rest = &rest[after + rel + "</tool_call>".len()..];
+    }
+    out
+}
+
+fn parse_tool_call_json(raw: &str) -> Option<ToolCall> {
     let value: Value = serde_json::from_str(raw).ok()?;
     let name = value.get("name")?.as_str()?.trim().to_string();
     if name.is_empty() {
@@ -2134,7 +2148,7 @@ async fn execute_tool(
             let mut model_result = result;
             if skills.fetch_url {
                 model_result.push_str(
-                    "\n\nNote: fetch_url is available. If a result URL looks useful and you need more detail than the snippets/excerpts above, call fetch_url on that URL before answering.",
+                    "\n\nNote: fetch_url is available. If result URLs look useful, you may call fetch_url on several of them in the same turn (they run in parallel).",
                 );
             }
             Ok(ToolOutcome::with_ui_text(model_result, ui_result, note))
@@ -2186,6 +2200,42 @@ async fn execute_tool(
         }
         other => Err(format!("Unknown capability '{other}'.")),
     }
+}
+
+async fn execute_tool_batch(
+    calls: Vec<ToolCall>,
+    skills: &AgentSkills,
+    user_skills: &[UserSkill],
+) -> Result<Vec<(ToolCall, ToolOutcome)>, StreamFail> {
+    let skills = skills.clone();
+    let user_skills = user_skills.to_vec();
+    let mut finished: Vec<(usize, ToolCall, Result<ToolOutcome, String>)> =
+        stream::iter(calls.into_iter().enumerate())
+            .map(|(index, call)| {
+                let skills = skills.clone();
+                let user_skills = user_skills.clone();
+                async move {
+                    let outcome = match execute_tool(&call, &skills, &user_skills).await {
+                        Ok(outcome) => Ok(outcome),
+                        Err(err) if is_lookup_tool(&call.name) => Ok(ToolOutcome::soft_failure(
+                            lookup_retry_guidance(&call.name, &err),
+                        )),
+                        Err(err) => Err(err),
+                    };
+                    (index, call, outcome)
+                }
+            })
+            .buffer_unordered(MAX_CONCURRENT_TOOL_CALLS)
+            .collect()
+            .await;
+    if let Some((_, _, Err(err))) = finished.iter().find(|(_, _, result)| result.is_err()) {
+        return Err(StreamFail::Other(err.clone()));
+    }
+    finished.sort_by_key(|(index, _, _)| *index);
+    Ok(finished
+        .into_iter()
+        .map(|(_, call, outcome)| (call, outcome.expect("lookup errors were converted")))
+        .collect())
 }
 
 fn format_page_window(url: &str, full_text: &str, offset: usize, max_chars: usize) -> String {
@@ -2635,7 +2685,7 @@ mod tests {
 <tool_call>
 {"name":"web_search","arguments":{"query":"rust async"}}
 </tool_call>"#;
-        let call = extract_tool_call(text).unwrap();
+        let call = &extract_tool_calls(text)[0];
         assert_eq!(call.name, "web_search");
         assert_eq!(call.arguments["query"], "rust async");
     }
@@ -2659,7 +2709,7 @@ mod tests {
             }),
         );
         let turn = resolve_streamed_turn("", "Checking sources first.", &slots);
-        assert!(turn.tool.is_some());
+        assert_eq!(turn.tools.len(), 1);
         assert_eq!(turn.content, "Checking sources first.");
     }
 
@@ -2675,7 +2725,7 @@ mod tests {
             }),
         );
         let turn = resolve_streamed_turn("", "", &slots);
-        let call = turn.tool.unwrap();
+        let call = &turn.tools[0];
         assert_eq!(call.name, "web_search");
         assert_eq!(call.arguments["query"], "elon musk");
     }
@@ -2684,7 +2734,7 @@ mod tests {
     fn unclosed_think_does_not_swallow_tool_call() {
         let text = "<think>planning\n<tool_call>\n{\"name\":\"web_search\",\"arguments\":{\"query\":\"x\"}}\n</tool_call>";
         let visible = strip_think_blocks(text);
-        let call = extract_tool_call(&visible).unwrap();
+        let call = &extract_tool_calls(&visible)[0];
         assert_eq!(call.arguments["query"], "x");
     }
 
@@ -2710,7 +2760,7 @@ mod tests {
             turn.assistant_text()
                 .contains("<think>planning a search</think>")
         );
-        assert!(turn.tool.is_none());
+        assert!(turn.tools.is_empty());
     }
 
     #[test]
@@ -2728,8 +2778,8 @@ mod tests {
         );
         let inline = "<tool_call>\n{\"name\":\"web_search\",\"arguments\":{\"query\":\"from-xml\"}}\n</tool_call>";
         let turn = resolve_streamed_turn("", inline, &slots);
-        let call = turn.tool.unwrap();
-        assert_eq!(call.arguments["query"], "from-native");
+        assert_eq!(turn.tools.len(), 1);
+        assert_eq!(turn.tools[0].arguments["query"], "from-native");
     }
 
     #[test]
@@ -2739,8 +2789,55 @@ mod tests {
 {"name":"web_search","arguments":{"query":"hi"}}
 </tool_call>"#;
         let visible = strip_think_blocks(text);
-        let call = extract_tool_call(&visible).unwrap();
+        let call = &extract_tool_calls(&visible)[0];
         assert_eq!(call.arguments["query"], "hi");
+    }
+
+    #[test]
+    fn extracts_parallel_xml_tool_calls() {
+        let text = r#"
+<tool_call>
+{"name":"web_search","arguments":{"query":"alpha"}}
+</tool_call>
+<tool_call>
+{"name":"fetch_url","arguments":{"url":"https://example.com/a"}}
+</tool_call>
+<tool_call>
+{"name":"web_search","arguments":{"query":"beta"}}
+</tool_call>"#;
+        let calls = extract_tool_calls(text);
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].name, "web_search");
+        assert_eq!(calls[0].arguments["query"], "alpha");
+        assert_eq!(calls[1].name, "fetch_url");
+        assert_eq!(calls[2].arguments["query"], "beta");
+    }
+
+    #[test]
+    fn resolves_parallel_native_tool_calls() {
+        let mut slots = Vec::new();
+        merge_tool_call_delta(
+            &mut slots,
+            &json!({
+                "index": 0,
+                "id": "call_a",
+                "function": { "name": "web_search", "arguments": "{\"query\":\"one\"}" }
+            }),
+        );
+        merge_tool_call_delta(
+            &mut slots,
+            &json!({
+                "index": 1,
+                "id": "call_b",
+                "function": { "name": "fetch_url", "arguments": "{\"url\":\"https://example.com\"}" }
+            }),
+        );
+        let turn = resolve_streamed_turn("", "", &slots);
+        assert_eq!(turn.tools.len(), 2);
+        assert_eq!(turn.tools[0].id, "call_a");
+        assert_eq!(turn.tools[0].arguments["query"], "one");
+        assert_eq!(turn.tools[1].id, "call_b");
+        assert_eq!(turn.tools[1].name, "fetch_url");
     }
 
     #[test]
@@ -2923,13 +3020,13 @@ mod tests {
         let turn = StreamedTurn {
             content: "<think>planning only</think>".into(),
             reasoning: String::new(),
-            tool: None,
+            tools: Vec::new(),
         };
         assert!(turn.visible_text().is_empty());
         let turn = StreamedTurn {
             content: "<think>plan</think>\nAndrew Tate is…".into(),
             reasoning: String::new(),
-            tool: None,
+            tools: Vec::new(),
         };
         assert!(turn.visible_text().contains("Andrew Tate"));
     }

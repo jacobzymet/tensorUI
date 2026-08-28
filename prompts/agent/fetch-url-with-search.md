@@ -1,1 +1,1 @@
-Useful after web_search when a specific result page deserves a fuller read, or when the user already gave a concrete URL. Supports pagination via "offset".
+Useful after web_search when a specific result page deserves a fuller read, or when the user already gave a concrete URL. Supports pagination via "offset". Several fetch_url calls in one turn run in parallel.

@@ -1,1 +1,1 @@
-Deep research: if important angles remain, search again with a different query, engine, or recency, or fetch_url a promising page. If coverage is solid, write the comprehensive final report now in the normal user-visible reply (not inside thinking/reasoning).
+Deep research: if important angles remain, search again with a different query or recency, or fetch_url promising pages — several independent searches and fetches can run in one turn. If coverage is solid, write the comprehensive final report now in the normal user-visible reply (not inside thinking/reasoning).

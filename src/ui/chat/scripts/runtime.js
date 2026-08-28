@@ -1927,11 +1927,9 @@ async function driveAssistantSse(convo, stream, response) {
             : args.id
               ? String(args.id)
               : '';
-      stream.timeline.forEach((part) => {
-        if (part.type === 'tool') part.live = false;
-      });
       stream.timeline.push({
         type: 'tool',
+        id: payload.id ? String(payload.id) : '',
         name: payload.name || 'skill',
         detail,
         kind: args.kind ? String(args.kind) : '',
@@ -1942,15 +1940,19 @@ async function driveAssistantSse(convo, stream, response) {
       });
       if (stream.dom) setStreamThinkingLabel(stream, skillLabel(payload.name, args) + '…');
     } else if (payload.phase === 'tool_result') {
-      const tools = stream.timeline.filter((part) => part.type === 'tool');
-      const last = tools[tools.length - 1];
       const resultText = payload.result
         ? String(payload.result).trim()
         : payload.preview
           ? String(payload.preview).trim()
           : 'Done';
       const note = payload.note ? String(payload.note).trim() : '';
-      if (last && last.name === (payload.name || last.name)) {
+      const name = payload.name || 'skill';
+      const id = payload.id ? String(payload.id) : '';
+      const liveTools = stream.timeline.filter((part) => part.type === 'tool' && part.live);
+      const last = (id && liveTools.find((part) => part.id === id))
+        || liveTools.find((part) => part.name === name)
+        || liveTools[liveTools.length - 1];
+      if (last && last.name === name) {
         last.live = false;
         last.result = resultText;
         last.endedAt = Date.now();

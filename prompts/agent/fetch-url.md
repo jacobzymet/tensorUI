@@ -1,1 +1,1 @@
-Tool fetch_url — open one http(s) URL and extract readable text in chunks (~{{max_chars}} characters). Pass "offset" to paginate through longer pages.
+Tool fetch_url — open one http(s) URL and extract readable text in chunks (~{{max_chars}} characters). Pass "offset" to paginate through longer pages. Several fetch_url calls in one turn run in parallel.
