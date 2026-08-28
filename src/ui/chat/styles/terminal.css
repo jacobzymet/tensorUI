@@ -346,6 +346,6 @@
 }
 .segmented-stack {
   flex-wrap: wrap;
-  width: 100%;
-  max-width: 28rem;
+  width: max-content;
+  max-width: 100%;
 }
