@@ -72,6 +72,7 @@ const CHAT_BACKGROUND_POSITIONS = [
   'top left', 'top right', 'bottom left', 'bottom right',
 ];
 const PROJECT_MEMORY_MODES = ['default', 'project_only'];
+const APPROVAL_MODES = ['manual', 'auto_safe'];
 const SIBLING_CHAT_MAX = 8;
 const SIBLING_CHAT_BUDGET = 10000;
 const SIBLING_MSG_CHARS = 420;
@@ -95,6 +96,11 @@ const DEFAULT_SETTINGS = {
   fetchUrlMaxChars: 8000,
   webSearchPageMaxChars: 0,
   skillDeepResearch: true,
+  approvalMode: 'manual',
+  skillFilesystem: false,
+  skillTerminal: false,
+  terminalTimeoutSecs: 30,
+  terminalHeightVh: 0.25,
   agentMode: false,
   deepResearch: 'off', // off | long | brief — composer Research mode
   attachmentsMode: 'auto', // auto | on | off
@@ -198,6 +204,8 @@ let traceAutoOpenedForStream = null;
 let traceUserCollapsed = false;
 /** Keep the activity rail pinned to the latest step unless the user scrolls up. */
 let stickTraceSidebar = true;
+let terminalOpen = false;
+let draftWorkspaceRoot = '';
 let currentFonts = {
   font_body: 'inter',
   font_display: 'space-grotesk',
@@ -469,6 +477,7 @@ function applyTheme(theme) {
     if (prevResolved !== resolved && typeof repaintStarfield === 'function') {
       repaintStarfield();
     }
+    if (typeof refreshTerminalThemes === 'function') refreshTerminalThemes();
     if (prevResolved !== resolved && typeof repaintEmptyOrb === 'function') {
       repaintEmptyOrb();
     }
@@ -648,6 +657,48 @@ function normalizeModelIds(ids, limit) {
     .map((id) => id.trim()))].slice(0, limit);
 }
 
+function normalizeWorkspaceRoot(value) {
+  return String(value || '').trim().slice(0, 512);
+}
+
+function sessionWorkspaceRoot() {
+  const convo = conversations.find((item) => item.id === activeId);
+  if (convo) return normalizeWorkspaceRoot(convo.workspaceRoot);
+  return normalizeWorkspaceRoot(draftWorkspaceRoot);
+}
+
+function workspaceFolderName(root) {
+  const path = normalizeWorkspaceRoot(root);
+  if (!path) return '';
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || trimmed;
+}
+
+function setSessionWorkspaceRoot(value) {
+  const next = normalizeWorkspaceRoot(value);
+  const convo = conversations.find((item) => item.id === activeId);
+  let changed = false;
+  if (convo) {
+    if (normalizeWorkspaceRoot(convo.workspaceRoot) !== next) {
+      convo.workspaceRoot = next;
+      changed = true;
+      if (!convo.incognito) saveStore({ immediate: true });
+    }
+  } else if (normalizeWorkspaceRoot(draftWorkspaceRoot) !== next) {
+    draftWorkspaceRoot = next;
+    changed = true;
+  }
+  if (typeof renderComposerModes === 'function') renderComposerModes();
+  if (typeof renderPlusMenu === 'function') renderPlusMenu();
+  if (typeof onSessionWorkspaceChanged === 'function') onSessionWorkspaceChanged(changed);
+  return changed;
+}
+
+function resetDraftWorkspace() {
+  draftWorkspaceRoot = '';
+}
+
 function persistModelPickerState() {
   saveSettings({
     ...settings,
@@ -792,6 +843,9 @@ function normalizeConversation(convo) {
     groupMemory: typeof convo.groupMemory === 'string' ? convo.groupMemory : '',
     botsHeldBy: typeof convo.botsHeldBy === 'string' ? convo.botsHeldBy : null,
     sideThreadOf: typeof convo.sideThreadOf === 'string' ? convo.sideThreadOf : null,
+    workspaceRoot: typeof convo.workspaceRoot === 'string'
+      ? convo.workspaceRoot.trim().slice(0, 512)
+      : '',
     outboundQueue: Array.isArray(convo.outboundQueue)
       ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
       : [],
@@ -1324,6 +1378,21 @@ function normalizeSettings(parsed) {
         : Math.min(200000, Math.max(1000, Math.round(webSearchPageMaxChars))))
       : DEFAULT_SETTINGS.webSearchPageMaxChars,
     skillDeepResearch: parsed.skillDeepResearch !== false,
+    approvalMode: APPROVAL_MODES.includes(parsed.approvalMode)
+      ? parsed.approvalMode
+      : DEFAULT_SETTINGS.approvalMode,
+    skillFilesystem: parsed.skillFilesystem === true,
+    skillTerminal: parsed.skillTerminal === true,
+    terminalTimeoutSecs: (() => {
+      const n = Number(parsed.terminalTimeoutSecs);
+      if (!Number.isFinite(n)) return DEFAULT_SETTINGS.terminalTimeoutSecs;
+      return Math.min(120, Math.max(5, Math.round(n)));
+    })(),
+    terminalHeightVh: (() => {
+      const n = Number(parsed.terminalHeightVh);
+      if (!Number.isFinite(n)) return DEFAULT_SETTINGS.terminalHeightVh;
+      return Math.min(0.72, Math.max(0.16, n));
+    })(),
     agentMode: parsed.agentMode === true,
     deepResearch: DEEP_RESEARCH_MODES.includes(parsed.deepResearch)
       ? parsed.deepResearch
@@ -1389,6 +1458,7 @@ function applySettingsInMemory(next) {
   syncAgentButton();
   syncResearchControls();
   syncAttachButton();
+  if (typeof applyTerminalHeight === 'function') applyTerminalHeight();
 }
 
 function saveSettings(next, { immediate = true } = {}) {

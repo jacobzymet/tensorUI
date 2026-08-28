@@ -1055,6 +1055,11 @@ function fillSettingsFormFromState() {
     Number.isFinite(settings.webSearchPageMaxChars) ? settings.webSearchPageMaxChars : 0
   );
   document.getElementById('settingSkillDeepResearch').checked = settings.skillDeepResearch !== false;
+  document.getElementById('settingSkillFilesystem').checked = !!settings.skillFilesystem;
+  document.getElementById('settingSkillTerminal').checked = !!settings.skillTerminal;
+  document.getElementById('settingTerminalTimeout').value = String(settings.terminalTimeoutSecs || 30);
+  syncApprovalModeControls();
+  syncTerminalSkillControls();
   document.getElementById('settingAttachmentsMode').value = settings.attachmentsMode || 'auto';
   document.getElementById('settingAttachmentTextFallback').checked = !!settings.attachmentTextFallback;
   document.getElementById('settingAttachmentOcr').checked = !!settings.attachmentOcr;
@@ -1066,6 +1071,7 @@ function fillSettingsFormFromState() {
   syncChatBackgroundForm();
   syncWebSearchControls();
   syncFetchUrlControls();
+  syncTerminalSkillControls();
   syncAttachmentFallbackControls();
   fillDefaultModelSetting();
 }
@@ -1097,6 +1103,12 @@ function readSettingsForm() {
     fetchUrlMaxChars: fetchUrlMaxCharsRaw,
     webSearchPageMaxChars: webSearchPageMaxCharsRaw,
     skillDeepResearch: document.getElementById('settingSkillDeepResearch').checked,
+    skillFilesystem: document.getElementById('settingSkillFilesystem').checked,
+    skillTerminal: document.getElementById('settingSkillTerminal').checked,
+    terminalTimeoutSecs: Number(document.getElementById('settingTerminalTimeout').value),
+    approvalMode: document.querySelector('#approvalModeToggle [data-approval-mode].is-active')?.dataset.approvalMode
+      || settings.approvalMode
+      || 'manual',
     agentMode: settings.agentMode,
     deepResearch: settings.deepResearch,
     attachmentsMode: document.getElementById('settingAttachmentsMode').value,
@@ -1202,6 +1214,29 @@ function syncFetchUrlControls() {
     control.disabled = !enabled;
   });
   options.style.opacity = enabled ? '' : '0.55';
+}
+
+function syncTerminalSkillControls() {
+  const enabled = document.getElementById('settingSkillTerminal').checked;
+  const options = document.getElementById('terminalOptions');
+  const toggle = document.getElementById('btnTerminalAdvanced');
+  if (toggle) toggle.disabled = !enabled;
+  if (!options) return;
+  options.querySelectorAll('input, select').forEach((control) => {
+    control.disabled = !enabled;
+  });
+  options.style.opacity = enabled ? '' : '0.55';
+}
+
+function syncApprovalModeControls() {
+  const mode = APPROVAL_MODES.includes(settings.approvalMode)
+    ? settings.approvalMode
+    : 'manual';
+  document.querySelectorAll('#approvalModeToggle [data-approval-mode]').forEach((btn) => {
+    const on = btn.dataset.approvalMode === mode;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
 }
 
 function syncAttachmentFallbackControls() {
@@ -1448,6 +1483,8 @@ function plusMenuIcons() {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.5 14.5-6 6"/><path d="m14 6 4 4"/><path d="M15.2 4.8a2.2 2.2 0 0 1 3.1 3.1L10.5 15.7 7.3 12.5Z"/><path d="M4 20h5"/><path d="M6.5 17.5v5"/></svg>',
     agent:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>',
+    terminal:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>',
   };
 }
 
@@ -1557,6 +1594,15 @@ function renderPlusMenu() {
       disabled: false,
     }));
   }
+  plusMenu.appendChild(renderPlusMenuItem({
+    id: 'terminal',
+    iconClass: 'is-agent',
+    icon: icons.terminal,
+    title: 'Terminal',
+    desc: 'Open a command panel under the chat box',
+    on: !!terminalOpen,
+    disabled: false,
+  }));
 }
 
 function renderComposerModes() {
@@ -1715,6 +1761,11 @@ function handlePlusMenuAction(action) {
     settings.agentMode = !settings.agentMode;
     saveSettings({ ...settings });
     setPlusMenuOpen(false);
+    return;
+  }
+  if (action === 'terminal') {
+    setPlusMenuOpen(false);
+    if (typeof toggleTerminalPanel === 'function') toggleTerminalPanel();
   }
 }
 

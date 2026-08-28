@@ -206,7 +206,7 @@ button { font-family: inherit; }
   font-family: var(--font-logo);
   font-weight: 700;
   font-size: 1.2rem;
-  line-height: 1.05;
+  line-height: 1.2;
   color: var(--color-ink);
   letter-spacing: -0.03em;
   text-decoration: none;
@@ -236,7 +236,7 @@ button { font-family: inherit; }
   letter-spacing: -0.02em;
   color: var(--color-muted);
   cursor: pointer;
-  line-height: 1.05;
+  line-height: 1.3;
   border-radius: 0.2em;
 }
 .wordmark-surface:hover,
@@ -246,6 +246,8 @@ button { font-family: inherit; }
 .wordmark-surface-viewport {
   display: inline-grid;
   overflow: hidden;
+  padding: 0.08em 0 0.18em;
+  margin: -0.08em 0 -0.04em;
 }
 .wordmark-surface-label {
   grid-area: 1 / 1;

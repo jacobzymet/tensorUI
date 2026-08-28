@@ -1,0 +1,1 @@
+run_terminal executes one command in the workspace (timeout {{timeout}}s). Use it for builds, tests, and git — not for reading or writing files. Commands are reviewed before they run. Do not request privilege escalation, disk wipes, or piping downloads into a shell.

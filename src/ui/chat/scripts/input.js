@@ -729,9 +729,13 @@ function resolveTurnSkills(mentionIds) {
   const fetchUrl = deep
     || (!!settings.agentMode && !!settings.skillFetchUrl)
     || mentioned.has('fetch_url');
+  const filesystem = !!settings.agentMode && !!settings.skillFilesystem;
+  const terminalCap = !!settings.agentMode && !!settings.skillTerminal;
   const useAgent = deep
     || webSearch
     || fetchUrl
+    || filesystem
+    || terminalCap
     || (!!settings.agentMode && userSkills.some((skill) => skill.enabled));
   const skills = {
       web_search: webSearch,
@@ -761,6 +765,13 @@ function resolveTurnSkills(mentionIds) {
         if (!Number.isFinite(raw) || raw <= 0) return 0;
         return Math.min(200000, Math.max(1000, Math.round(raw)));
       })(),
+      approval_mode: APPROVAL_MODES.includes(settings.approvalMode)
+        ? settings.approvalMode
+        : 'manual',
+      filesystem,
+      workspace_root: sessionWorkspaceRoot(),
+      terminal: terminalCap,
+      terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
   };
   if (deep) {
     skills.web_search_depth = 'deep';

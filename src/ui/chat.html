@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TensorMI Harness | Chat</title>
+  <title>TensorMI Harness | Agent</title>
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <meta name="color-scheme" content="dark">
   <style>html,body{background:#16181e;color:#e8eaef;margin:0}</style>
   <link rel="stylesheet" href="/chat.css">
+  <link rel="stylesheet" href="/xterm.css">
   <script defer src="/optional-fonts.js"></script>
 </head>
 <body>
@@ -31,10 +32,10 @@
               aria-haspopup="menu"
               aria-expanded="false"
               aria-controls="wordmarkMenu"
-              aria-label="Surface: Chat. Switch surface"
+              aria-label="Surface: Agent. Switch surface"
             >
               <span class="wordmark-surface-viewport">
-                <span class="wordmark-surface-label" id="wordmarkSurfaceLabel">Chat</span>
+                <span class="wordmark-surface-label" id="wordmarkSurfaceLabel">Agent</span>
               </span>
               <svg class="wordmark-surface-caret" viewBox="0 0 12 12" aria-hidden="true">
                 <path d="M2.25 4.4 6 8.15 9.75 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -42,7 +43,7 @@
             </button>
             <div class="wordmark-menu is-hidden" id="wordmarkMenu" role="menu" aria-label="Surfaces">
               <div class="wordmark-menu-clip">
-                <button type="button" role="menuitemradio" class="is-active" aria-checked="true" data-surface="chat">Chat</button>
+                <button type="button" role="menuitemradio" class="is-active" aria-checked="true" data-surface="chat">Agent</button>
                 <button type="button" role="menuitemradio" aria-checked="false" data-surface="bots">Bots</button>
               </div>
             </div>
@@ -129,7 +130,7 @@
         <div class="mode-switch" role="navigation" aria-label="Mode">
           <a href="/" class="is-active" aria-current="page">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span>Chat</span>
+            <span>Agent</span>
           </a>
           <a href="/settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
@@ -236,6 +237,12 @@
                             <button type="button" role="menuitemradio" data-effort="max">Max</button>
                           </div>
                         </div>
+                        <button type="button" class="btn-terminal" id="btnTerminal" aria-pressed="false" title="Open terminal" aria-label="Open terminal">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+                        </button>
+                        <button type="button" class="btn-workspace" id="btnWorkspace" aria-pressed="false" title="Choose workspace folder" aria-label="Choose workspace folder">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/><path d="M2 10v10a2 2 0 0 0 2 2h14"/></svg>
+                        </button>
                       </div>
                       <div class="composer-buttons">
                         <button type="button" class="btn btn-outline is-hidden" id="btnStop" aria-label="Stop generating" title="Stop generating">
@@ -292,6 +299,37 @@
             </div>
           </div>
           <div class="chat-composer-dock" id="composerDock"></div>
+          <div class="chat-terminal" id="chatTerminal" aria-hidden="true" inert>
+            <div class="chat-terminal-clip">
+              <div class="chat-terminal-pane">
+                <button type="button" class="chat-terminal-resize" id="chatTerminalResize" aria-label="Resize terminal" title="Drag to resize">
+                  <span class="chat-terminal-resize-bar" aria-hidden="true"></span>
+                </button>
+                <div class="chat-terminal-head">
+                  <span class="chat-terminal-title">Terminal</span>
+                  <input class="chat-terminal-cwd" id="chatTerminalCwd" type="text" spellcheck="false" autocomplete="off" placeholder="Folder for this chat" aria-label="Workspace folder for this chat">
+                  <button type="button" class="btn btn-ghost btn-icon" id="btnTerminalBrowse" aria-label="Choose workspace folder" title="Choose folder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/><path d="M2 10v10a2 2 0 0 0 2 2h14"/></svg>
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-icon" id="btnTerminalNew" aria-label="New terminal" title="New terminal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-icon" id="btnTerminalClose" aria-label="Hide terminal" title="Hide terminal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
+                </div>
+                <div class="chat-terminal-main">
+                  <div class="chat-terminal-stage">
+                    <p class="chat-terminal-empty is-hidden" id="chatTerminalEmpty"></p>
+                    <div class="chat-terminal-viewports" id="chatTerminalViewports"></div>
+                  </div>
+                  <aside class="chat-terminal-rail" aria-label="Terminal sessions">
+                    <ul class="chat-terminal-sessions" id="chatTerminalSessions"></ul>
+                  </aside>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <aside class="trace-sidebar" id="traceSidebar" aria-label="Turn activity">
           <div class="trace-sidebar-head">
@@ -571,6 +609,15 @@
             <h2 class="settings-pane-title">Agent Capabilities</h2>
             <p class="settings-pane-lede">Tools the model can call in agent mode. Open the composer <strong>+</strong> menu for Agent, Deep research, web search, fetch URL, and file uploads — or type <code>@</code> to use a tool once.</p>
             <div class="settings-section">
+              <h3 class="settings-section-title">Approvals</h3>
+              <p class="field-hint" style="margin:0 0 0.75rem">Applies to every capability below. File writes and terminal commands always need your OK, even when auto-approving safe actions.</p>
+              <div class="segmented segmented-stack" id="approvalModeToggle" role="tablist" aria-label="Tool approval">
+                <button type="button" data-approval-mode="auto_safe" role="tab" aria-selected="false">Auto-approve safe actions</button>
+                <button type="button" data-approval-mode="manual" class="is-active" role="tab" aria-selected="true">Approve every request</button>
+              </div>
+              <p class="field-hint" style="margin-top:0.65rem">Safe actions: web search, fetch URL, and reading files. Default is to ask every time.</p>
+            </div>
+            <div class="settings-section">
               <h3 class="settings-section-title">Web search</h3>
               <label class="field-check">
                 <input type="checkbox" id="settingSkillWebSearch" checked>
@@ -700,6 +747,45 @@
                   </span>
                 </span>
               </label>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">File system</h3>
+              <label class="field-check">
+                <input type="checkbox" id="settingSkillFilesystem">
+                <span>
+                  <strong style="color:var(--color-ink);font-weight:600">Enable file system</strong>
+                  <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
+                    Let the model read and edit files in this chat’s workspace folder using dedicated tools (not shell). Pick the folder with the folder button next to the terminal. Requires Agent mode.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Terminal</h3>
+              <label class="field-check">
+                <input type="checkbox" id="settingSkillTerminal">
+                <span>
+                  <strong style="color:var(--color-ink);font-weight:600">Enable terminal</strong>
+                  <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
+                    Let the model run one command at a time in this chat’s workspace. Always requires approval. Destructive and privilege-escalating commands are blocked.
+                  </span>
+                </span>
+              </label>
+              <div class="capability-advanced" data-capability-advanced="terminal">
+                <button type="button" class="capability-advanced-toggle" id="btnTerminalAdvanced" aria-expanded="false" aria-controls="terminalOptions">
+                  Advanced
+                  <span class="capability-advanced-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="terminalOptions" class="capability-advanced-panel is-collapsed" hidden>
+                  <div class="settings-row">
+                    <label class="field-label" for="settingTerminalTimeout">Timeout (seconds)</label>
+                    <div>
+                      <input class="field-input" id="settingTerminalTimeout" type="number" min="5" max="120" step="1" value="30">
+                      <p class="field-hint">Commands are killed after this many seconds (5–120). Use the composer terminal button to open a panel under the chat box.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -1025,6 +1111,8 @@
   <script src="/highlight.min.js"></script>
   <script src="/marked.min.js"></script>
   <script src="/purify.min.js"></script>
+  <script src="/xterm.min.js"></script>
+  <script src="/xterm-addon-fit.min.js"></script>
   <script src="/chat.js"></script>
 </body>
 </html>

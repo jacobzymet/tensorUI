@@ -278,6 +278,34 @@
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
+.agent-step-body {
+  margin-top: 0.55rem;
+  min-width: 0;
+}
+.agent-step-body-stream {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--color-ink-2) 88%, var(--color-muted));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 14rem;
+  overflow: auto;
+}
+.agent-step-body.is-live .agent-step-body-stream {
+  height: 7.2rem;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 100%);
+  scrollbar-width: none;
+}
+.agent-step-body.is-live .agent-step-body-stream::-webkit-scrollbar {
+  display: none;
+}
 .agent-step-result {
   margin-top: 0.4rem;
   padding-top: 0.4rem;

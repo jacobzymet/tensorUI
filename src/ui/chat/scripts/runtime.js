@@ -1095,6 +1095,7 @@ async function sendMessage({ branch = false } = {}) {
       incognito: !!source.incognito,
       pinned: false,
       pinnedAt: null,
+      workspaceRoot: typeof source.workspaceRoot === 'string' ? source.workspaceRoot : '',
     };
     conversations.push(convo);
     if (activeId) stickByConvo.set(activeId, stickToBottom);
@@ -1129,6 +1130,7 @@ async function sendMessage({ branch = false } = {}) {
       incognito: !!draftIncognito,
       pinned: false,
       pinnedAt: null,
+      workspaceRoot: draftWorkspaceRoot,
     };
     conversations.push(convo);
     activeId = id;
@@ -1290,11 +1292,88 @@ function paintLiveThinkOnly(rootEl, cleaned) {
   return true;
 }
 
+function toolDetailFromPayload(payload) {
+  const args = payload && payload.arguments && typeof payload.arguments === 'object'
+    ? payload.arguments
+    : {};
+  if (args.command) return String(args.command);
+  if (args.path) return String(args.path);
+  if (args.pattern) return String(args.pattern);
+  if (args.url) return String(args.url);
+  if (args.query) return String(args.query);
+  if (args.name) return String(args.name);
+  if (args.id) return String(args.id);
+  if (payload && payload.summary) return String(payload.summary);
+  return '';
+}
+
+function upsertLiveToolPart(stream, payload) {
+  const id = payload && payload.id ? String(payload.id) : '';
+  const args = payload && payload.arguments && typeof payload.arguments === 'object'
+    ? payload.arguments
+    : {};
+  const detail = toolDetailFromPayload(payload);
+  const body = toolBodyFromArgs((payload && payload.name) || '', args);
+  let part = id
+    ? stream.timeline.find((item) => item.type === 'tool' && item.id === id)
+    : null;
+  if (!part && !id) {
+    const liveTools = stream.timeline.filter((item) => item.type === 'tool' && item.live);
+    part = liveTools.find((item) => payload && item.name === payload.name && !item.result && !item.id) || null;
+  }
+  if (!part) {
+    part = {
+      type: 'tool',
+      id,
+      name: (payload && payload.name) || 'skill',
+      detail,
+      kind: args.kind ? String(args.kind) : '',
+      args: { ...args },
+      body,
+      result: '',
+      note: '',
+      live: true,
+      executing: false,
+      startedAt: Date.now(),
+    };
+    stream.timeline.push(part);
+  } else {
+    if (id) part.id = id;
+    if (payload && payload.name) part.name = payload.name;
+    if (detail) part.detail = detail;
+    if (args.kind) part.kind = String(args.kind);
+    if (Object.keys(args).length) part.args = { ...(part.args || {}), ...args };
+    if (body) part.body = body;
+  }
+  if (payload && (payload.needs_approval || payload.phase === 'tool_approval')) {
+    part.approval = 'pending';
+    part.approvalRisk = payload.risk ? String(payload.risk) : (part.approvalRisk || 'write');
+    part.executing = false;
+  }
+  if (payload && payload.phase === 'tool_executing') {
+    part.approval = 'allowed';
+    part.executing = true;
+  }
+  return part;
+}
+
 function timelineSignature(timeline) {
   return (timeline || []).map((part) => {
     if (!part) return '';
     if (part.type === 'tool') {
-      return ['tool', part.name, part.detail, part.result, part.note || '', part.live ? '1' : '0'].join('\0');
+      return [
+        'tool',
+        part.id || '',
+        part.name,
+        part.detail,
+        part.result,
+        part.note || '',
+        part.live ? '1' : '0',
+        part.approval || '',
+        part.approvalRisk || '',
+        part.executing ? '1' : '0',
+        part.body || '',
+      ].join('\0');
     }
     if (part.type === 'clarify') {
       return ['clarify', part.id || '', part.live ? '1' : '0', part.summary || ''].join('\0');
@@ -1548,6 +1627,13 @@ async function runAssistantTurn(convo, {
       if (!Number.isFinite(raw) || raw <= 0) return 0;
       return Math.min(200000, Math.max(1000, Math.round(raw)));
     })(),
+    approval_mode: APPROVAL_MODES.includes(settings.approvalMode)
+      ? settings.approvalMode
+      : 'manual',
+    filesystem: !!settings.skillFilesystem,
+    workspace_root: sessionWorkspaceRoot(),
+    terminal: !!settings.skillTerminal,
+    terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
   };
   if (deepResearch) {
     useAgent = true;
@@ -1955,31 +2041,34 @@ async function driveAssistantSse(convo, stream, response) {
       if (activeId === convo.id && stream.dom) {
         paintStreamIntoView(convo, stream, typer.shown || '', true);
       }
-    } else if (payload.phase === 'tool_call') {
+    } else if (payload.phase === 'tool_prepare' || payload.phase === 'tool_call') {
       commitStreamBuffer(stream, typer);
       if (stream.dom) stream.dom.row.dataset.raw = '';
-      const args = payload.arguments || {};
-      const detail = args.url
-        ? String(args.url)
-        : args.query
-          ? String(args.query)
-          : args.name
-            ? String(args.name)
-            : args.id
-              ? String(args.id)
-              : '';
-      stream.timeline.push({
-        type: 'tool',
-        id: payload.id ? String(payload.id) : '',
-        name: payload.name || 'skill',
-        detail,
-        kind: args.kind ? String(args.kind) : '',
-        result: '',
-        note: '',
-        live: true,
-        startedAt: Date.now(),
-      });
-      if (stream.dom) setStreamThinkingLabel(stream, skillLabel(payload.name, args) + '…');
+      const part = upsertLiveToolPart(stream, payload);
+      if (stream.dom) {
+        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
+      }
+    } else if (payload.phase === 'tool_approval') {
+      const part = upsertLiveToolPart(stream, payload);
+      if (part) {
+        part.approval = 'pending';
+        part.approvalRisk = payload.risk ? String(payload.risk) : (part.approvalRisk || 'write');
+        part.executing = false;
+      }
+      if (stream.dom) {
+        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
+      }
+    } else if (payload.phase === 'tool_executing') {
+      const part = upsertLiveToolPart(stream, payload);
+      if (part) {
+        part.approval = 'allowed';
+        part.executing = true;
+      }
+      if (stream.dom) {
+        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
+      }
+    } else if (payload.phase === 'terminal') {
+      if (typeof onAgentTerminalEvent === 'function') onAgentTerminalEvent(payload);
     } else if (payload.phase === 'tool_result') {
       const resultText = payload.result
         ? String(payload.result).trim()
@@ -1990,11 +2079,11 @@ async function driveAssistantSse(convo, stream, response) {
       const name = payload.name || 'skill';
       const id = payload.id ? String(payload.id) : '';
       const liveTools = stream.timeline.filter((part) => part.type === 'tool' && part.live);
-      const last = (id && liveTools.find((part) => part.id === id))
-        || liveTools.find((part) => part.name === name)
-        || liveTools[liveTools.length - 1];
-      if (last && last.name === name) {
+      const last = (id && stream.timeline.find((part) => part.type === 'tool' && part.id === id))
+        || (!id && (liveTools.find((part) => part.name === name) || liveTools[liveTools.length - 1]));
+      if (last && (!id || last.id === id || last.name === name)) {
         last.live = false;
+        last.executing = false;
         last.result = resultText;
         last.endedAt = Date.now();
         last.durationMs = last.startedAt
@@ -2003,6 +2092,7 @@ async function driveAssistantSse(convo, stream, response) {
         last.justSettled = true;
         scheduleJustSettledClear(last);
         if (note) last.note = note;
+        last.approval = payload.ok === false && /denied/i.test(resultText) ? 'denied' : '';
       } else {
         stream.timeline.push({
           type: 'tool',
@@ -2016,10 +2106,7 @@ async function driveAssistantSse(convo, stream, response) {
         scheduleJustSettledClear(stream.timeline[stream.timeline.length - 1]);
       }
       if (stream.dom) {
-        setStreamThinkingLabel(
-          stream,
-          note ? (skillLabel(payload.name, last) + ' · ' + note) : 'Processing…'
-        );
+        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       }
     } else if (payload.phase === 'clarify') {
       commitStreamBuffer(stream, typer);
@@ -2074,7 +2161,12 @@ async function driveAssistantSse(convo, stream, response) {
       applySteeredEntry(convo, stream, text, entry);
       if (stream.dom) setStreamThinkingLabel(stream, 'Steering…');
     } else if (payload.phase === 'status' && payload.message) {
-      if (stream.dom) setStreamThinkingLabel(stream, String(payload.message));
+      const msg = String(payload.message);
+      const waiting = /waiting for (your )?approval/i.test(msg);
+      const canAsk = stream.timeline.some((part) => part.type === 'tool' && part.approval === 'pending');
+      if (stream.dom && (!waiting || canAsk)) {
+        setStreamThinkingLabel(stream, msg);
+      }
     } else if (payload.phase === 'notice' && payload.message) {
       const text = String(payload.message).trim();
       if (text && !stream.timeline.some((part) => part.type === 'notice' && part.content === text)) {
@@ -2489,6 +2581,14 @@ chatThread.addEventListener('click', (event) => {
     if (stream && clarifyId) void submitClarifyForm(stream, clarifyId);
     return;
   }
+  const allowBtn = event.target.closest('[data-tool-allow]');
+  const denyBtn = event.target.closest('[data-tool-deny]');
+  if ((allowBtn || denyBtn) && chatThread.contains(allowBtn || denyBtn)) {
+    event.preventDefault();
+    const id = (allowBtn || denyBtn).getAttribute(allowBtn ? 'data-tool-allow' : 'data-tool-deny');
+    if (id) void submitToolApproval(id, !!allowBtn);
+    return;
+  }
   const foldToggle = event.target.closest('.agent-timeline-fold-toggle');
   if (foldToggle && chatThread.contains(foldToggle)) {
     event.preventDefault();
@@ -2522,6 +2622,16 @@ chatThread.addEventListener('click', (event) => {
   const index = Number(row.dataset.msgIndex);
   if (!Number.isFinite(index)) return;
   selectTraceMessage(index, { animate: true, ensureOpen: false });
+});
+
+document.addEventListener('click', (event) => {
+  const allowBtn = event.target.closest('[data-tool-allow]');
+  const denyBtn = event.target.closest('[data-tool-deny]');
+  if (!allowBtn && !denyBtn) return;
+  if (chatThread.contains(allowBtn || denyBtn)) return;
+  event.preventDefault();
+  const id = (allowBtn || denyBtn).getAttribute(allowBtn ? 'data-tool-allow' : 'data-tool-deny');
+  if (id) void submitToolApproval(id, !!allowBtn);
 });
 
 chatThread.addEventListener('change', (event) => {
@@ -2706,7 +2816,7 @@ composerInput.addEventListener('paste', (event) => {
 document.getElementById('settingAttachmentTextFallback').addEventListener('change', syncAttachmentFallbackControls);
 
 const APP_SURFACES = {
-  chat: 'Chat',
+  chat: 'Agent',
   bots: 'Bots',
 };
 let wordmarkMenuCloseTimer = 0;
@@ -3276,6 +3386,7 @@ settingsModal.querySelector('.settings-dialog')?.addEventListener('input', (even
   if (!event.target.closest('input, textarea, select')) return;
   syncWebSearchControls();
   syncFetchUrlControls();
+  syncTerminalSkillControls();
   syncAttachmentFallbackControls();
   syncSettingsSaveButton();
 });
@@ -3283,6 +3394,7 @@ settingsModal.querySelector('.settings-dialog')?.addEventListener('change', (eve
   if (!event.target.closest('input, textarea, select')) return;
   syncWebSearchControls();
   syncFetchUrlControls();
+  syncTerminalSkillControls();
   syncAttachmentFallbackControls();
   syncSettingsSaveButton();
 });
@@ -3299,6 +3411,23 @@ document.getElementById('btnFetchUrlAdvanced')?.addEventListener('click', () => 
   const panel = document.getElementById('fetchUrlOptions');
   if (!toggle || toggle.disabled) return;
   setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+});
+document.getElementById('settingSkillTerminal')?.addEventListener('change', syncTerminalSkillControls);
+document.getElementById('btnTerminalAdvanced')?.addEventListener('click', () => {
+  const toggle = document.getElementById('btnTerminalAdvanced');
+  const panel = document.getElementById('terminalOptions');
+  if (!toggle || toggle.disabled) return;
+  setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+});
+document.querySelectorAll('#approvalModeToggle [data-approval-mode]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#approvalModeToggle [data-approval-mode]').forEach((other) => {
+      const on = other === btn;
+      other.classList.toggle('is-active', on);
+      other.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    syncSettingsSaveButton();
+  });
 });
 document.getElementById('btnSkillCreate').addEventListener('click', () => {
   openSkillEditor({

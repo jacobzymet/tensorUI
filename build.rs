@@ -8,6 +8,7 @@ const CHAT_STYLE_FILES: &[&str] = &[
     "src/ui/chat/styles/activity.css",
     "src/ui/chat/styles/projects.css",
     "src/ui/chat/styles/bots.css",
+    "src/ui/chat/styles/terminal.css",
 ];
 
 const CHAT_SCRIPT_FILES: &[&str] = &[
@@ -17,6 +18,7 @@ const CHAT_SCRIPT_FILES: &[&str] = &[
     "src/ui/chat/scripts/render.js",
     "src/ui/chat/scripts/bots.js",
     "src/ui/chat/scripts/runtime.js",
+    "src/ui/chat/scripts/terminal.js",
 ];
 
 fn bundle_ui(files: &[&str], output: &str) {

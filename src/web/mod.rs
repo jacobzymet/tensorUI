@@ -11,12 +11,16 @@ use std::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, OriginalUri, Path, State},
+    extract::{
+        DefaultBodyLimit, OriginalUri, Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use zeroize::Zeroize;
@@ -37,7 +41,7 @@ use crate::{
 pub(crate) use embed::APP_ICON_PNG;
 use embed::{
     CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, OPTIONAL_FONTS_JS, ORB_JS, PURIFY_JS,
-    SETTINGS_HTML,
+    SETTINGS_HTML, XTERM_CSS, XTERM_FIT_JS, XTERM_JS,
 };
 
 const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
@@ -292,6 +296,11 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/api/chat/cancel", post(chat_cancel))
         .route("/api/chat/clarify", post(chat_clarify))
         .route("/api/chat/steer", post(chat_steer))
+        .route("/api/chat/approve", post(chat_approve))
+        .route("/api/terminal/open", post(terminal_open))
+        .route("/api/terminal/ws/{id}", get(terminal_ws))
+        .route("/api/terminal/close", post(terminal_close))
+        .route("/api/workspace/pick", post(pick_workspace_folder))
         .route("/api/chat/title", post(chat_title))
         .route("/api/state", get(state))
         .route("/api/ui/theme", post(set_ui_theme))
@@ -363,6 +372,9 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/highlight.min.js", get(highlight_script))
         .route("/marked.min.js", get(marked_script))
         .route("/purify.min.js", get(purify_script))
+        .route("/xterm.css", get(xterm_stylesheet))
+        .route("/xterm.min.js", get(xterm_script))
+        .route("/xterm-addon-fit.min.js", get(xterm_fit_script))
         .route("/optional-fonts.js", get(optional_fonts_script))
         .route("/browser-favicon.png", get(app_icon_png))
         .route("/favicon.ico", get(app_icon_png))
@@ -493,6 +505,24 @@ async fn optional_fonts_script() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         OPTIONAL_FONTS_JS,
     )
+}
+
+async fn xterm_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        XTERM_JS,
+    )
+}
+
+async fn xterm_fit_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        XTERM_FIT_JS,
+    )
+}
+
+async fn xterm_stylesheet() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], XTERM_CSS)
 }
 
 async fn app_icon_png() -> impl IntoResponse {
@@ -866,6 +896,168 @@ async fn chat_steer(Json(body): Json<SteerBody>) -> Result<Json<serde_json::Valu
     agent::submit_steer(&body.id, &body.text, body.client_id.as_deref())
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ApproveBody {
+    id: String,
+    #[serde(default)]
+    allow: bool,
+}
+
+async fn chat_approve(Json(body): Json<ApproveBody>) -> Result<Json<serde_json::Value>, ApiError> {
+    agent::submit_tool_approval(&body.id, body.allow).map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalOpenBody {
+    workspace: String,
+    #[serde(default)]
+    cols: Option<u16>,
+    #[serde(default)]
+    rows: Option<u16>,
+}
+
+async fn terminal_open(
+    Json(body): Json<TerminalOpenBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let opened = agent::terminal::open_session(
+        &body.workspace,
+        body.cols.unwrap_or(0),
+        body.rows.unwrap_or(0),
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "id": opened.id,
+        "cwd": opened.cwd,
+        "title": opened.title,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalResizeCtrl {
+    #[serde(rename = "type")]
+    kind: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+}
+
+async fn terminal_ws(
+    ws: WebSocketUpgrade,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = validate_live_id(id)?;
+    let io = agent::terminal::attach_session(&id)
+        .await
+        .ok_or_else(|| ApiError::not_found("Terminal session is not open"))?;
+    Ok(ws.on_upgrade(move |socket| terminal_socket(socket, io)))
+}
+
+async fn terminal_socket(socket: WebSocket, io: agent::terminal::SessionIo) {
+    let (mut sink, mut stream) = socket.split();
+    let agent::terminal::SessionIo {
+        to_pty,
+        mut stdout,
+        replay,
+    } = io;
+    if !replay.is_empty() && sink.send(Message::Binary(replay.into())).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            msg = stdout.recv() => {
+                match msg {
+                    Ok(chunk) => {
+                        if sink.send(Message::Binary(chunk.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            incoming = stream.next() => {
+                match incoming {
+                    Some(Ok(Message::Binary(data))) => {
+                        if data.is_empty() {
+                            continue;
+                        }
+                        if to_pty.send(agent::terminal::ToPty::Data(data.to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        if apply_terminal_ctrl(&to_pty, text.as_str()).is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        if sink.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+        }
+    }
+}
+
+fn apply_terminal_ctrl(
+    to_pty: &std::sync::mpsc::Sender<agent::terminal::ToPty>,
+    text: &str,
+) -> Result<(), ()> {
+    let Ok(ctrl) = serde_json::from_str::<TerminalResizeCtrl>(text) else {
+        return if to_pty
+            .send(agent::terminal::ToPty::Data(text.as_bytes().to_vec()))
+            .is_err()
+        {
+            Err(())
+        } else {
+            Ok(())
+        };
+    };
+    if ctrl.kind != "resize" {
+        return Ok(());
+    }
+    let (cols, rows) = agent::terminal::clamp_pty_size(
+        ctrl.cols.unwrap_or(0),
+        ctrl.rows.unwrap_or(0),
+    );
+    to_pty
+        .send(agent::terminal::ToPty::Resize { cols, rows })
+        .map_err(|_| ())
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalCloseBody {
+    id: String,
+}
+
+async fn terminal_close(
+    Json(body): Json<TerminalCloseBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    agent::terminal::close_session(&body.id).await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn pick_workspace_folder() -> Result<Json<serde_json::Value>, ApiError> {
+    let picked = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Choose workspace folder")
+            .pick_folder()
+    })
+    .await
+    .map_err(|error| ApiError::bad_request(format!("folder picker: {error}")))?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "path": picked.map(|path| path.display().to_string()),
+    })))
 }
 
 #[derive(Debug, Deserialize)]

@@ -530,6 +530,11 @@ function defaultBotsTurn() {
     skills: {
       web_search: !!settings.skillWebSearch,
       fetch_url: !!settings.skillFetchUrl,
+      approval_mode: settings.approvalMode === 'auto_safe' ? 'auto_safe' : 'manual',
+      filesystem: !!settings.skillFilesystem,
+      workspace_root: sessionWorkspaceRoot(),
+      terminal: !!settings.skillTerminal,
+      terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
     },
     deepResearch: false,
     deepResearchOutput: 'long',
@@ -849,6 +854,7 @@ function createBotSession(bot, { group = false, title = '', participantIds = [] 
     groupMemory: '',
     botsHeldBy: null,
     sideThreadOf: null,
+    workspaceRoot: '',
   };
   conversations.push(convo);
   return convo;

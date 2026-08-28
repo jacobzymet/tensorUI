@@ -9,6 +9,9 @@ pub const HIGHLIGHT_JS: &str = include_str!("../ui/vendor/highlight.min.js");
 pub const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 pub const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 pub const OPTIONAL_FONTS_JS: &str = include_str!("../ui/optional-fonts.js");
+pub const XTERM_JS: &str = include_str!("../ui/vendor/xterm.min.js");
+pub const XTERM_FIT_JS: &str = include_str!("../ui/vendor/xterm-addon-fit.min.js");
+pub const XTERM_CSS: &str = include_str!("../ui/vendor/xterm.css");
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/browser-favicon.png");
 
 #[cfg(test)]
@@ -129,5 +132,14 @@ mod tests {
         assert!(CHAT_JS.contains("network.inference_mode === 'locked'"));
         assert!(CHAT_JS.contains("serverProviderName.textContent = 'Encrypted'"));
         assert!(CHAT_JS.contains("serverChip.textContent = 'Locked'"));
+    }
+
+    #[test]
+    fn user_terminal_is_a_pty_emulator_not_a_command_log() {
+        assert!(CHAT_HTML.contains("/xterm.min.js"));
+        assert!(CHAT_HTML.contains("id=\"chatTerminalViewports\""));
+        assert!(!CHAT_JS.contains("isClearCommand"));
+        assert!(!CHAT_JS.contains("/api/terminal/exec"));
+        assert!(CHAT_JS.contains("/api/terminal/ws/"));
     }
 }

@@ -719,7 +719,7 @@ function initTraceSidebarPreferred() {
 
 function scrollThinkStreams(root) {
   if (!root) return;
-  root.querySelectorAll('.think-stream').forEach((el) => {
+  root.querySelectorAll('.think-stream, .agent-step-body.is-live .agent-step-body-stream').forEach((el) => {
     el.scrollTop = el.scrollHeight;
   });
 }
@@ -734,15 +734,76 @@ function skillLabel(name, args) {
   if (name === 'fetch_url') return 'Fetch URL';
   if (name === 'ask_user') return 'Clarifying questions';
   if (name === 'activate_skill' || name === 'read_skill') return 'Activate skill';
+  if (name === 'read_file') return 'Read file';
+  if (name === 'list_dir') return 'List folder';
+  if (name === 'glob') return 'Find files';
+  if (name === 'grep') return 'Search files';
+  if (name === 'write_file') return 'Write file';
+  if (name === 'str_replace') return 'Edit file';
+  if (name === 'delete_file') return 'Delete file';
+  if (name === 'run_terminal') return 'Terminal';
   return name || 'Skill';
 }
 
+function toolBodyFromArgs(name, args) {
+  const a = args && typeof args === 'object' ? args : {};
+  if (name === 'write_file') return String(a.content || '');
+  if (name === 'str_replace') {
+    const oldText = String(a.old_string || a.old || '');
+    const newText = String(a.new_string || a.new || '');
+    if (!oldText && !newText) return '';
+    return (oldText ? ('- ' + oldText) : '') + (oldText && newText ? '\n\n' : '') + (newText ? ('+ ' + newText) : '');
+  }
+  if (name === 'run_terminal') return String(a.command || '');
+  return '';
+}
+
 function skillLiveVerb(name, args) {
+  const approval = args && args.approval;
+  const executing = !!(args && args.executing);
   if (name === 'web_search') return 'Searching';
   if (name === 'fetch_url') return 'Fetching';
   if (name === 'ask_user') return 'Waiting';
   if (name === 'activate_skill' || name === 'read_skill') return 'Loading skill';
+  if (name === 'read_file') return 'Reading';
+  if (name === 'list_dir' || name === 'glob' || name === 'grep') return 'Scanning';
+  if (name === 'write_file' || name === 'str_replace' || name === 'delete_file') {
+    if (executing) {
+      if (name === 'delete_file') return 'Deleting';
+      if (name === 'str_replace') return 'Editing';
+      return 'Writing';
+    }
+    if (approval === 'allowed') return 'Queued';
+    return 'Drafting';
+  }
+  if (name === 'run_terminal') {
+    if (executing) return 'Running';
+    if (approval === 'allowed') return 'Queued';
+    return 'Drafting';
+  }
   return 'Running';
+}
+
+function liveToolStatusLabel(stream, payload) {
+  const tools = (stream && stream.timeline ? stream.timeline : []).filter((part) => part && part.type === 'tool' && part.live);
+  const running = tools.find((part) => part.executing);
+  if (running) {
+    const verb = skillLiveVerb(running.name, running);
+    const path = String(running.detail || '').trim();
+    return path ? (verb + ' ' + path + '…') : (verb + '…');
+  }
+  const pending = tools.filter((part) => part.approval === 'pending').length;
+  if (pending) {
+    return pending === 1 ? 'Waiting for your approval…' : ('Waiting for approval · ' + pending + ' files');
+  }
+  const drafting = tools[tools.length - 1];
+  if (drafting) {
+    const label = skillLabel(drafting.name, drafting.args || payload && payload.arguments || {});
+    const path = String(drafting.detail || '').trim();
+    return path ? ('Drafting ' + path + '…') : (label + '…');
+  }
+  if (payload && payload.name) return skillLabel(payload.name, payload.arguments || {}) + '…';
+  return 'Processing…';
 }
 
 function skillToolIcon(name, args) {
@@ -757,6 +818,12 @@ function skillToolIcon(name, args) {
   }
   if (name === 'ask_user') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>';
+  }
+  if (name === 'run_terminal') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>';
+  }
+  if (name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir' || name === 'glob' || name === 'grep') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
   }
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>';
 }
@@ -1120,9 +1187,59 @@ async function submitClarifyForm(stream, clarifyId) {
   }
 }
 
+const approvalInFlight = new Set();
+
+async function submitToolApproval(id, allow) {
+  const key = String(id || '').trim();
+  if (!key || approvalInFlight.has(key)) return;
+  const stream = typeof activeStream === 'function' ? activeStream() : null;
+  const part = stream?.timeline?.find((item) => item.type === 'tool' && item.id === key);
+  if (part && (part.approval === 'allowed' || part.approval === 'denied')) return;
+  approvalInFlight.add(key);
+  if (part) {
+    part.approval = allow ? 'allowed' : 'denied';
+  }
+  document.querySelectorAll('[data-tool-allow="' + CSS.escape(key) + '"], [data-tool-deny="' + CSS.escape(key) + '"]').forEach((btn) => {
+    btn.disabled = true;
+  });
+  if (typeof refreshTraceSidebar === 'function') refreshTraceSidebar({ animate: false });
+  try {
+    const response = await fetch('/api/chat/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: key, allow: !!allow }),
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null);
+      throw new Error((problem && problem.error) || 'Could not submit approval');
+    }
+  } catch (error) {
+    const expired = /no pending tool approval/i.test(String(error?.message || ''));
+    if (expired && allow) {
+      if (typeof refreshTraceSidebar === 'function') refreshTraceSidebar({ animate: false });
+      return;
+    }
+    if (part) part.approval = 'pending';
+    document.querySelectorAll('[data-tool-allow="' + CSS.escape(key) + '"], [data-tool-deny="' + CSS.escape(key) + '"]').forEach((btn) => {
+      btn.disabled = false;
+    });
+    if (typeof showAttachHint === 'function') {
+      showAttachHint(error?.message || 'Could not submit approval');
+    }
+    if (typeof refreshTraceSidebar === 'function') refreshTraceSidebar({ animate: false });
+  } finally {
+    approvalInFlight.delete(key);
+  }
+}
+
 function skillDetailLabel(name) {
   if (name === 'fetch_url') return 'URL';
   if (name === 'activate_skill' || name === 'read_skill') return 'Skill';
+  if (name === 'run_terminal') return 'Command';
+  if (name === 'glob' || name === 'grep') return 'Pattern';
+  if (name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir') {
+    return 'Path';
+  }
   return 'Query';
 }
 
@@ -1154,6 +1271,12 @@ function agentStepHtml({
   durationMs,
   endedAt,
   justSettled,
+  approval,
+  approvalRisk,
+  id,
+  executing: executingFlag,
+  args,
+  body,
 }) {
   let kindLabel = skillLabel(name, { kind });
   const resultText = String(result || '');
@@ -1162,22 +1285,47 @@ function agentStepHtml({
   }
   const elapsedMs = toolDurationMs({ live, startedAt, durationMs, endedAt });
   const elapsed = elapsedMs > 0 || live ? formatToolElapsed(elapsedMs) : '';
+  const waitingApproval = approval === 'pending';
+  const executing = !!executingFlag;
   const status = live
-    ? '<span class="agent-step-status">' + escapeHtml(skillLiveVerb(name, { kind })) + '</span>'
+    ? '<span class="agent-step-status">' + escapeHtml(waitingApproval ? 'Needs approval' : skillLiveVerb(name, { kind, approval, executing })) + '</span>'
     : '';
   const meta = (status || elapsed)
     ? '<span class="agent-step-meta">' + status +
       (elapsed ? '<span class="agent-step-elapsed">' + escapeHtml(elapsed) + '</span>' : '') +
       '</span>'
     : '';
+  const risk = String(approvalRisk || '');
+  const riskLabel = risk === 'terminal'
+    ? 'Runs a command'
+    : risk === 'write'
+      ? 'Modifies files'
+      : risk === 'safe'
+        ? 'Read-only'
+        : '';
+  const riskHtml = waitingApproval && riskLabel
+    ? '<div class="agent-step-risk' + (risk === 'safe' ? ' is-safe' : risk === 'terminal' ? ' is-terminal' : '') + '">' + escapeHtml(riskLabel) + '</div>'
+    : '';
+  const approveHtml = waitingApproval
+    ? '<div class="agent-step-approve">' +
+        '<button type="button" class="btn btn-primary" data-tool-allow="' + escapeHtml(id || '') + '">Allow</button>' +
+        '<button type="button" class="btn btn-outline" data-tool-deny="' + escapeHtml(id || '') + '">Deny</button>' +
+      '</div>'
+    : '';
+  const bodyText = String(body || toolBodyFromArgs(name, args) || '').slice(0, 20000);
+  const bodyHtml = bodyText
+    ? '<div class="agent-step-body' + (live ? ' is-live' : '') + '"><pre class="agent-step-body-stream">' + escapeHtml(bodyText) + '</pre></div>'
+    : '';
   return wrapTimelineStep(
     '<div class="agent-step-card"' + (live ? ' aria-busy="true"' : '') + '>' +
-      (live ? '<span class="agent-step-scan" aria-hidden="true"></span>' : '') +
+      (live && executing ? '<span class="agent-step-scan" aria-hidden="true"></span>' : '') +
       '<div class="agent-step-head">' +
         '<span class="agent-step-icon" aria-hidden="true">' + skillToolIcon(name, { kind }) + '</span>' +
         '<div class="agent-step-kind">' + escapeHtml(kindLabel) + '</div>' +
         meta +
       '</div>' +
+      riskHtml +
+      approveHtml +
       (note
         ? '<div class="agent-step-note">' + escapeHtml(note) + '</div>'
         : '') +
@@ -1185,7 +1333,8 @@ function agentStepHtml({
         ? '<div class="agent-step-detail"><em>' + escapeHtml(skillDetailLabel(name)) + '</em>'
           + '<span class="agent-step-detail-value">' + escapeHtml(detail) + '</span></div>'
         : '') +
-      (live && !resultText
+      bodyHtml +
+      (live && !resultText && executing
         ? '<div class="agent-step-await" aria-hidden="true"><span class="agent-step-await-bar"></span></div>'
         : '') +
       agentStepResultHtml(result) +
@@ -3272,6 +3421,9 @@ function selectConversation(id) {
   syncUrlFromState();
   closeMobileSidebar();
   composerInput.focus();
+  if (typeof bindTerminalToSession === 'function') bindTerminalToSession();
+  if (typeof renderComposerModes === 'function') renderComposerModes();
+  if (typeof renderPlusMenu === 'function') renderPlusMenu();
 }
 
 /** Return to the draft state — no conversation object until a message is sent. */
@@ -3290,6 +3442,7 @@ function startDraft({ incognito = false } = {}) {
   resetTraceAutoOpenState();
   composerMentionIds.clear();
   renderComposerMentions();
+  if (typeof resetDraftWorkspace === 'function') resetDraftWorkspace();
   renderComposerModes();
   showChatView();
   renderSidebar();
@@ -3300,6 +3453,7 @@ function startDraft({ incognito = false } = {}) {
   syncUrlFromState();
   closeMobileSidebar();
   composerInput.focus();
+  if (typeof bindTerminalToSession === 'function') bindTerminalToSession();
 }
 
 async function deleteConversation(id) {

@@ -269,7 +269,8 @@
   margin-top: 1.1rem;
 }
 .trace-sidebar-body .think-body,
-.trace-sidebar-body .think-stream {
+.trace-sidebar-body .think-stream,
+.trace-sidebar-body .agent-step-body {
   margin-top: 0.55rem;
   margin-bottom: 0.35rem;
   padding-bottom: 0.15rem;

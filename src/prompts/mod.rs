@@ -71,6 +71,8 @@ pub mod agent {
         include_str!("../../prompts/agent/fetch-url-with-search.md");
     pub const FETCH_URL_ALONE: &str = include_str!("../../prompts/agent/fetch-url-alone.md");
     pub const CITATIONS: &str = include_str!("../../prompts/agent/citations.md");
+    pub const FILESYSTEM: &str = include_str!("../../prompts/agent/filesystem.md");
+    pub const TERMINAL: &str = include_str!("../../prompts/agent/terminal.md");
     pub const SKILLS_ACTIVATE: &str = include_str!("../../prompts/agent/skills-activate.md");
     pub const SKILLS_CATALOG_INTRO: &str =
         include_str!("../../prompts/agent/skills-catalog-intro.md");
@@ -107,6 +109,14 @@ pub mod tools {
     pub const FETCH_URL_WITH_SEARCH: &str =
         include_str!("../../prompts/tools/fetch-url-with-search.md");
     pub const ACTIVATE_SKILL: &str = include_str!("../../prompts/tools/activate-skill.md");
+    pub const READ_FILE: &str = include_str!("../../prompts/tools/read-file.md");
+    pub const LIST_DIR: &str = include_str!("../../prompts/tools/list-dir.md");
+    pub const GLOB: &str = include_str!("../../prompts/tools/glob.md");
+    pub const GREP: &str = include_str!("../../prompts/tools/grep.md");
+    pub const WRITE_FILE: &str = include_str!("../../prompts/tools/write-file.md");
+    pub const STR_REPLACE: &str = include_str!("../../prompts/tools/str-replace.md");
+    pub const DELETE_FILE: &str = include_str!("../../prompts/tools/delete-file.md");
+    pub const RUN_TERMINAL: &str = include_str!("../../prompts/tools/run-terminal.md");
 }
 
 /// Chat UI templates served as `/prompts.js` (`window.TENSORUI_PROMPTS`).

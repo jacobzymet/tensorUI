@@ -2,8 +2,10 @@
 //! XML `<tool_call>` in content is accepted only as a fallback for local models.
 
 pub mod chat;
+pub mod fs;
 pub mod search;
 pub mod skills;
+pub mod terminal;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -50,6 +52,11 @@ fn clarify_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<Value>>> 
     WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn approval_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
+    static WAITERS: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> = OnceLock::new();
+    WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn steer_sessions() -> &'static Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>>> =
         OnceLock::new();
@@ -60,6 +67,21 @@ fn steer_sessions() -> &'static Mutex<HashMap<String, mpsc::UnboundedSender<Stee
 struct SteerPayload {
     text: String,
     client_id: Option<String>,
+}
+
+pub fn submit_tool_approval(id: &str, allow: bool) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("approval id is required".into());
+    }
+    let sender = approval_waiters()
+        .lock()
+        .map_err(|_| "approval waiters lock poisoned".to_string())?
+        .remove(id)
+        .ok_or_else(|| "No pending tool approval for that id (it may have expired).".to_string())?;
+    sender
+        .send(allow)
+        .map_err(|_| "Agent turn is no longer waiting for approval.".to_string())
 }
 
 pub fn submit_clarify_answers(id: &str, answers: Value) -> Result<(), String> {
@@ -104,6 +126,18 @@ pub fn submit_steer(id: &str, text: &str, client_id: Option<&str>) -> Result<(),
             client_id,
         })
         .map_err(|_| "Agent turn is no longer accepting steering.".to_string())
+}
+
+struct ApprovalWaitGuard {
+    id: String,
+}
+
+impl Drop for ApprovalWaitGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = approval_waiters().lock() {
+            map.remove(&self.id);
+        }
+    }
 }
 
 struct ClarifyWaitGuard {
@@ -310,6 +344,22 @@ fn default_fetch_url_max_chars() -> usize {
     DEFAULT_FETCH_URL_MAX_CHARS
 }
 
+fn default_terminal_timeout_secs() -> u64 {
+    30
+}
+
+fn default_approval_mode() -> ApprovalMode {
+    ApprovalMode::Manual
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    #[default]
+    Manual,
+    AutoSafe,
+}
+
 fn clamp_page_fetch_chars(value: usize) -> usize {
     value.clamp(MIN_PAGE_FETCH_CHARS, MAX_PAGE_FETCH_CHARS)
 }
@@ -339,6 +389,16 @@ pub struct AgentSkills {
     pub fetch_url: bool,
     #[serde(default = "default_fetch_url_max_chars")]
     pub fetch_url_max_chars: usize,
+    #[serde(default = "default_approval_mode")]
+    pub approval_mode: ApprovalMode,
+    #[serde(default)]
+    pub filesystem: bool,
+    #[serde(default)]
+    pub workspace_root: String,
+    #[serde(default)]
+    pub terminal: bool,
+    #[serde(default = "default_terminal_timeout_secs")]
+    pub terminal_timeout_secs: u64,
 }
 
 impl Default for AgentSkills {
@@ -355,13 +415,18 @@ impl Default for AgentSkills {
             web_search_page_max_chars: 0,
             fetch_url: false,
             fetch_url_max_chars: default_fetch_url_max_chars(),
+            approval_mode: ApprovalMode::Manual,
+            filesystem: false,
+            workspace_root: String::new(),
+            terminal: false,
+            terminal_timeout_secs: default_terminal_timeout_secs(),
         }
     }
 }
 
 impl AgentSkills {
     pub fn any_enabled(&self) -> bool {
-        self.web_search || self.fetch_url
+        self.web_search || self.fetch_url || self.filesystem || self.terminal
     }
 
     fn fetch_url_char_limit(&self) -> usize {
@@ -503,8 +568,20 @@ fn append_openai_tool_exchange(
     }
 }
 
-fn is_lookup_tool(name: &str) -> bool {
-    matches!(name, "web_search" | "fetch_url")
+fn is_recoverable_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "web_search"
+            | "fetch_url"
+            | "read_file"
+            | "list_dir"
+            | "glob"
+            | "grep"
+            | "write_file"
+            | "str_replace"
+            | "delete_file"
+            | "run_terminal"
+    )
 }
 
 fn lookup_retry_guidance(name: &str, err: &str) -> String {
@@ -512,10 +589,12 @@ fn lookup_retry_guidance(name: &str, err: &str) -> String {
         format!(
             "{err}\n\nSearch did not return results. You may try one simpler query, or continue without live sources."
         )
-    } else {
+    } else if name == "fetch_url" {
         format!(
             "{err}\n\nFetch failed. Try a different URL from prior search results, or search again."
         )
+    } else {
+        format!("{err}\n\nFix the arguments and retry, or continue without this tool.")
     }
 }
 
@@ -711,7 +790,7 @@ async fn run_agent_loop(
                 let err = crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_FORCE_FINAL);
                 let mut results = Vec::new();
                 for call in &calls {
-                    send_tool_call(tx, call).await?;
+                    send_tool_call(tx, call, false).await?;
                     let outcome = ToolOutcome::soft_failure(err);
                     send_tool_result(tx, call, &outcome).await?;
                     results.push((call.clone(), err.to_string()));
@@ -733,7 +812,7 @@ async fn run_agent_loop(
                     let err = ask_user_format_error(&ask.arguments);
                     let mut results = Vec::new();
                     for call in &calls {
-                        send_tool_call(tx, call).await?;
+                        send_tool_call(tx, call, false).await?;
                         let text = if call.name == "ask_user" {
                             err.clone()
                         } else {
@@ -800,7 +879,7 @@ async fn run_agent_loop(
                 tool_rounds += calls.len();
                 let mut results = Vec::new();
                 for call in &calls {
-                    send_tool_call(tx, call).await?;
+                    send_tool_call(tx, call, false).await?;
                     let outcome = ToolOutcome::soft_failure(err);
                     send_tool_result(tx, call, &outcome).await?;
                     results.push((call.clone(), err.to_string()));
@@ -840,17 +919,29 @@ async fn run_agent_loop(
                 .await?;
             }
 
+            let mut approval_rx = HashMap::new();
             for call in &calls {
-                send_tool_call(tx, call).await?;
+                if needs_approval(&call.name, request.skills.approval_mode) {
+                    approval_rx.insert(call.id.clone(), arm_tool_approval(&call.id)?);
+                }
+            }
+            for call in &calls {
+                send_tool_call(tx, call, approval_rx.contains_key(&call.id)).await?;
             }
 
-            let executed = execute_tool_batch(calls, &request.skills, user_skills).await?;
+            let executed = approve_and_execute_tools(
+                calls,
+                &request.skills,
+                user_skills,
+                tx,
+                approval_rx,
+            )
+            .await?;
             let mut results = Vec::new();
             for (call, outcome) in executed {
                 if call.name == "web_search" && outcome.ok {
                     deep_searches += 1;
                 }
-                send_tool_result(tx, &call, &outcome).await?;
                 let mut model_result = outcome.text;
                 if request.deep_research {
                     model_result.push_str(&deep_research_continue_note(
@@ -999,7 +1090,55 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
         "fetch_url" => skills.fetch_url,
         "ask_user" => true,
         "activate_skill" | "read_skill" => !user_skills.is_empty(),
+        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace" | "delete_file" => {
+            skills.filesystem
+        }
+        "run_terminal" => skills.terminal,
         _ => false,
+    }
+}
+
+fn tool_risk(name: &str) -> &'static str {
+    match name {
+        "write_file" | "str_replace" | "delete_file" => "write",
+        "run_terminal" => "terminal",
+        _ => "safe",
+    }
+}
+
+fn needs_approval(name: &str, mode: ApprovalMode) -> bool {
+    if name == "ask_user" {
+        return false;
+    }
+    match mode {
+        ApprovalMode::Manual => true,
+        ApprovalMode::AutoSafe => matches!(tool_risk(name), "write" | "terminal"),
+    }
+}
+
+fn tool_call_summary(call: &ToolCall) -> String {
+    match call.name.as_str() {
+        "web_search" => call
+            .arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "fetch_url" => call
+            .arguments
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "activate_skill" | "read_skill" => call
+            .arguments
+            .get("name")
+            .or_else(|| call.arguments.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "run_terminal" => terminal::tool_summary(&call.arguments),
+        _ => fs::tool_summary(&call.name, &call.arguments),
     }
 }
 
@@ -1123,6 +1262,16 @@ fn agent_system_block(
     if skills.web_search || skills.fetch_url {
         lines.push(trim_prompt(agent::CITATIONS).to_string());
     }
+    if skills.filesystem {
+        lines.push(fill(
+            agent::FILESYSTEM,
+            &[("workspace", &fs::workspace_prompt_line(&skills.workspace_root))],
+        ));
+    }
+    if skills.terminal {
+        let timeout = terminal::clamp_timeout_secs(skills.terminal_timeout_secs).to_string();
+        lines.push(fill(agent::TERMINAL, &[("timeout", &timeout)]));
+    }
     if !user_skills.is_empty() {
         lines.push(trim_prompt(agent::SKILLS_ACTIVATE).to_string());
         lines.push(crate::skills::user_skills_catalog_block(user_skills));
@@ -1193,6 +1342,8 @@ struct AccumToolCall {
     id: String,
     name: String,
     arguments: String,
+    announced: bool,
+    emit_at: usize,
 }
 
 /// With `--jinja`, llama-server may lift `<tool_call>` into native `delta.tool_calls`;
@@ -1486,6 +1637,7 @@ async fn apply_openai_sse_line(
             *forwarding = false;
             send_sse(tx, sse_agent(json!({ "phase": "content_clear" }))).await?;
         }
+        announce_preparing_tools(native_tools, tx).await?;
     }
 
     Ok(())
@@ -1507,6 +1659,92 @@ fn append_tool_arguments(slot: &mut AccumToolCall, args: &Value) {
     }
 }
 
+async fn announce_preparing_tools(
+    native_tools: &mut [Option<AccumToolCall>],
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+) -> Result<(), StreamFail> {
+    for slot in native_tools.iter_mut().flatten() {
+        if slot.name.trim().is_empty() {
+            continue;
+        }
+        if slot.id.trim().is_empty() {
+            slot.id = new_tool_call_id();
+        }
+        let grown = slot.arguments.len().saturating_sub(slot.emit_at) >= 96;
+        if slot.announced && !grown {
+            continue;
+        }
+        slot.announced = true;
+        slot.emit_at = slot.arguments.len();
+        let arguments = preview_tool_arguments(&slot.arguments);
+        send_sse(
+            tx,
+            sse_agent(json!({
+                "phase": "tool_prepare",
+                "id": slot.id,
+                "name": slot.name,
+                "arguments": arguments,
+            })),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+fn preview_tool_arguments(raw: &str) -> Value {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return json!({});
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        return value;
+    }
+    let mut map = serde_json::Map::new();
+    for key in [
+        "path",
+        "content",
+        "old_string",
+        "new_string",
+        "command",
+        "query",
+        "url",
+        "pattern",
+        "cwd",
+    ] {
+        if let Some(value) = json_string_field(raw, key) {
+            map.insert(key.to_string(), json!(value));
+        }
+    }
+    Value::Object(map)
+}
+
+fn json_string_field(raw: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let idx = raw.find(&needle)?;
+    let rest = raw[idx + needle.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some(other) => out.push(other),
+                None => break,
+            }
+        } else if ch == '"' {
+            break;
+        } else {
+            out.push(ch);
+        }
+    }
+    Some(out)
+}
+
 fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) {
     let index = delta.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     while slots.len() <= index {
@@ -1516,7 +1754,7 @@ fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) 
 
     if let Some(id) = delta.get("id").and_then(|v| v.as_str()) {
         let id = id.trim();
-        if !id.is_empty() {
+        if !id.is_empty() && (!slot.announced || slot.id.trim().is_empty()) {
             slot.id = id.to_string();
         }
     }
@@ -1669,6 +1907,77 @@ fn openai_tools_payload(
             }
         }));
     }
+    if skills.filesystem {
+        tools_out.push(function_tool(
+            "read_file",
+            trim_prompt(tools::READ_FILE),
+            json!({
+                "path": { "type": "string" },
+                "offset": { "type": "integer", "description": "Optional 0-based line offset" },
+                "limit": { "type": "integer", "description": "Optional max lines to return" }
+            }),
+            &["path"],
+        ));
+        tools_out.push(function_tool(
+            "list_dir",
+            trim_prompt(tools::LIST_DIR),
+            json!({ "path": { "type": "string" } }),
+            &[],
+        ));
+        tools_out.push(function_tool(
+            "glob",
+            trim_prompt(tools::GLOB),
+            json!({ "pattern": { "type": "string" } }),
+            &["pattern"],
+        ));
+        tools_out.push(function_tool(
+            "grep",
+            trim_prompt(tools::GREP),
+            json!({
+                "query": { "type": "string" },
+                "glob": { "type": "string" },
+                "case_insensitive": { "type": "boolean" }
+            }),
+            &["query"],
+        ));
+        tools_out.push(function_tool(
+            "write_file",
+            trim_prompt(tools::WRITE_FILE),
+            json!({
+                "path": { "type": "string" },
+                "content": { "type": "string" }
+            }),
+            &["path", "content"],
+        ));
+        tools_out.push(function_tool(
+            "str_replace",
+            trim_prompt(tools::STR_REPLACE),
+            json!({
+                "path": { "type": "string" },
+                "old_string": { "type": "string" },
+                "new_string": { "type": "string" },
+                "replace_all": { "type": "boolean" }
+            }),
+            &["path", "old_string", "new_string"],
+        ));
+        tools_out.push(function_tool(
+            "delete_file",
+            trim_prompt(tools::DELETE_FILE),
+            json!({ "path": { "type": "string" } }),
+            &["path"],
+        ));
+    }
+    if skills.terminal {
+        tools_out.push(function_tool(
+            "run_terminal",
+            trim_prompt(tools::RUN_TERMINAL),
+            json!({
+                "command": { "type": "string" },
+                "cwd": { "type": "string", "description": "Optional path relative to the workspace" }
+            }),
+            &["command"],
+        ));
+    }
     if !user_skills.is_empty() {
         let names: Vec<String> = user_skills.iter().map(|skill| skill.name.clone()).collect();
         tools_out.push(json!({
@@ -1693,6 +2002,21 @@ fn openai_tools_payload(
         }));
     }
     tools_out
+}
+
+fn function_tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        }
+    })
 }
 
 fn tool_calls_from_native(slots: &[Option<AccumToolCall>]) -> Vec<ToolCall> {
@@ -1778,14 +2102,52 @@ async fn send_content_clear(
 async fn send_tool_call(
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
     call: &ToolCall,
+    needs_approval: bool,
+) -> Result<(), StreamFail> {
+    let mut payload = json!({
+        "phase": "tool_call",
+        "id": call.id,
+        "name": call.name,
+        "arguments": call.arguments,
+        "needs_approval": needs_approval,
+    });
+    if needs_approval {
+        payload["risk"] = json!(tool_risk(&call.name));
+        payload["summary"] = json!(tool_call_summary(call));
+    }
+    send_sse(tx, sse_agent(payload)).await
+}
+
+async fn send_tool_approval(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    call: &ToolCall,
 ) -> Result<(), StreamFail> {
     send_sse(
         tx,
         sse_agent(json!({
-            "phase": "tool_call",
+            "phase": "tool_approval",
             "id": call.id,
             "name": call.name,
             "arguments": call.arguments,
+            "risk": tool_risk(&call.name),
+            "summary": tool_call_summary(call),
+        })),
+    )
+    .await
+}
+
+async fn send_tool_executing(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    call: &ToolCall,
+) -> Result<(), StreamFail> {
+    send_sse(
+        tx,
+        sse_agent(json!({
+            "phase": "tool_executing",
+            "id": call.id,
+            "name": call.name,
+            "arguments": call.arguments,
+            "summary": tool_call_summary(call),
         })),
     )
     .await
@@ -1810,6 +2172,43 @@ async fn send_tool_result(
         payload["note"] = json!(note);
     }
     send_sse(tx, sse_agent(payload)).await
+}
+
+fn arm_tool_approval(approval_id: &str) -> Result<oneshot::Receiver<bool>, StreamFail> {
+    let (answer_tx, answer_rx) = oneshot::channel();
+    approval_waiters()
+        .lock()
+        .map_err(|_| StreamFail::Other("approval waiters lock poisoned".into()))?
+        .insert(approval_id.to_string(), answer_tx);
+    Ok(answer_rx)
+}
+
+async fn wait_for_approval(
+    approval_id: &str,
+    mut answer_rx: oneshot::Receiver<bool>,
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+) -> Result<bool, StreamFail> {
+    let _guard = ApprovalWaitGuard {
+        id: approval_id.to_string(),
+    };
+    let started = std::time::Instant::now();
+    loop {
+        if tx.is_closed() {
+            return Err(StreamFail::Other("Approval cancelled.".into()));
+        }
+        if started.elapsed() >= CLARIFY_WAIT_TIMEOUT {
+            return Err(StreamFail::Other(
+                "Timed out waiting for tool approval.".into(),
+            ));
+        }
+        match timeout(Duration::from_millis(400), &mut answer_rx).await {
+            Ok(Ok(allow)) => return Ok(allow),
+            Ok(Err(_)) => {
+                return Err(StreamFail::Other("Approval cancelled.".into()));
+            }
+            Err(_) => continue,
+        }
+    }
 }
 
 async fn wait_for_clarify_answers(
@@ -2182,6 +2581,23 @@ async fn execute_tool(
                 fetch_single_url(url, skills, offset, custom_max).await?,
             ))
         }
+        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace" | "delete_file" => {
+            let name = call.name.clone();
+            let args = call.arguments.clone();
+            let root = skills.workspace_root.clone();
+            tokio::task::spawn_blocking(move || execute_fs_tool(&name, &root, &args))
+                .await
+                .map_err(|err| err.to_string())?
+                .map(ToolOutcome::text)
+        }
+        "run_terminal" => Ok(ToolOutcome::text(
+            terminal::run_agent_command(
+                &skills.workspace_root,
+                &call.arguments,
+                skills.terminal_timeout_secs,
+            )
+            .await?,
+        )),
         "activate_skill" | "read_skill" => {
             let key = call
                 .arguments
@@ -2202,6 +2618,90 @@ async fn execute_tool(
     }
 }
 
+fn execute_fs_tool(name: &str, root: &str, args: &Value) -> Result<String, String> {
+    let ws = fs::Workspace::open(root)?;
+    match name {
+        "read_file" => fs::read_file(&ws, args),
+        "list_dir" => fs::list_dir(&ws, args),
+        "glob" => fs::glob_files(&ws, args),
+        "grep" => fs::grep_files(&ws, args),
+        "write_file" => fs::write_file(&ws, args),
+        "str_replace" => fs::str_replace(&ws, args),
+        "delete_file" => fs::delete_file(&ws, args),
+        other => Err(format!("Unknown file tool '{other}'.")),
+    }
+}
+
+async fn approve_and_execute_tools(
+    calls: Vec<ToolCall>,
+    skills: &AgentSkills,
+    user_skills: &[UserSkill],
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    mut approval_rx: HashMap<String, oneshot::Receiver<bool>>,
+) -> Result<Vec<(ToolCall, ToolOutcome)>, StreamFail> {
+    let mut auto = Vec::new();
+    let mut pending = Vec::new();
+    for call in calls {
+        if approval_rx.contains_key(&call.id) {
+            send_tool_approval(tx, &call).await?;
+            pending.push(call);
+        } else {
+            auto.push(call);
+        }
+    }
+    let mut denied = Vec::new();
+    let mut executed = Vec::new();
+    if !auto.is_empty() {
+        let batch = execute_tool_batch(auto, skills, user_skills).await?;
+        emit_executed_tools(tx, &batch).await?;
+        executed.extend(batch);
+    }
+    for call in pending {
+        let rx = approval_rx
+            .remove(&call.id)
+            .ok_or_else(|| StreamFail::Other("Missing tool approval waiter.".into()))?;
+        let allow = wait_for_approval(&call.id, rx, tx).await?;
+        if allow {
+            send_tool_executing(tx, &call).await?;
+            let batch = execute_tool_batch(vec![call], skills, user_skills).await?;
+            emit_executed_tools(tx, &batch).await?;
+            executed.extend(batch);
+        } else {
+            let outcome = ToolOutcome::soft_failure(
+                "The user denied this tool call. Continue without it, or ask them to approve a smaller request.",
+            );
+            send_tool_result(tx, &call, &outcome).await?;
+            denied.push((call, outcome));
+        }
+    }
+    let mut combined = denied;
+    combined.extend(executed);
+    Ok(combined)
+}
+
+async fn emit_executed_tools(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    batch: &[(ToolCall, ToolOutcome)],
+) -> Result<(), StreamFail> {
+    for (call, outcome) in batch {
+        if call.name == "run_terminal" {
+            send_sse(
+                tx,
+                sse_agent(json!({
+                    "phase": "terminal",
+                    "command": terminal::tool_summary(&call.arguments),
+                    "output": outcome.ui_text,
+                    "ok": outcome.ok,
+                    "source": "agent",
+                })),
+            )
+            .await?;
+        }
+        send_tool_result(tx, call, outcome).await?;
+    }
+    Ok(())
+}
+
 async fn execute_tool_batch(
     calls: Vec<ToolCall>,
     skills: &AgentSkills,
@@ -2217,7 +2717,7 @@ async fn execute_tool_batch(
                 async move {
                     let outcome = match execute_tool(&call, &skills, &user_skills).await {
                         Ok(outcome) => Ok(outcome),
-                        Err(err) if is_lookup_tool(&call.name) => Ok(ToolOutcome::soft_failure(
+                        Err(err) if is_recoverable_tool(&call.name) => Ok(ToolOutcome::soft_failure(
                             lookup_retry_guidance(&call.name, &err),
                         )),
                         Err(err) => Err(err),
@@ -2896,6 +3396,54 @@ mod tests {
         assert!(capability_allowed("fetch_url", &on, &[]));
         assert!(on.any_enabled());
         assert!(!off.any_enabled());
+    }
+
+    #[test]
+    fn filesystem_and_terminal_are_gated() {
+        let off = AgentSkills::default();
+        let on = AgentSkills {
+            filesystem: true,
+            terminal: true,
+            ..AgentSkills::default()
+        };
+        assert!(!capability_allowed("read_file", &off, &[]));
+        assert!(capability_allowed("read_file", &on, &[]));
+        assert!(capability_allowed("str_replace", &on, &[]));
+        assert!(capability_allowed("run_terminal", &on, &[]));
+        assert!(!capability_allowed("run_terminal", &off, &[]));
+        assert!(on.any_enabled());
+        assert!(needs_approval("web_search", ApprovalMode::Manual));
+        assert!(!needs_approval("web_search", ApprovalMode::AutoSafe));
+        assert!(needs_approval("write_file", ApprovalMode::AutoSafe));
+        assert!(needs_approval("run_terminal", ApprovalMode::AutoSafe));
+        assert!(!needs_approval("ask_user", ApprovalMode::Manual));
+        assert_eq!(tool_risk("run_terminal"), "terminal");
+        assert_eq!(tool_risk("read_file"), "safe");
+    }
+
+    #[test]
+    fn preview_arguments_reads_partial_json() {
+        let raw = r#"{"path":"script.js","content":"console.log(1);"#;
+        let value = preview_tool_arguments(raw);
+        assert_eq!(value["path"], "script.js");
+        assert_eq!(value["content"], "console.log(1);");
+        let complete = preview_tool_arguments(r#"{"path":"a.html","content":"<p>hi</p>"}"#);
+        assert_eq!(complete["path"], "a.html");
+        assert_eq!(complete["content"], "<p>hi</p>");
+    }
+
+    #[tokio::test]
+    async fn approval_can_be_clicked_before_the_wait_loop() {
+        let id = "call_arm_early";
+        let rx = arm_tool_approval(id).expect("arm");
+        submit_tool_approval(id, true).expect("submit");
+        let (tx, _keep) = tokio::sync::mpsc::channel(1);
+        let allow = wait_for_approval(id, rx, &tx).await.expect("wait");
+        assert!(allow);
+        assert!(
+            submit_tool_approval(id, true).is_err(),
+            "duplicate allow should not find a waiter"
+        );
     }
 
     #[test]
