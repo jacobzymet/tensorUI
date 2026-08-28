@@ -22,7 +22,6 @@
   transition: opacity var(--dur-enter) var(--ease-out);
 }
 .chat-background.has-image { opacity: 1; }
-.chat-shell.is-projects .chat-background { opacity: 0; }
 .chat-background img,
 .chat-background-overlay {
   position: absolute;
@@ -48,11 +47,14 @@
   --chat-background-muted: oklch(35% 0.012 260);
 }
 .chat-main[data-background-tone] .empty-greeting,
+.chat-main[data-background-tone] .projects-title,
+.chat-main[data-background-tone] .projects-empty strong,
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble,
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble :is(h1, h2, h3, h4, h5, h6) {
   color: var(--chat-background-ink);
 }
 .chat-main[data-background-tone] .empty-sub,
+.chat-main[data-background-tone] .projects-empty,
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble blockquote,
 .chat-main[data-background-tone] .msg-role-assistant .msg-meta,
 .chat-main[data-background-tone] .msg-role-assistant .msg-meta-model {

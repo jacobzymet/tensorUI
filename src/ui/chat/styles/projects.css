@@ -7,6 +7,9 @@
   background:
     radial-gradient(ellipse 76% 46% at 12% -12%, color-mix(in oklch, var(--color-accent) 13%, transparent), transparent 58%);
 }
+.chat-main[data-background-tone] .projects-view {
+  background: transparent;
+}
 .projects-view.is-hidden { display: none !important; }
 .projects-inner {
   width: 100%;

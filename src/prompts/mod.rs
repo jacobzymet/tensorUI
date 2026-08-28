@@ -22,6 +22,7 @@ pub fn trim_prompt(raw: &str) -> &str {
 
 pub mod chat {
     pub const BASE: &str = include_str!("../../prompts/chat/base.md");
+    pub const TODAY: &str = include_str!("../../prompts/chat/today.md");
     pub const USER_NAME: &str = include_str!("../../prompts/chat/user-name.md");
     pub const USER_ABOUT: &str = include_str!("../../prompts/chat/user-about.md");
     pub const GLOBAL_INSTRUCTIONS: &str = include_str!("../../prompts/chat/global-instructions.md");
@@ -137,6 +138,7 @@ pub fn frontend_js() -> &'static str {
     JS.get_or_init(|| {
         let entries: &[(&str, &str)] = &[
             ("chat.base", chat::BASE),
+            ("chat.today", chat::TODAY),
             ("chat.userName", chat::USER_NAME),
             ("chat.userAbout", chat::USER_ABOUT),
             ("chat.globalInstructions", chat::GLOBAL_INSTRUCTIONS),
@@ -196,6 +198,7 @@ mod tests {
     fn frontend_js_exposes_chat_prompts() {
         let js = frontend_js();
         assert!(js.contains("window.TENSORUI_PROMPTS"));
+        assert!(js.contains("chat.today"));
         assert!(js.contains("chat.projectMemory"));
         assert!(js.contains("chat.botIdentity"));
         assert!(js.contains("chat.botDm"));

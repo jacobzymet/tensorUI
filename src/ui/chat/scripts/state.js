@@ -1834,6 +1834,20 @@ function currentProjectId() {
   return activeProjectId;
 }
 
+/** Local calendar date only — no clock, so the system prefix is stable all day. */
+function formatPromptToday(now = new Date()) {
+  const weekday = now.toLocaleDateString('en-US', { weekday: 'short' });
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const offsetMin = -now.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMin);
+  const hours = String(Math.floor(abs / 60)).padStart(2, '0');
+  const minutes = String(abs % 60).padStart(2, '0');
+  return `${year}-${month}-${day} (${weekday}, UTC${sign}${hours}:${minutes})`;
+}
+
 function buildSystemPrompt(projectIdOverride, opts = {}) {
   const excludeConvoId = opts.excludeConvoId || opts.excludeConvoId || null;
   const convo = opts.convo || null;
@@ -1896,9 +1910,10 @@ function buildSystemPrompt(projectIdOverride, opts = {}) {
     });
   }
 
-  if (parts.length === 0) return null;
   const base = P['chat.base'] || 'You are a helpful assistant.';
-  return base + '\n\n' + parts.join('\n\n');
+  const today = fill(P['chat.today'] || 'Today: {{today}}', { today: formatPromptToday() });
+  if (parts.length === 0) return base + '\n\n' + today;
+  return base + '\n\n' + today + '\n\n' + parts.join('\n\n');
 }
 
 function messagePlainExcerpt(message, maxChars) {
