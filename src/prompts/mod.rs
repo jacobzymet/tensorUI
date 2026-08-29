@@ -74,7 +74,11 @@ pub mod agent {
     pub const FETCH_URL_ALONE: &str = include_str!("../../prompts/agent/fetch-url-alone.md");
     pub const CITATIONS: &str = include_str!("../../prompts/agent/citations.md");
     pub const FILESYSTEM: &str = include_str!("../../prompts/agent/filesystem.md");
+    pub const FILESYSTEM_NO_WORKSPACE: &str =
+        include_str!("../../prompts/agent/filesystem-no-workspace.md");
     pub const TERMINAL: &str = include_str!("../../prompts/agent/terminal.md");
+    pub const TERMINAL_NO_WORKSPACE: &str =
+        include_str!("../../prompts/agent/terminal-no-workspace.md");
     pub const BROWSER: &str = include_str!("../../prompts/agent/browser.md");
     pub const SKILLS_ACTIVATE: &str = include_str!("../../prompts/agent/skills-activate.md");
     pub const SKILLS_CATALOG_INTRO: &str =

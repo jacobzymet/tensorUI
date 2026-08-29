@@ -258,6 +258,43 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   height: 20px;
 }
 .agent-answer { min-width: 0; }
+.stream-sealed,
+.stream-tail,
+.stream-think,
+.stream-answer {
+  min-width: 0;
+}
+.stream-sealed:empty,
+.stream-tail:empty,
+.stream-think:empty,
+.stream-answer:empty {
+  display: none;
+}
+.stream-caret {
+  display: inline-block;
+  width: 0.08em;
+  height: 0.95em;
+  margin-left: 0.06em;
+  vertical-align: -0.1em;
+  background: currentColor;
+  animation: stream-caret-blink 0.85s steps(1) infinite;
+  pointer-events: none;
+}
+@keyframes stream-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.stream-settle {
+  animation: stream-ink var(--dur-enter) var(--ease-out) both;
+}
+@keyframes stream-ink {
+  from { opacity: 0.35; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret { display: none; }
+  .stream-settle { animation: none; }
+}
 
 .think-block {
   margin: 0;

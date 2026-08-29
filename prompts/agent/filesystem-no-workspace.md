@@ -1,0 +1,1 @@
+No workspace folder is set for this chat. File tools are unavailable. Do not call write_file, read_file, list_dir, glob, grep, str_replace, or delete_file. Put any file contents in the chat reply instead.

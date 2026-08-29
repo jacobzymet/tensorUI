@@ -455,6 +455,14 @@ impl AgentSkills {
         self.web_search || self.fetch_url || self.filesystem || self.terminal || self.browser
     }
 
+    fn filesystem_ready(&self) -> bool {
+        self.filesystem && !self.workspace_root.trim().is_empty()
+    }
+
+    fn terminal_ready(&self) -> bool {
+        self.terminal && !self.workspace_root.trim().is_empty()
+    }
+
     fn fetch_url_char_limit(&self) -> usize {
         clamp_page_fetch_chars(if self.fetch_url_max_chars == 0 {
             DEFAULT_FETCH_URL_MAX_CHARS
@@ -1134,9 +1142,9 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
         "ask_user" => true,
         "activate_skill" | "read_skill" => !user_skills.is_empty(),
         "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace" | "delete_file" => {
-            skills.filesystem
+            skills.filesystem_ready()
         }
-        "run_terminal" => skills.terminal,
+        "run_terminal" => skills.terminal_ready(),
         name if browser::is_browser_tool(name) => skills.browser,
         "show_image" => true,
         _ => false,
@@ -1311,15 +1319,19 @@ fn agent_system_block(
     if skills.web_search || skills.fetch_url {
         lines.push(trim_prompt(agent::CITATIONS).to_string());
     }
-    if skills.filesystem {
+    if skills.filesystem_ready() {
         lines.push(fill(
             agent::FILESYSTEM,
             &[("workspace", &fs::workspace_prompt_line(&skills.workspace_root))],
         ));
+    } else if skills.filesystem {
+        lines.push(trim_prompt(agent::FILESYSTEM_NO_WORKSPACE).to_string());
     }
-    if skills.terminal {
+    if skills.terminal_ready() {
         let timeout = terminal::clamp_timeout_secs(skills.terminal_timeout_secs).to_string();
         lines.push(fill(agent::TERMINAL, &[("timeout", &timeout)]));
+    } else if skills.terminal {
+        lines.push(trim_prompt(agent::TERMINAL_NO_WORKSPACE).to_string());
     }
     if skills.browser {
         lines.push(trim_prompt(agent::BROWSER).to_string());
@@ -1964,7 +1976,7 @@ fn openai_tools_payload(
             }
         }));
     }
-    if skills.filesystem {
+    if skills.filesystem_ready() {
         tools_out.push(function_tool(
             "read_file",
             trim_prompt(tools::READ_FILE),
@@ -2024,7 +2036,7 @@ fn openai_tools_payload(
             &["path"],
         ));
     }
-    if skills.terminal {
+    if skills.terminal_ready() {
         tools_out.push(function_tool(
             "run_terminal",
             trim_prompt(tools::RUN_TERMINAL),
@@ -3591,12 +3603,24 @@ mod tests {
         let off = AgentSkills::default();
         let on = AgentSkills {
             filesystem: true,
+            workspace_root: "/tmp/ws".into(),
+            terminal: true,
+            ..AgentSkills::default()
+        };
+        let filesystem_no_folder = AgentSkills {
+            filesystem: true,
+            ..AgentSkills::default()
+        };
+        let terminal_no_folder = AgentSkills {
             terminal: true,
             ..AgentSkills::default()
         };
         assert!(!capability_allowed("read_file", &off, &[]));
+        assert!(!capability_allowed("write_file", &filesystem_no_folder, &[]));
+        assert!(!capability_allowed("read_file", &filesystem_no_folder, &[]));
         assert!(capability_allowed("read_file", &on, &[]));
         assert!(capability_allowed("str_replace", &on, &[]));
+        assert!(!capability_allowed("run_terminal", &terminal_no_folder, &[]));
         assert!(capability_allowed("run_terminal", &on, &[]));
         assert!(!capability_allowed("run_terminal", &off, &[]));
         assert!(on.any_enabled());

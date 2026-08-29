@@ -37,6 +37,17 @@ function createStreamTyper(onPaint) {
       else i += 1;
       taken += 1;
     }
+    // Caught-up only: finish the word if a break is a few characters away.
+    if (step <= 2 && i < target.length) {
+      const limit = Math.min(target.length, i + 5);
+      for (let j = i; j < limit; j++) {
+        const ch = target.charCodeAt(j);
+        if (ch === 32 || ch === 9 || ch === 10 || ch === 13) {
+          i = j + 1;
+          break;
+        }
+      }
+    }
     shown = target.slice(0, i);
   }
 
@@ -115,10 +126,8 @@ function createStreamTyper(onPaint) {
         cancelAnimationFrame(raf);
         raf = 0;
       }
-      if (shown !== target) {
-        shown = target;
-        onPaint(shown, false);
-      }
+      shown = target;
+      onPaint(shown, false);
     },
   };
 }
@@ -1376,7 +1385,7 @@ function timelineSignature(timeline) {
         part.approval || '',
         part.approvalRisk || '',
         part.executing ? '1' : '0',
-        part.body || '',
+        part.live ? '' : (part.body || ''),
         part.image ? String(part.image.length) : '',
       ].join('\0');
     }
@@ -1397,10 +1406,22 @@ function streamingAnswerText(text) {
   return out;
 }
 
-function renderStreamingAnswerHtml(text) {
-  const answer = streamingAnswerText(text);
-  if (!answer.trim()) return '';
-  return '<div class="agent-final-answer">' + renderMarkdown(answer) + '</div>';
+function ensureLiveAnswerBox(liveRoot) {
+  let box = liveRoot.querySelector(':scope > .agent-final-answer');
+  if (!box) {
+    liveRoot.innerHTML = '<div class="agent-final-answer"></div>';
+    box = liveRoot.querySelector(':scope > .agent-final-answer');
+  }
+  return box;
+}
+
+function paintLiveStreamingAnswer(host, cleaned, { streaming = true, wrapFinal = false } = {}) {
+  const liveText = streamingAnswerText(cleaned);
+  if (wrapFinal) {
+    paintIncrementalMarkdown(ensureLiveAnswerBox(host), liveText, { streaming });
+    return;
+  }
+  paintIncrementalMarkdown(host, liveText, { streaming });
 }
 
 function paintStreamIntoView(convo, stream, replyText, streaming) {
@@ -1436,18 +1457,15 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
   );
   stream.processNotesCollapsed = notesCollapsed;
   const sealedAnswerHtml = renderSealedAnswerHtml(stream.timeline, { notesCollapsed });
-  const liveAnswerHtml = renderStreamingAnswerHtml(cleaned);
-  const answerHtml = desktop ? (sealedAnswerHtml + liveAnswerHtml) : '';
+  const liveText = streamingAnswerText(cleaned);
+  const hasLiveAnswer = !!liveText.trim();
+  const hasThinkFallback = !hasTimeline && !thinkingOpen && !!cleaned && !hasLiveAnswer;
   const hasVisibleAnswer = desktop
-    ? !!answerHtml
-    : !!(cleaned && streamingAnswerText(cleaned).trim()) || !!sealedAnswerHtml;
+    ? !!(sealedAnswerHtml || hasLiveAnswer || hasThinkFallback)
+    : !!(hasLiveAnswer || sealedAnswerHtml);
 
   if (desktop) {
-    const fallbackLiveHtml = (!hasTimeline && !thinkingOpen && cleaned)
-      ? renderAssistantHtml(cleaned, { streaming: true })
-      : '';
-    const nextLiveHtml = liveAnswerHtml || fallbackLiveHtml;
-    const hasContent = !!(sealedAnswerHtml || nextLiveHtml);
+    const hasContent = !!(sealedAnswerHtml || hasLiveAnswer || hasThinkFallback);
     if (!hasContent && !streaming) {
       if (answerEl.innerHTML) answerEl.innerHTML = '';
       delete answerEl.dataset.renderedHtml;
@@ -1463,13 +1481,20 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
       if (sealedRoot.dataset.sealedSig !== sealedSig) {
         sealedRoot.innerHTML = sealedAnswerHtml;
         sealedRoot.dataset.sealedSig = sealedSig;
+        enhanceCodeBlocks(sealedRoot);
       }
-      if (liveRoot.dataset.renderedHtml !== nextLiveHtml) {
-        liveRoot.innerHTML = nextLiveHtml;
-        liveRoot.dataset.renderedHtml = nextLiveHtml;
+      if (hasThinkFallback) {
+        const html = renderAssistantHtml(cleaned, { streaming });
+        if (liveRoot.dataset.renderedHtml !== html) {
+          liveRoot.innerHTML = html;
+          liveRoot.dataset.renderedHtml = html;
+          enhanceCodeBlocks(liveRoot);
+        }
+      } else {
+        delete liveRoot.dataset.renderedHtml;
+        paintLiveStreamingAnswer(liveRoot, cleaned, { streaming, wrapFinal: true });
       }
     }
-    enhanceCodeBlocks(answerEl);
     delete answerEl.dataset.committedSig;
     delete answerEl.dataset.renderedHtml;
     stream.enteredSteps = 0;
@@ -1485,20 +1510,27 @@ function paintStreamIntoView(convo, stream, replyText, streaming) {
 
     if (!liveOnly) {
       let liveRoot = answerEl.querySelector(':scope > .agent-live');
-      if ((hasTimeline || sealedAnswerHtml) && streaming && cleaned) {
+      if ((hasTimeline || sealedAnswerHtml) && streaming) {
         if (answerEl.dataset.committedSig !== committedSig || !liveRoot) {
           answerEl.innerHTML = committedHtml + sealedAnswerHtml + '<div class="agent-live"></div>';
           answerEl.dataset.committedSig = committedSig;
           liveRoot = answerEl.querySelector(':scope > .agent-live');
+          enhanceCodeBlocks(answerEl);
         }
-        if (liveRoot && !(thinkingOpen && paintLiveThinkOnly(liveRoot, cleaned))) {
-          liveRoot.innerHTML = renderAssistantHtml(cleaned, { streaming: true });
+        patchLiveToolBodies(answerEl, stream.timeline);
+        if (cleaned && liveRoot && !(thinkingOpen && paintLiveThinkOnly(liveRoot, cleaned))) {
+          paintStreamingAssistant(liveRoot, cleaned, { streaming: true });
         }
+      } else if (streaming && cleaned && !hasTimeline && !sealedAnswerHtml) {
+        if (!(thinkingOpen && paintLiveThinkOnly(answerEl, cleaned))) {
+          paintStreamingAssistant(answerEl, cleaned, { streaming: true });
+        }
+        answerEl.dataset.committedSig = committedSig;
       } else {
         answerEl.innerHTML = committedHtml + sealedAnswerHtml + (cleaned ? renderAssistantHtml(cleaned, { streaming }) : '');
         answerEl.dataset.committedSig = committedSig;
+        enhanceCodeBlocks(answerEl);
       }
-      enhanceCodeBlocks(answerEl);
       scrollThinkStreams(answerEl);
       const steps = answerEl.querySelectorAll(':scope > .agent-step');
       const seen = stream.enteredSteps || 0;
