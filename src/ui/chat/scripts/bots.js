@@ -529,6 +529,21 @@ function defaultBotsTurn() {
     useAgent: !!settings.agentMode,
     skills: {
       web_search: !!settings.skillWebSearch,
+      web_search_provider: WEB_SEARCH_PROVIDERS.includes(settings.webSearchProvider)
+        ? settings.webSearchProvider
+        : 'auto',
+      web_search_searxng: typeof settings.webSearchSearxng === 'string'
+        ? settings.webSearchSearxng.trim()
+        : '',
+      web_search_parallel_api_key: typeof settings.webSearchParallelApiKey === 'string'
+        ? settings.webSearchParallelApiKey.trim()
+        : '',
+      web_search_parallel_mode: WEB_SEARCH_PARALLEL_MODES.includes(settings.webSearchParallelMode)
+        ? settings.webSearchParallelMode
+        : 'fast',
+      web_search_tinyfish_api_key: typeof settings.webSearchTinyfishApiKey === 'string'
+        ? settings.webSearchTinyfishApiKey.trim()
+        : '',
       fetch_url: !!settings.skillFetchUrl,
       approval_mode: settings.approvalMode === 'auto_safe' ? 'auto_safe' : 'manual',
       filesystem: !!settings.skillFilesystem,

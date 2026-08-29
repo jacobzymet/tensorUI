@@ -1,18 +1,23 @@
-//! Native web search: optional SearXNG first, then DuckDuckGo HTML + Lite.
+//! Native web search: Parallel, TinyFish, optional SearXNG, then DuckDuckGo HTML + Lite.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use scraper::{Html, Selector};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::time::timeout;
 
-use super::{AgentSkills, SearchHit, WebSearchRecency, WebSearchSafeSearch};
+use super::{AgentSkills, SearchHit, WebSearchProvider, WebSearchRecency, WebSearchSafeSearch};
 use crate::http;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 const SEARXNG_TIMEOUT: Duration = Duration::from_secs(8);
+const PARALLEL_TIMEOUT: Duration = Duration::from_secs(30);
+const PARALLEL_SEARCH_URL: &str = "https://api.parallel.ai/v1/search";
+const PARALLEL_MCP_URL: &str = "https://search.parallel.ai/mcp";
+const TINYFISH_TIMEOUT: Duration = Duration::from_secs(20);
+const TINYFISH_SEARCH_URL: &str = "https://api.search.tinyfish.ai/";
 const DDG_LITE: &str = "https://lite.duckduckgo.com/lite/";
 const DDG_HTML: &str = "https://html.duckduckgo.com/html/";
 
@@ -25,6 +30,86 @@ pub(super) async fn search_web(
         return Err("web_search requires a non-empty \"query\" string.".into());
     }
     let limit = skills.search_result_count();
+
+    match skills.web_search_provider {
+        WebSearchProvider::Parallel => search_parallel_only(&query, skills, limit).await,
+        WebSearchProvider::Tinyfish => search_tinyfish_only(&query, skills, limit).await,
+        WebSearchProvider::Duckduckgo => search_duckduckgo_only(&query, skills, limit).await,
+        WebSearchProvider::Searxng => search_searxng_only(&query, skills, limit).await,
+        WebSearchProvider::Auto => search_auto(&query, skills, limit).await,
+    }
+}
+
+async fn search_parallel_only(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<(Vec<SearchHit>, String, String), String> {
+    let hits = parallel_hits(query, skills, limit).await?;
+    if hits.is_empty() {
+        return Err(format!("Search returned no pages matching {query:?}."));
+    }
+    let mode = skills.web_search_parallel_mode.as_str();
+    let note = if parallel_api_key(skills).is_some() {
+        format!("Parallel · {mode}")
+    } else {
+        "Parallel · free MCP".into()
+    };
+    Ok((hits, "Parallel".into(), note))
+}
+
+async fn search_tinyfish_only(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<(Vec<SearchHit>, String, String), String> {
+    let hits = tinyfish_hits(query, skills, limit).await?;
+    if hits.is_empty() {
+        return Err(format!("Search returned no pages matching {query:?}."));
+    }
+    Ok((hits, "TinyFish".into(), "TinyFish · Monid".into()))
+}
+
+async fn search_duckduckgo_only(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<(Vec<SearchHit>, String, String), String> {
+    let mut errors = Vec::new();
+    let by_source = search_duckduckgo(query, skills, &mut errors).await;
+    finalize_sources(by_source, errors, query, limit, false, None, "DuckDuckGo")
+}
+
+async fn search_searxng_only(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<(Vec<SearchHit>, String, String), String> {
+    let mut errors = Vec::new();
+    let endpoint = match parse_searxng_endpoint(&skills.web_search_searxng) {
+        Ok(Some(url)) => url,
+        Ok(None) => {
+            return Err(
+                "SearXNG provider selected, but no instance URL is set in Agent Capabilities."
+                    .into(),
+            );
+        }
+        Err(error) => return Err(format!("searxng: {error}")),
+    };
+    let mut by_source = Vec::new();
+    match searxng_hits(&endpoint, query, skills, limit).await {
+        Ok(hits) if !hits.is_empty() => by_source.push(("searxng".into(), hits)),
+        Ok(_) => errors.push("searxng: no usable links".into()),
+        Err(error) => errors.push(format!("searxng: {error}")),
+    }
+    finalize_sources(by_source, errors, query, limit, false, None, "SearXNG")
+}
+
+async fn search_auto(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<(Vec<SearchHit>, String, String), String> {
     let mut errors: Vec<String> = Vec::new();
     let searx_requested = !skills.web_search_searxng.trim().is_empty();
     let searx_endpoint = match parse_searxng_endpoint(&skills.web_search_searxng) {
@@ -37,7 +122,7 @@ pub(super) async fn search_web(
 
     let mut by_source: Vec<(String, Vec<SearchHit>)> = Vec::new();
     if let Some(url) = &searx_endpoint {
-        match searxng_hits(url, &query, skills, limit).await {
+        match searxng_hits(url, query, skills, limit).await {
             Ok(hits) if !hits.is_empty() => {
                 by_source.push(("searxng".into(), hits));
             }
@@ -53,17 +138,41 @@ pub(super) async fn search_web(
     let mut fell_back = false;
     if by_source.is_empty() {
         fell_back = searx_requested;
-        by_source = search_duckduckgo(&query, skills, &mut errors).await;
+        by_source = search_duckduckgo(query, skills, &mut errors).await;
     }
 
+    finalize_sources(
+        by_source,
+        errors,
+        query,
+        limit,
+        fell_back,
+        searx_error,
+        if searx_requested {
+            "SearXNG"
+        } else {
+            "DuckDuckGo"
+        },
+    )
+}
+
+fn finalize_sources(
+    by_source: Vec<(String, Vec<SearchHit>)>,
+    errors: Vec<String>,
+    query: &str,
+    limit: usize,
+    fell_back: bool,
+    searx_error: Option<String>,
+    preferred_label: &str,
+) -> Result<(Vec<SearchHit>, String, String), String> {
     if by_source.is_empty() {
         let detail = if errors.is_empty() {
             "no search endpoint returned usable links".into()
         } else {
             errors.join("; ")
         };
-        let hint = if !searx_requested {
-            " DuckDuckGo HTML/Lite may be blocked — set a SearXNG instance URL in Agent Capabilities if you have one."
+        let hint = if preferred_label == "DuckDuckGo" && !fell_back {
+            " DuckDuckGo HTML/Lite may be blocked — set a SearXNG instance URL or switch the search provider to Parallel or TinyFish in Agent Capabilities."
         } else {
             ""
         };
@@ -81,7 +190,7 @@ pub(super) async fn search_web(
     } else {
         engine.to_string()
     };
-    let merged = merge_sources(by_source, &query, limit);
+    let merged = merge_sources(by_source, query, limit);
     if merged.is_empty() {
         return Err(format!("Search returned no pages matching {query:?}."));
     }
@@ -98,6 +207,515 @@ fn strip_searxng_prefix(line: &str) -> String {
         let mut out: String = stripped.chars().take(MAX).collect();
         out.push('…');
         out
+    }
+}
+
+fn parallel_api_key(skills: &AgentSkills) -> Option<String> {
+    let from_settings = skills.web_search_parallel_api_key.trim();
+    if !from_settings.is_empty() {
+        return Some(from_settings.to_string());
+    }
+    std::env::var("PARALLEL_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn parallel_hits(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<Vec<SearchHit>, String> {
+    match parallel_api_key(skills) {
+        Some(api_key) => parallel_rest_hits(query, skills, limit, &api_key).await,
+        None => parallel_mcp_hits(query, limit).await,
+    }
+}
+
+async fn parallel_rest_hits(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+    api_key: &str,
+) -> Result<Vec<SearchHit>, String> {
+    let mut body = json!({
+        "objective": query,
+        "search_queries": [query],
+        "mode": skills.web_search_parallel_mode.as_str(),
+        "advanced_settings": {
+            "max_results": limit,
+        }
+    });
+
+    if let Some(location) = parallel_location(&skills.search_region()) {
+        body["advanced_settings"]["location"] = json!(location);
+    }
+    if let Some(after) = recency_after_date(skills.web_search_recency) {
+        body["advanced_settings"]["source_policy"] = json!({ "after_date": after });
+    }
+
+    let client = http::public_client();
+    let request = client
+        .post(PARALLEL_SEARCH_URL)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", api_key)
+        .json(&body);
+    let response_body = send_parallel_json(request, PARALLEL_TIMEOUT).await?;
+    Ok(parse_parallel_json(&response_body, limit))
+}
+
+/// Free Parallel Search MCP (`https://search.parallel.ai/mcp`) — no API key required.
+async fn parallel_mcp_hits(query: &str, limit: usize) -> Result<Vec<SearchHit>, String> {
+    let client = http::public_client();
+    let session_id = parallel_mcp_initialize(&client).await?;
+
+    let _ = client
+        .post(PARALLEL_MCP_URL)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Mcp-Session-Id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }))
+        .send()
+        .await;
+
+    let call_body = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "web_search",
+            "arguments": {
+                "objective": query,
+                "search_queries": [query]
+            }
+        }
+    });
+    let request = client
+        .post(PARALLEL_MCP_URL)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Mcp-Session-Id", &session_id)
+        .json(&call_body);
+    let response = timeout(PARALLEL_TIMEOUT, request.send())
+        .await
+        .map_err(|_| "Parallel MCP search timed out".to_string())?
+        .map_err(|error| format!("Parallel MCP search failed: {error}"))?;
+    let status = response.status().as_u16();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("Parallel MCP response was not text: {error}"))?;
+
+    let _ = client
+        .delete(PARALLEL_MCP_URL)
+        .header("Mcp-Session-Id", &session_id)
+        .send()
+        .await;
+
+    if status != 200 {
+        return Err(format!(
+            "Parallel MCP HTTP {status}: {}",
+            truncate_chars(&collapse_ws(&text), 160)
+        ));
+    }
+
+    let envelope: Value = serde_json::from_str(mcp_json_payload(&text)?)
+        .map_err(|error| format!("Invalid Parallel MCP JSON: {error}"))?;
+    if let Some(message) = envelope
+        .pointer("/error/message")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Err(format!("Parallel MCP: {}", truncate_chars(message, 160)));
+    }
+    let search_body = parallel_mcp_search_body(&envelope)?;
+    Ok(parse_parallel_json(&search_body, limit))
+}
+
+async fn parallel_mcp_initialize(client: &reqwest::Client) -> Result<String, String> {
+    let request = client
+        .post(PARALLEL_MCP_URL)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "tensorui",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            }
+        }));
+    let response = timeout(PARALLEL_TIMEOUT, request.send())
+        .await
+        .map_err(|_| "Parallel MCP initialize timed out".to_string())?
+        .map_err(|error| format!("Parallel MCP initialize failed: {error}"))?;
+    let session_id = response
+        .headers()
+        .get("mcp-session-id")
+        .or_else(|| response.headers().get("Mcp-Session-Id"))
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "Parallel MCP did not return Mcp-Session-Id".to_string())?;
+    let status = response.status().as_u16();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("Parallel MCP initialize body: {error}"))?;
+    if status != 200 {
+        return Err(format!(
+            "Parallel MCP initialize HTTP {status}: {}",
+            truncate_chars(&collapse_ws(&text), 160)
+        ));
+    }
+    Ok(session_id)
+}
+
+fn mcp_json_payload(raw: &str) -> Result<&str, String> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('{') {
+        return Ok(trimmed);
+    }
+    // Streamable HTTP may return SSE frames.
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if let Some(data) = line.strip_prefix("data:") {
+            let data = data.trim();
+            if data.starts_with('{') {
+                return Ok(data);
+            }
+        }
+    }
+    Err("Parallel MCP response had no JSON payload".into())
+}
+
+fn parallel_mcp_search_body(envelope: &Value) -> Result<Value, String> {
+    let content = envelope
+        .pointer("/result/content")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "Parallel MCP result missing content".to_string())?;
+    for item in content {
+        if item.get("type").and_then(|v| v.as_str()) != Some("text") {
+            continue;
+        }
+        let Some(text) = item.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<Value>(text) {
+            if value.get("results").is_some() {
+                return Ok(value);
+            }
+        }
+    }
+    Err("Parallel MCP result did not include search JSON".into())
+}
+
+async fn send_parallel_json(
+    request: reqwest::RequestBuilder,
+    wait: Duration,
+) -> Result<Value, String> {
+    let response = timeout(wait, request.send())
+        .await
+        .map_err(|_| "Parallel search timed out".to_string())?
+        .map_err(|error| format!("Parallel search failed: {error}"))?;
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Parallel response was not text: {error}"))?;
+    if status != 200 {
+        let detail = parallel_error_detail(&body).unwrap_or_else(|| {
+            let trimmed = collapse_ws(&body);
+            if trimmed.is_empty() {
+                format!("HTTP {status}")
+            } else {
+                format!("HTTP {status}: {}", truncate_chars(&trimmed, 160))
+            }
+        });
+        return Err(detail);
+    }
+    serde_json::from_str(&body).map_err(|error| format!("Invalid Parallel JSON: {error}"))
+}
+
+fn parallel_error_detail(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let message = value
+        .pointer("/error/message")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    Some(format!("Parallel API: {}", truncate_chars(message, 160)))
+}
+
+fn parse_parallel_json(body: &Value, limit: usize) -> Vec<SearchHit> {
+    let Some(results) = body.get("results").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut hits = Vec::new();
+    for item in results {
+        let url = item
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if url.is_empty() || reject_result_url(url) {
+            continue;
+        }
+        let title = item
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(collapse_ws)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| url.to_string());
+        let snippet = item
+            .get("excerpts")
+            .and_then(|v| v.as_array())
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(|part| part.as_str())
+                    .map(collapse_ws)
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" … ")
+            })
+            .unwrap_or_default();
+        let snippet = truncate_chars(&snippet, 1200);
+        if let Some(hit) = clean_hit(title, url.to_string(), snippet) {
+            hits.push(hit);
+            if hits.len() >= limit {
+                break;
+            }
+        }
+    }
+    hits
+}
+
+fn parallel_location(region: &str) -> Option<String> {
+    let region = region.trim().to_ascii_lowercase();
+    let country = region.split('-').next().unwrap_or("");
+    if country.len() == 2 && country != "wt" && country.bytes().all(|b| b.is_ascii_lowercase()) {
+        Some(country.to_string())
+    } else {
+        None
+    }
+}
+
+fn recency_after_date(value: WebSearchRecency) -> Option<String> {
+    let days = match value {
+        WebSearchRecency::Any => return None,
+        WebSearchRecency::Day => 1,
+        WebSearchRecency::Week => 7,
+        WebSearchRecency::Month => 30,
+        WebSearchRecency::Year => 365,
+    };
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let secs = now.saturating_sub(days * 86_400);
+    Some(unix_ymd(secs))
+}
+
+fn unix_ymd(secs: u64) -> String {
+    // Civil from days (Howard Hinnant) — UTC calendar date.
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+fn tinyfish_api_key(skills: &AgentSkills) -> Option<String> {
+    let from_settings = skills.web_search_tinyfish_api_key.trim();
+    if !from_settings.is_empty() {
+        return Some(from_settings.to_string());
+    }
+    std::env::var("TINYFISH_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn tinyfish_hits(
+    query: &str,
+    skills: &AgentSkills,
+    limit: usize,
+) -> Result<Vec<SearchHit>, String> {
+    let api_key = tinyfish_api_key(skills).ok_or_else(|| {
+        "TinyFish provider selected, but no API key is set. Add one under Agent Capabilities → Web search (free via TinyFish / Monid), or set the TINYFISH_API_KEY environment variable."
+            .to_string()
+    })?;
+
+    let mut params: Vec<(&str, String)> = vec![("query", query.to_string())];
+    if let Some((location, language)) = tinyfish_geo(&skills.search_region()) {
+        params.push(("location", location));
+        params.push(("language", language));
+    }
+    if let Some(minutes) = recency_minutes(skills.web_search_recency) {
+        params.push(("recency_minutes", minutes.to_string()));
+    }
+
+    let client = http::public_client();
+    let request = client
+        .get(TINYFISH_SEARCH_URL)
+        .header("X-API-Key", api_key)
+        .query(&params);
+    let response_body = send_tinyfish_json(request, TINYFISH_TIMEOUT).await?;
+    Ok(parse_tinyfish_json(&response_body, limit))
+}
+
+async fn send_tinyfish_json(
+    request: reqwest::RequestBuilder,
+    wait: Duration,
+) -> Result<Value, String> {
+    let response = timeout(wait, request.send())
+        .await
+        .map_err(|_| "TinyFish search timed out".to_string())?
+        .map_err(|error| format!("TinyFish search failed: {error}"))?;
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("TinyFish response was not text: {error}"))?;
+    if status != 200 {
+        let detail = tinyfish_error_detail(&body).unwrap_or_else(|| {
+            let trimmed = collapse_ws(&body);
+            if trimmed.is_empty() {
+                format!("HTTP {status}")
+            } else {
+                format!("HTTP {status}: {}", truncate_chars(&trimmed, 160))
+            }
+        });
+        return Err(detail);
+    }
+    serde_json::from_str(&body).map_err(|error| format!("Invalid TinyFish JSON: {error}"))
+}
+
+fn tinyfish_error_detail(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let message = value
+        .pointer("/error/message")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    let code = value
+        .pointer("/error/code")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    Some(match code {
+        Some(code) => format!("TinyFish API ({code}): {}", truncate_chars(message, 140)),
+        None => format!("TinyFish API: {}", truncate_chars(message, 160)),
+    })
+}
+
+fn parse_tinyfish_json(body: &Value, limit: usize) -> Vec<SearchHit> {
+    let Some(results) = body.get("results").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut hits = Vec::new();
+    for item in results {
+        let url = item
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if url.is_empty() || reject_result_url(url) {
+            continue;
+        }
+        let title = item
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(collapse_ws)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| url.to_string());
+        let mut snippet = item
+            .get("snippet")
+            .and_then(|v| v.as_str())
+            .map(collapse_ws)
+            .unwrap_or_default();
+        if let Some(site) = item
+            .get("site_name")
+            .and_then(|v| v.as_str())
+            .map(collapse_ws)
+            .filter(|s| !s.is_empty())
+        {
+            if snippet.is_empty() {
+                snippet = site;
+            } else if !snippet.to_ascii_lowercase().contains(&site.to_ascii_lowercase()) {
+                snippet = format!("{site} — {snippet}");
+            }
+        }
+        if let Some(date) = item
+            .get("date")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            snippet = if snippet.is_empty() {
+                date.to_string()
+            } else {
+                format!("{date} · {snippet}")
+            };
+        }
+        let snippet = truncate_chars(&snippet, 1200);
+        if let Some(hit) = clean_hit(title, url.to_string(), snippet) {
+            hits.push(hit);
+            if hits.len() >= limit {
+                break;
+            }
+        }
+    }
+    hits
+}
+
+fn tinyfish_geo(region: &str) -> Option<(String, String)> {
+    let region = region.trim().to_ascii_lowercase();
+    let mut parts = region.split('-');
+    let country = parts.next().unwrap_or("");
+    let lang = parts.next().unwrap_or("");
+    if country.len() != 2
+        || lang.len() != 2
+        || country == "wt"
+        || !country.bytes().all(|b| b.is_ascii_lowercase())
+        || !lang.bytes().all(|b| b.is_ascii_lowercase())
+    {
+        return None;
+    }
+    Some((country.to_ascii_uppercase(), lang.to_string()))
+}
+
+fn recency_minutes(value: WebSearchRecency) -> Option<u32> {
+    match value {
+        WebSearchRecency::Any => None,
+        WebSearchRecency::Day => Some(1_440),
+        WebSearchRecency::Week => Some(10_080),
+        WebSearchRecency::Month => Some(43_200),
+        WebSearchRecency::Year => Some(525_600),
     }
 }
 
@@ -973,6 +1591,8 @@ fn merge_sources(
     let mut scores: Vec<(f32, SearchHit)> = Vec::new();
     for (engine, hits) in sources {
         let weight = match engine.as_str() {
+            "parallel" => 1.35,
+            "tinyfish" => 1.35,
             "duckduckgo" => 1.2,
             "duckduckgo-post" => 1.15,
             "duckduckgo-lite" => 1.1,
@@ -1427,6 +2047,117 @@ mod tests {
         let hits = parse_searxng_html(html);
         assert!(hits.iter().any(|hit| hit.url == "https://x.ai/blog/grok"));
         assert!(hits.iter().any(|hit| hit.url.contains("help.x.com")));
+    }
+
+    #[test]
+    fn parses_tinyfish_json_results() {
+        let body = serde_json::json!({
+            "query": "web automation",
+            "page": 0,
+            "total_results": 2,
+            "results": [
+                {
+                    "position": 1,
+                    "site_name": "tinyfish.ai",
+                    "title": "TinyFish",
+                    "snippet": "AI web automation",
+                    "url": "https://tinyfish.ai"
+                },
+                {
+                    "position": 2,
+                    "site_name": "example.com",
+                    "title": "News",
+                    "snippet": "Breaking update",
+                    "url": "https://example.com/news",
+                    "date": "2026-08-01"
+                },
+                {
+                    "position": 3,
+                    "site_name": "bing.com",
+                    "title": "Junk",
+                    "snippet": "drop",
+                    "url": "https://www.bing.com/search?q=x"
+                }
+            ]
+        });
+        let hits = parse_tinyfish_json(&body, 6);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].url, "https://tinyfish.ai");
+        assert!(hits[0].snippet.contains("tinyfish.ai"));
+        assert_eq!(hits[1].url, "https://example.com/news");
+        assert!(hits[1].snippet.starts_with("2026-08-01"));
+    }
+
+    #[test]
+    fn tinyfish_geo_and_recency_helpers() {
+        assert_eq!(
+            tinyfish_geo("us-en"),
+            Some(("US".into(), "en".into()))
+        );
+        assert_eq!(tinyfish_geo("wt-wt"), None);
+        assert_eq!(recency_minutes(WebSearchRecency::Day), Some(1_440));
+        assert!(recency_minutes(WebSearchRecency::Any).is_none());
+    }
+
+    #[test]
+    fn parses_parallel_mcp_tool_envelope() {
+        let envelope = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "content": [{
+                    "type": "text",
+                    "text": "{\"search_id\":\"s1\",\"results\":[{\"url\":\"https://parallel.ai/\",\"title\":\"Parallel\",\"excerpts\":[\"Hello\"]}]}"
+                }]
+            }
+        });
+        let body = parallel_mcp_search_body(&envelope).unwrap();
+        let hits = parse_parallel_json(&body, 6);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].url, "https://parallel.ai/");
+    }
+
+    #[test]
+    fn parses_parallel_json_results() {
+        let body = serde_json::json!({
+            "search_id": "search_test",
+            "session_id": "session_test",
+            "results": [
+                {
+                    "url": "https://parallel.ai/products/search",
+                    "title": "Parallel Search",
+                    "excerpts": ["First excerpt.", "Second excerpt."]
+                },
+                {
+                    "url": "https://www.bing.com/search?q=x",
+                    "title": "Junk",
+                    "excerpts": ["should drop"]
+                },
+                {
+                    "url": "https://example.com/article",
+                    "title": null,
+                    "excerpts": ["Body text"]
+                }
+            ]
+        });
+        let hits = parse_parallel_json(&body, 6);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].url, "https://parallel.ai/products/search");
+        assert!(hits[0].snippet.contains("First excerpt"));
+        assert!(hits[0].snippet.contains("Second excerpt"));
+        assert_eq!(hits[1].url, "https://example.com/article");
+        assert_eq!(hits[1].title, "https://example.com/article");
+    }
+
+    #[test]
+    fn parallel_location_and_recency_helpers() {
+        assert_eq!(parallel_location("us-en").as_deref(), Some("us"));
+        assert_eq!(parallel_location("wt-wt"), None);
+        assert!(recency_after_date(WebSearchRecency::Any).is_none());
+        let week = recency_after_date(WebSearchRecency::Week).unwrap();
+        assert_eq!(week.len(), 10);
+        assert_eq!(&week[4..5], "-");
+        assert_eq!(unix_ymd(0), "1970-01-01");
     }
 
     #[test]

@@ -744,8 +744,20 @@ function resolveTurnSkills(mentionIds) {
       web_search_depth: WEB_SEARCH_DEPTHS.includes(settings.webSearchDepth)
         ? settings.webSearchDepth
         : DEFAULT_SETTINGS.webSearchDepth,
+      web_search_provider: WEB_SEARCH_PROVIDERS.includes(settings.webSearchProvider)
+        ? settings.webSearchProvider
+        : DEFAULT_SETTINGS.webSearchProvider,
       web_search_searxng: typeof settings.webSearchSearxng === 'string'
         ? settings.webSearchSearxng.trim()
+        : '',
+      web_search_parallel_api_key: typeof settings.webSearchParallelApiKey === 'string'
+        ? settings.webSearchParallelApiKey.trim()
+        : '',
+      web_search_parallel_mode: WEB_SEARCH_PARALLEL_MODES.includes(settings.webSearchParallelMode)
+        ? settings.webSearchParallelMode
+        : DEFAULT_SETTINGS.webSearchParallelMode,
+      web_search_tinyfish_api_key: typeof settings.webSearchTinyfishApiKey === 'string'
+        ? settings.webSearchTinyfishApiKey.trim()
         : '',
       web_search_max_results: Math.min(20, Math.max(1, Number(settings.webSearchResults) || 6)),
       web_search_region: /^[a-z]{2}-[a-z]{2}$/.test(settings.webSearchRegion)

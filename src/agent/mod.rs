@@ -309,6 +309,42 @@ pub enum WebSearchBackend {
     Wikipedia,
 }
 
+/// Which upstream the agent uses for `web_search`.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchProvider {
+    /// SearXNG when configured, otherwise DuckDuckGo HTML/Lite.
+    #[default]
+    Auto,
+    Duckduckgo,
+    Searxng,
+    /// Parallel Search API (`https://api.parallel.ai/v1/search`).
+    Parallel,
+    /// TinyFish Search API (`https://api.search.tinyfish.ai`), free via Monid partnership.
+    Tinyfish,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchParallelMode {
+    Turbo,
+    #[default]
+    Fast,
+    Basic,
+    Advanced,
+}
+
+impl WebSearchParallelMode {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Turbo => "turbo",
+            Self::Fast => "fast",
+            Self::Basic => "basic",
+            Self::Advanced => "advanced",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WebSearchSafeSearch {
@@ -392,7 +428,15 @@ pub struct AgentSkills {
     #[serde(default)]
     pub web_search_backend: WebSearchBackend,
     #[serde(default)]
+    pub web_search_provider: WebSearchProvider,
+    #[serde(default)]
     pub web_search_searxng: String,
+    #[serde(default)]
+    pub web_search_parallel_api_key: String,
+    #[serde(default)]
+    pub web_search_parallel_mode: WebSearchParallelMode,
+    #[serde(default)]
+    pub web_search_tinyfish_api_key: String,
     #[serde(default = "default_web_search_max_results")]
     pub web_search_max_results: usize,
     #[serde(default = "default_web_search_region")]
@@ -431,7 +475,11 @@ impl Default for AgentSkills {
             web_search: false,
             web_search_depth: WebSearchDepth::default(),
             web_search_backend: WebSearchBackend::default(),
+            web_search_provider: WebSearchProvider::default(),
             web_search_searxng: String::new(),
+            web_search_parallel_api_key: String::new(),
+            web_search_parallel_mode: WebSearchParallelMode::default(),
+            web_search_tinyfish_api_key: String::new(),
             web_search_max_results: default_web_search_max_results(),
             web_search_region: default_web_search_region(),
             web_search_safesearch: WebSearchSafeSearch::default(),
@@ -3717,7 +3765,34 @@ mod tests {
         });
         let next = search_call_overrides(&skills, &args);
         assert_eq!(next.web_search_backend, WebSearchBackend::Auto);
+        assert_eq!(next.web_search_provider, WebSearchProvider::Auto);
         assert_eq!(next.web_search_recency, WebSearchRecency::Week);
+    }
+
+    #[test]
+    fn web_search_deserializes_parallel_provider() {
+        let skills: AgentSkills = serde_json::from_value(json!({
+            "web_search": true,
+            "web_search_provider": "parallel",
+            "web_search_parallel_api_key": "pk_test",
+            "web_search_parallel_mode": "advanced"
+        }))
+        .unwrap();
+        assert_eq!(skills.web_search_provider, WebSearchProvider::Parallel);
+        assert_eq!(skills.web_search_parallel_api_key, "pk_test");
+        assert_eq!(skills.web_search_parallel_mode, WebSearchParallelMode::Advanced);
+    }
+
+    #[test]
+    fn web_search_deserializes_tinyfish_provider() {
+        let skills: AgentSkills = serde_json::from_value(json!({
+            "web_search": true,
+            "web_search_provider": "tinyfish",
+            "web_search_tinyfish_api_key": "tf_test"
+        }))
+        .unwrap();
+        assert_eq!(skills.web_search_provider, WebSearchProvider::Tinyfish);
+        assert_eq!(skills.web_search_tinyfish_api_key, "tf_test");
     }
 
     #[test]

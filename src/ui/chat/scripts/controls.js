@@ -1045,7 +1045,11 @@ function fillSettingsFormFromState() {
   document.getElementById('settingEnterSends').checked = settings.enterSends;
   document.getElementById('settingSkillWebSearch').checked = settings.skillWebSearch;
   document.getElementById('settingWebSearchDepth').value = settings.webSearchDepth || 'off';
+  document.getElementById('settingWebSearchProvider').value = settings.webSearchProvider || 'auto';
   document.getElementById('settingWebSearchSearxng').value = settings.webSearchSearxng || '';
+  document.getElementById('settingWebSearchParallelApiKey').value = settings.webSearchParallelApiKey || '';
+  document.getElementById('settingWebSearchParallelMode').value = settings.webSearchParallelMode || 'fast';
+  document.getElementById('settingWebSearchTinyfishApiKey').value = settings.webSearchTinyfishApiKey || '';
   document.getElementById('settingWebSearchResults').value = String(settings.webSearchResults || 6);
   document.getElementById('settingWebSearchRegion').value = settings.webSearchRegion || 'us-en';
   document.getElementById('settingWebSearchSafeSearch').value = settings.webSearchSafeSearch || 'moderate';
@@ -1096,7 +1100,11 @@ function readSettingsForm() {
     enterSends: document.getElementById('settingEnterSends').checked,
     skillWebSearch: document.getElementById('settingSkillWebSearch').checked,
     webSearchDepth: document.getElementById('settingWebSearchDepth').value,
+    webSearchProvider: document.getElementById('settingWebSearchProvider').value,
     webSearchSearxng: document.getElementById('settingWebSearchSearxng').value.trim(),
+    webSearchParallelApiKey: document.getElementById('settingWebSearchParallelApiKey').value.trim(),
+    webSearchParallelMode: document.getElementById('settingWebSearchParallelMode').value,
+    webSearchTinyfishApiKey: document.getElementById('settingWebSearchTinyfishApiKey').value.trim(),
     webSearchResults: searchResultsRaw,
     webSearchRegion: searchRegionRaw,
     webSearchSafeSearch: document.getElementById('settingWebSearchSafeSearch').value,
@@ -1199,10 +1207,17 @@ function syncWebSearchControls() {
   const enabled = document.getElementById('settingSkillWebSearch').checked;
   const options = document.getElementById('webSearchOptions');
   const toggle = document.getElementById('btnWebSearchAdvanced');
+  const provider = document.getElementById('settingWebSearchProvider')?.value || 'auto';
   if (toggle) toggle.disabled = !enabled;
   if (!options) return;
   options.querySelectorAll('input, select').forEach((control) => {
     control.disabled = !enabled;
+  });
+  options.querySelectorAll('[data-web-search-provider]').forEach((row) => {
+    const tokens = String(row.dataset.webSearchProvider || '')
+      .split(/\s+/)
+      .filter(Boolean);
+    row.hidden = !tokens.includes(provider);
   });
   options.style.opacity = enabled ? '' : '0.55';
 }

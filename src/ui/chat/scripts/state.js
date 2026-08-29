@@ -59,6 +59,8 @@ function syncIdentityTitles(privacyOn) {
 
 const THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'max'];
 const WEB_SEARCH_DEPTHS = ['auto', 'off', 'light', 'standard', 'deep'];
+const WEB_SEARCH_PROVIDERS = ['auto', 'parallel', 'tinyfish', 'searxng', 'duckduckgo'];
+const WEB_SEARCH_PARALLEL_MODES = ['turbo', 'fast', 'basic', 'advanced'];
 const WEB_SEARCH_SAFESEARCH = ['on', 'moderate', 'off'];
 const WEB_SEARCH_RECENCIES = ['any', 'day', 'week', 'month', 'year'];
 const DEEP_RESEARCH_MODES = ['off', 'long', 'brief'];
@@ -87,7 +89,11 @@ const DEFAULT_SETTINGS = {
   enterSends: true,
   skillWebSearch: true,
   webSearchDepth: 'off', // off | auto | light | standard | deep
+  webSearchProvider: 'auto', // auto | parallel | tinyfish | searxng | duckduckgo
   webSearchSearxng: '',
+  webSearchParallelApiKey: '',
+  webSearchParallelMode: 'fast', // turbo | fast | basic | advanced
+  webSearchTinyfishApiKey: '',
   webSearchResults: 6,
   webSearchRegion: 'us-en',
   webSearchSafeSearch: 'moderate',
@@ -1356,7 +1362,19 @@ function normalizeSettings(parsed) {
     webSearchDepth: WEB_SEARCH_DEPTHS.includes(parsed.webSearchDepth)
       ? parsed.webSearchDepth
       : DEFAULT_SETTINGS.webSearchDepth,
+    webSearchProvider: WEB_SEARCH_PROVIDERS.includes(parsed.webSearchProvider)
+      ? parsed.webSearchProvider
+      : DEFAULT_SETTINGS.webSearchProvider,
     webSearchSearxng: normalizeSearxngUrl(parsed.webSearchSearxng),
+    webSearchParallelApiKey: typeof parsed.webSearchParallelApiKey === 'string'
+      ? parsed.webSearchParallelApiKey.trim()
+      : '',
+    webSearchParallelMode: WEB_SEARCH_PARALLEL_MODES.includes(parsed.webSearchParallelMode)
+      ? parsed.webSearchParallelMode
+      : DEFAULT_SETTINGS.webSearchParallelMode,
+    webSearchTinyfishApiKey: typeof parsed.webSearchTinyfishApiKey === 'string'
+      ? parsed.webSearchTinyfishApiKey.trim()
+      : '',
     webSearchResults: Number.isFinite(searchResults)
       ? Math.min(20, Math.max(1, Math.round(searchResults)))
       : DEFAULT_SETTINGS.webSearchResults,
