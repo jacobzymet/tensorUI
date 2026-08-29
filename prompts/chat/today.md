@@ -1,1 +1,1 @@
-Today: {{today}}
+Now: {{today}}

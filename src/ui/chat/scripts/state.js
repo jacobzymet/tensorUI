@@ -1834,18 +1834,20 @@ function currentProjectId() {
   return activeProjectId;
 }
 
-/** Local calendar date only — no clock, so the system prefix is stable all day. */
+/** Local date and clock so the model knows the current time of day. */
 function formatPromptToday(now = new Date()) {
   const weekday = now.toLocaleDateString('en-US', { weekday: 'short' });
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
+  const hour = String(now.getHours()).padStart(2, '0');
+  const minute = String(now.getMinutes()).padStart(2, '0');
   const offsetMin = -now.getTimezoneOffset();
   const sign = offsetMin >= 0 ? '+' : '-';
   const abs = Math.abs(offsetMin);
-  const hours = String(Math.floor(abs / 60)).padStart(2, '0');
-  const minutes = String(abs % 60).padStart(2, '0');
-  return `${year}-${month}-${day} (${weekday}, UTC${sign}${hours}:${minutes})`;
+  const tzHours = String(Math.floor(abs / 60)).padStart(2, '0');
+  const tzMinutes = String(abs % 60).padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute} (${weekday}, UTC${sign}${tzHours}:${tzMinutes})`;
 }
 
 function buildSystemPrompt(projectIdOverride, opts = {}) {
@@ -1911,7 +1913,7 @@ function buildSystemPrompt(projectIdOverride, opts = {}) {
   }
 
   const base = P['chat.base'] || 'You are a helpful assistant.';
-  const today = fill(P['chat.today'] || 'Today: {{today}}', { today: formatPromptToday() });
+  const today = fill(P['chat.today'] || 'Now: {{today}}', { today: formatPromptToday() });
   if (parts.length === 0) return base + '\n\n' + today;
   return base + '\n\n' + today + '\n\n' + parts.join('\n\n');
 }
