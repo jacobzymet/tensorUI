@@ -820,25 +820,24 @@ function skillLiveVerb(name, args) {
   return 'Running';
 }
 
+function liveToolStatusText(part) {
+  if (!part) return '';
+  const verb = skillLiveVerb(part.name, part);
+  const detail = String(part.detail || '').trim();
+  return detail ? (verb + ' ' + detail + '…') : (verb + '…');
+}
+
 function liveToolStatusLabel(stream, payload) {
   const tools = (stream && stream.timeline ? stream.timeline : []).filter((part) => part && part.type === 'tool' && part.live);
   const running = tools.find((part) => part.executing);
-  if (running) {
-    const verb = skillLiveVerb(running.name, running);
-    const path = String(running.detail || '').trim();
-    return path ? (verb + ' ' + path + '…') : (verb + '…');
-  }
+  if (running) return liveToolStatusText(running);
   const pending = tools.filter((part) => part.approval === 'pending').length;
   if (pending) {
     return pending === 1 ? 'Waiting for your approval…' : ('Waiting for approval · ' + pending + ' files');
   }
-  const drafting = tools[tools.length - 1];
-  if (drafting) {
-    const label = skillLabel(drafting.name, drafting.args || payload && payload.arguments || {});
-    const path = String(drafting.detail || '').trim();
-    return path ? ('Drafting ' + path + '…') : (label + '…');
-  }
-  if (payload && payload.name) return skillLabel(payload.name, payload.arguments || {}) + '…';
+  const live = tools[tools.length - 1];
+  if (live) return liveToolStatusText(live);
+  if (payload && payload.name) return skillLiveVerb(payload.name, payload.arguments || {}) + '…';
   return 'Processing…';
 }
 

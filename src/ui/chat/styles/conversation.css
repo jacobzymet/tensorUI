@@ -568,8 +568,8 @@
 .agent-final-answer {
   min-width: 0;
 }
-.msg-bubble .agent-final-answer img,
-.msg-bubble p img {
+.msg-bubble .agent-final-answer img:not(.md-cite-favicon),
+.msg-bubble p img:not(.md-cite-favicon) {
   display: block;
   max-width: min(100%, 36rem);
   width: auto;
@@ -596,10 +596,14 @@
 }
 .msg-bubble a.md-cite .md-cite-favicon {
   display: inline-block;
-  width: 0.9em;
-  height: 0.9em;
-  margin-right: 0.28em;
-  vertical-align: -0.12em;
+  width: 0.85em;
+  height: 0.85em;
+  max-width: 0.85em;
+  max-height: 0.85em;
+  margin: 0 0.22em 0 0;
+  padding: 0;
+  vertical-align: -0.15em;
+  border: 0;
   border-radius: 2px;
   object-fit: contain;
   background: color-mix(in oklch, var(--color-ink) 6%, transparent);
