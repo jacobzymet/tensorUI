@@ -146,12 +146,16 @@
   gap: 0.1rem;
 }
 .trace-sidebar-head .trace-pane-fold {
+  display: none;
   width: 1.85rem;
   min-width: 1.85rem;
   height: 1.85rem;
   min-height: 1.85rem;
   padding: 0;
   color: var(--color-muted);
+}
+.trace-sidebar.has-members .trace-sidebar-head .trace-pane-fold {
+  display: inline-flex;
 }
 .trace-sidebar-head .trace-pane-fold:hover { color: var(--color-ink); }
 .trace-pane-fold .think-chevron {
@@ -1313,6 +1317,7 @@ html[data-theme="light"] .agent-process-note {
   max-width: var(--thread-max);
   margin: 0 auto;
   width: 100%;
+  min-width: 0;
   /* Extra bottom pad so the last reply’s model/tok/s line clears the composer fade. */
   padding: var(--space-lg) clamp(1rem, 4vw, 2rem) calc(var(--space-md) + 2.4rem);
 }
@@ -1321,12 +1326,14 @@ html[data-theme="light"] .agent-process-note {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  min-width: 0;
 }
 .msg {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
   width: 100%;
+  min-width: 0;
 }
 .msg.motion-enter,
 .agent-step.motion-enter {
@@ -1336,6 +1343,7 @@ html[data-theme="light"] .agent-process-note {
 .msg-role-assistant { align-items: flex-start; }
 .msg-bubble {
   max-width: 100%;
+  min-width: 0;
   padding: 0.85rem 1.2rem;
   border-radius: var(--radius-3xl);
   font-size: var(--text-md);
@@ -1506,6 +1514,8 @@ html[data-theme="light"] .agent-process-note {
 }
 .msg-bubble .md-code-block {
   margin: 0 0 0.75rem;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-lg);
   background: var(--color-graphite);
@@ -1558,15 +1568,19 @@ html[data-theme="light"] .agent-process-note {
 .msg-bubble .md-code-copy.is-copied {
   color: var(--color-ok, var(--color-accent));
 }
+.msg-bubble pre {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
 .msg-bubble pre.md-code {
   margin: 0;
   padding: 0.7rem 0.85rem;
-  overflow-x: auto;
   background: transparent;
   border: 0;
   border-radius: 0;
 }
-.msg-bubble pre.md-code code {
+.msg-bubble pre code {
   background: none;
   padding: 0;
   font-size: var(--text-xs);

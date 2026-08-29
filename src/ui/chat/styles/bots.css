@@ -112,6 +112,8 @@
 .msg.is-bot-chat.msg-role-assistant > .msg-bubble {
   max-width: 85%;
   width: auto;
+  min-width: 0;
+  overflow-x: clip;
   padding: 0.85rem 1.2rem;
   border: 1px solid color-mix(in oklch, var(--color-rule) 78%, transparent);
   border-radius: var(--radius-3xl);

@@ -191,6 +191,7 @@ function syncComposerStreamUi() {
     const convo = conversations.find((c) => c.id === activeId);
     if (convo && getOutboundQueue(activeId).length) renderOutboundQueue(convo);
   }
+  if (typeof syncSidebarBusyUi === 'function') syncSidebarBusyUi();
 }
 
 function getOutboundQueue(convoId) {

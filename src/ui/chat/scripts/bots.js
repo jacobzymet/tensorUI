@@ -790,6 +790,7 @@ async function runBotsOutbound(convo, item, userMessage, previousTitle) {
   }
   if (!stopped) maybeSendNextQueued(convo.id);
   if (activeId === convo.id) renderThread(convo);
+  if (typeof renderSidebar === 'function') renderSidebar();
   if (typeof flushBotNavigation === 'function') flushBotNavigation();
 }
 
@@ -1196,7 +1197,10 @@ function saveTraceSplitPrefs() {
 
 function applyTraceSplitLayout() {
   const show = !!(traceSidebar && traceSidebar.classList.contains('has-members'));
-  if (btnTraceActivityFold) btnTraceActivityFold.hidden = !show;
+  if (btnTraceActivityFold) {
+    btnTraceActivityFold.hidden = !show;
+    btnTraceActivityFold.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
   if (traceSplitHandle) {
     traceSplitHandle.hidden = !show;
     traceSplitHandle.setAttribute('aria-valuenow', String(Math.round(traceActivityShare * 100)));

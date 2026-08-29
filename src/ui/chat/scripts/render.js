@@ -2245,6 +2245,24 @@ function bindConvoListReorder(listEl) {
   });
 }
 
+function syncSidebarBusyUi() {
+  document.querySelectorAll('.convo-item[data-convo-id]').forEach((item) => {
+    const busy = typeof isConvoBusy === 'function' && isConvoBusy(item.dataset.convoId);
+    item.classList.toggle('is-streaming', busy);
+    if (busy) item.setAttribute('aria-busy', 'true');
+    else item.removeAttribute('aria-busy');
+    let ring = item.querySelector(':scope > .convo-busy-ring');
+    if (busy && !ring) {
+      ring = document.createElement('span');
+      ring.className = 'convo-busy-ring';
+      ring.setAttribute('aria-hidden', 'true');
+      item.prepend(ring);
+    } else if (!busy && ring) {
+      ring.remove();
+    }
+  });
+}
+
 function createConvoItem(convo, { nested = false } = {}) {
   const item = document.createElement('div');
   item.className = 'convo-item' + (convo.id === activeId && mainView !== 'projects' ? ' is-active' : '');
