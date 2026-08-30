@@ -26,33 +26,6 @@ pub fn url_stays_in_webview(app_origin: &str, url: &str) -> bool {
         || url.starts_with(&(origin.to_owned() + "#"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn openable_urls() {
-        assert!(is_openable_external_url("https://x.ai/news"));
-        assert!(is_openable_external_url("http://127.0.0.1:8787/"));
-        assert!(is_openable_external_url("mailto:hi@example.com"));
-        assert!(!is_openable_external_url("javascript:alert(1)"));
-        assert!(!is_openable_external_url("file:///etc/passwd"));
-        assert!(!is_openable_external_url("https://x.ai/news\n-a"));
-    }
-
-    #[test]
-    fn webview_origin_check() {
-        let origin = "http://127.0.0.1:8787";
-        assert!(url_stays_in_webview(
-            origin,
-            "http://127.0.0.1:8787/settings"
-        ));
-        assert!(url_stays_in_webview(origin, "http://127.0.0.1:8787"));
-        assert!(!url_stays_in_webview(origin, "https://x.ai/blog"));
-        assert!(!url_stays_in_webview(origin, "http://127.0.0.1:8787.evil"));
-    }
-}
-
 pub fn open_in_browser(url: &str) -> io::Result<()> {
     if !is_openable_external_url(url) {
         return Err(io::Error::new(
@@ -91,4 +64,31 @@ pub fn open_in_file_manager(path: &Path) -> std::io::Result<()> {
         Command::new("xdg-open").arg(path).spawn()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openable_urls() {
+        assert!(is_openable_external_url("https://x.ai/news"));
+        assert!(is_openable_external_url("http://127.0.0.1:8787/"));
+        assert!(is_openable_external_url("mailto:hi@example.com"));
+        assert!(!is_openable_external_url("javascript:alert(1)"));
+        assert!(!is_openable_external_url("file:///etc/passwd"));
+        assert!(!is_openable_external_url("https://x.ai/news\n-a"));
+    }
+
+    #[test]
+    fn webview_origin_check() {
+        let origin = "http://127.0.0.1:8787";
+        assert!(url_stays_in_webview(
+            origin,
+            "http://127.0.0.1:8787/settings"
+        ));
+        assert!(url_stays_in_webview(origin, "http://127.0.0.1:8787"));
+        assert!(!url_stays_in_webview(origin, "https://x.ai/blog"));
+        assert!(!url_stays_in_webview(origin, "http://127.0.0.1:8787.evil"));
+    }
 }

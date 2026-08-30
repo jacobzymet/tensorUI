@@ -88,9 +88,9 @@ fn main() -> Result<()> {
         server.abort();
         match runtime.block_on(server) {
             Ok(Ok(())) | Err(_) => {}
-            Ok(Err(error)) => return Err(error.into()),
+            Ok(Err(error)) => return Err(error),
         }
-        window_result.map(|()| ())
+        window_result
     };
 
     if let Ok(mut app) = shared.lock() {

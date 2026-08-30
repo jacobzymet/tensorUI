@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use scraper::{Html, Selector};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::time::timeout;
 
 use super::{AgentSkills, SearchHit, WebSearchProvider, WebSearchRecency, WebSearchSafeSearch};
@@ -411,10 +411,10 @@ fn parallel_mcp_search_body(envelope: &Value) -> Result<Value, String> {
         let Some(text) = item.get("text").and_then(|v| v.as_str()) else {
             continue;
         };
-        if let Ok(value) = serde_json::from_str::<Value>(text) {
-            if value.get("results").is_some() {
-                return Ok(value);
-            }
+        if let Ok(value) = serde_json::from_str::<Value>(text)
+            && value.get("results").is_some()
+        {
+            return Ok(value);
         }
     }
     Err("Parallel MCP result did not include search JSON".into())
@@ -666,7 +666,10 @@ fn parse_tinyfish_json(body: &Value, limit: usize) -> Vec<SearchHit> {
         {
             if snippet.is_empty() {
                 snippet = site;
-            } else if !snippet.to_ascii_lowercase().contains(&site.to_ascii_lowercase()) {
+            } else if !snippet
+                .to_ascii_lowercase()
+                .contains(&site.to_ascii_lowercase())
+            {
                 snippet = format!("{site} — {snippet}");
             }
         }
@@ -964,7 +967,7 @@ fn searxng_query_params(
     let mut params = vec![
         ("q", query.to_string()),
         ("categories", "general".into()),
-        ("language", searxng_language(&skills.search_region()).into()),
+        ("language", searxng_language(&skills.search_region())),
         (
             "safesearch",
             searxng_safesearch(skills.web_search_safesearch).into(),
@@ -1022,7 +1025,11 @@ async fn searxng_json_hits(
     skills: &AgentSkills,
     limit: usize,
 ) -> Result<Vec<SearchHit>, String> {
-    let body = send_json(searxng_request(endpoint, query, skills, true), SEARXNG_TIMEOUT).await?;
+    let body = send_json(
+        searxng_request(endpoint, query, skills, true),
+        SEARXNG_TIMEOUT,
+    )
+    .await?;
     Ok(parse_searxng_json(&body, limit))
 }
 
@@ -1031,7 +1038,12 @@ async fn searxng_html_hits(
     query: &str,
     skills: &AgentSkills,
 ) -> Result<Vec<SearchHit>, String> {
-    let html = send_html(searxng_request(endpoint, query, skills, false), false, SEARXNG_TIMEOUT).await?;
+    let html = send_html(
+        searxng_request(endpoint, query, skills, false),
+        false,
+        SEARXNG_TIMEOUT,
+    )
+    .await?;
     Ok(parse_searxng_html(&html))
 }
 
@@ -1567,7 +1579,7 @@ fn decode_b64(payload: &str) -> Option<Vec<u8>> {
             .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
     );
     let mut padded = payload.replace('-', "+").replace('_', "/");
-    while !padded.is_empty() && padded.len() % 4 != 0 {
+    while !padded.is_empty() && !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     ENGINE.decode(padded).ok()
@@ -2090,10 +2102,7 @@ mod tests {
 
     #[test]
     fn tinyfish_geo_and_recency_helpers() {
-        assert_eq!(
-            tinyfish_geo("us-en"),
-            Some(("US".into(), "en".into()))
-        );
+        assert_eq!(tinyfish_geo("us-en"), Some(("US".into(), "en".into())));
         assert_eq!(tinyfish_geo("wt-wt"), None);
         assert_eq!(recency_minutes(WebSearchRecency::Day), Some(1_440));
         assert!(recency_minutes(WebSearchRecency::Any).is_none());
@@ -2275,7 +2284,7 @@ mod tests {
                 .all(|hit| !hit.url.contains("hellomagazine.com")
                     && !hit.url.contains("news.google.com"))
         );
-        assert_eq!(ranked[0].url.contains("reuters.com"), true);
+        assert!(ranked[0].url.contains("reuters.com"));
     }
 
     #[tokio::test]

@@ -584,12 +584,9 @@ pub fn find_browser_executable() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    for candidate in browser_candidates() {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    browser_candidates()
+        .into_iter()
+        .find(|candidate| candidate.is_file())
 }
 
 fn browser_candidates() -> Vec<PathBuf> {

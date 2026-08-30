@@ -13,7 +13,10 @@ use crate::http;
 const MAX_IMAGE_BYTES: usize = 1_500_000;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub async fn load_image(args: &Value, workspace_root: &str) -> Result<(Vec<u8>, &'static str), String> {
+pub async fn load_image(
+    args: &Value,
+    workspace_root: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
@@ -28,7 +31,9 @@ pub async fn load_image(args: &Value, workspace_root: &str) -> Result<(Vec<u8>, 
         (Some(path), None) => load_workspace_image(workspace_root, path),
         (None, Some(url)) => load_remote_image(url).await,
         (Some(_), Some(_)) => Err("Pass either \"path\" or \"url\", not both.".into()),
-        (None, None) => Err("show_image requires a workspace \"path\" or an http(s) \"url\".".into()),
+        (None, None) => {
+            Err("show_image requires a workspace \"path\" or an http(s) \"url\".".into())
+        }
     }
 }
 
@@ -41,7 +46,10 @@ pub fn tool_summary(args: &Value) -> String {
         .to_string()
 }
 
-fn load_workspace_image(workspace_root: &str, path: &str) -> Result<(Vec<u8>, &'static str), String> {
+fn load_workspace_image(
+    workspace_root: &str,
+    path: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
     let ws = Workspace::open(workspace_root)?;
     let abs = ws.resolve(path)?;
     let meta = std::fs::symlink_metadata(&abs).map_err(|_| format!("File not found: {path}"))?;
@@ -58,20 +66,20 @@ fn load_workspace_image(workspace_root: &str, path: &str) -> Result<(Vec<u8>, &'
         ));
     }
     let bytes = std::fs::read(&abs).map_err(|err| format!("Could not read {path}: {err}"))?;
-    let mime = sniff_image_mime(&bytes).ok_or_else(|| {
-        "That file is not a PNG, JPEG, GIF, or WebP image.".to_string()
-    })?;
+    let mime = sniff_image_mime(&bytes)
+        .ok_or_else(|| "That file is not a PNG, JPEG, GIF, or WebP image.".to_string())?;
     Ok((bytes, mime))
 }
 
 async fn load_remote_image(url: &str) -> Result<(Vec<u8>, &'static str), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|_| {
-        format!("Invalid URL '{url}'. Use an absolute http(s) address.")
-    })?;
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| format!("Invalid URL '{url}'. Use an absolute http(s) address."))?;
     match parsed.scheme() {
         "http" | "https" => {}
         other => {
-            return Err(format!("Refusing {other} URL. show_image only fetches http(s)."));
+            return Err(format!(
+                "Refusing {other} URL. show_image only fetches http(s)."
+            ));
         }
     }
     let response = timeout(FETCH_TIMEOUT, http::safe_public_get(parsed.as_str(), true))
@@ -95,9 +103,8 @@ async fn load_remote_image(url: &str) -> Result<(Vec<u8>, &'static str), String>
     })
     .await
     .map_err(|_| "Image fetch timed out.".to_string())??;
-    let mime = sniff_image_mime(&bytes).ok_or_else(|| {
-        "That URL is not a PNG, JPEG, GIF, or WebP image.".to_string()
-    })?;
+    let mime = sniff_image_mime(&bytes)
+        .ok_or_else(|| "That URL is not a PNG, JPEG, GIF, or WebP image.".to_string())?;
     Ok((bytes, mime))
 }
 
@@ -133,7 +140,10 @@ mod tests {
         let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
         png.extend_from_slice(&[0; 8]);
         assert_eq!(sniff_image_mime(&png), Some("image/png"));
-        assert_eq!(sniff_image_mime(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(
+            sniff_image_mime(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some("image/jpeg")
+        );
         assert_eq!(sniff_image_mime(b"GIF89a...."), Some("image/gif"));
         let mut webp = b"RIFF".to_vec();
         webp.extend_from_slice(&[16, 0, 0, 0]);

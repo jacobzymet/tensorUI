@@ -569,11 +569,11 @@ impl App {
     pub fn reset_ui_appearance(&mut self) -> Result<(), String> {
         let before = self.config.ui.clone();
         self.config.ui.reset_appearance();
-        if self.config.ui != before {
-            if let Err(error) = self.try_persist_config() {
-                self.config.ui = before;
-                return Err(error);
-            }
+        if self.config.ui != before
+            && let Err(error) = self.try_persist_config()
+        {
+            self.config.ui = before;
+            return Err(error);
         }
         Ok(())
     }
