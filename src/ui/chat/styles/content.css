@@ -905,6 +905,10 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   gap: 0.75rem 1.25rem;
   align-items: start;
 }
+.settings-row[hidden],
+.field-hint[hidden] {
+  display: none !important;
+}
 .settings-row-stack {
   display: grid;
   gap: 0.4rem;
