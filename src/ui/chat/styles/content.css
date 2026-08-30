@@ -891,6 +891,11 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   display: grid;
   gap: 1rem;
 }
+.capability-advanced-panel .capability-advanced {
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
+}
 .capability-advanced-panel.is-collapsed {
   display: none;
 }

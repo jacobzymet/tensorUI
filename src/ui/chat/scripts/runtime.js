@@ -3484,6 +3484,12 @@ document.getElementById('btnWebSearchAdvanced')?.addEventListener('click', () =>
   if (!toggle || toggle.disabled) return;
   setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
 });
+document.getElementById('btnWebSearchMore')?.addEventListener('click', () => {
+  const toggle = document.getElementById('btnWebSearchMore');
+  const panel = document.getElementById('webSearchMoreOptions');
+  if (!toggle || toggle.disabled) return;
+  setCapabilityAdvancedOpen(toggle, panel, toggle.getAttribute('aria-expanded') !== 'true');
+});
 document.getElementById('settingSkillFetchUrl').addEventListener('change', syncFetchUrlControls);
 document.getElementById('btnFetchUrlAdvanced')?.addEventListener('click', () => {
   const toggle = document.getElementById('btnFetchUrlAdvanced');

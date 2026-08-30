@@ -1208,16 +1208,31 @@ function syncWebSearchControls() {
   const options = document.getElementById('webSearchOptions');
   const toggle = document.getElementById('btnWebSearchAdvanced');
   const provider = document.getElementById('settingWebSearchProvider')?.value || 'auto';
+  const parallelKey = (document.getElementById('settingWebSearchParallelApiKey')?.value || '').trim();
+  const depth = document.getElementById('settingWebSearchDepth')?.value || 'off';
+  const moreToggle = document.getElementById('btnWebSearchMore');
   if (toggle) toggle.disabled = !enabled;
+  if (moreToggle) moreToggle.disabled = !enabled;
   if (!options) return;
   options.querySelectorAll('input, select').forEach((control) => {
     control.disabled = !enabled;
   });
-  options.querySelectorAll('[data-web-search-provider]').forEach((row) => {
-    const tokens = String(row.dataset.webSearchProvider || '')
+  options.querySelectorAll('[data-web-search-provider]').forEach((el) => {
+    const tokens = String(el.dataset.webSearchProvider || '')
       .split(/\s+/)
       .filter(Boolean);
-    row.hidden = !tokens.includes(provider);
+    el.hidden = !tokens.includes(provider);
+  });
+  options.querySelectorAll('[data-web-search-when]').forEach((el) => {
+    if (el.hidden) return;
+    const when = el.dataset.webSearchWhen;
+    if (when === 'parallel-keyed') {
+      el.hidden = provider !== 'parallel' || !parallelKey;
+    } else if (when === 'safesearch') {
+      el.hidden = provider === 'parallel' || provider === 'tinyfish';
+    } else if (when === 'page-chars') {
+      el.hidden = depth === 'off';
+    }
   });
   options.style.opacity = enabled ? '' : '0.55';
 }
