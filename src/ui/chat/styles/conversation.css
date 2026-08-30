@@ -1267,7 +1267,7 @@ html[data-theme="light"] .agent-process-note {
   padding-bottom: clamp(1rem, 8vh, 4.5rem);
 }
 /* Settle the greeting cluster only — including the composer made it
-   slide in from a low/left first paint when returning from Server. */
+   slide in from a low/left first paint after route changes. */
 .empty-state-inner > .orb-mark,
 .empty-state-inner > .empty-eyebrow,
 .empty-state-inner > .empty-greeting,

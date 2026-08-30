@@ -6,10 +6,31 @@ function showSettingsPane(pane) {
     el.classList.toggle('is-active', el.dataset.settingsPane === pane);
   });
   const scroll = document.getElementById('settingsScroll');
-  if (scroll) scroll.scrollTop = 0;
+  document.querySelector('.settings-main')?.classList.toggle('is-provider-pane', pane === 'providers');
+  if (scroll) {
+    scroll.classList.toggle('is-provider-pane', pane === 'providers');
+    scroll.scrollTop = 0;
+  }
+  setProviderSettingsFrameActive(pane === 'providers');
   if (pane === 'data') {
     refreshLocalDataPane();
     refreshSettingsDataSummary();
+  }
+}
+
+function setProviderSettingsFrameActive(active) {
+  const frame = document.getElementById('settingsProvidersFrame');
+  if (!frame) return;
+  if (active) {
+    if (frame.dataset.loaded !== '1') {
+      frame.dataset.loaded = '1';
+      frame.src = frame.dataset.src;
+    }
+    return;
+  }
+  if (frame.dataset.loaded === '1') {
+    frame.src = 'about:blank';
+    delete frame.dataset.loaded;
   }
 }
 
@@ -1176,7 +1197,7 @@ function syncSettingsSaveButton({ saved = false, saving = false, failed = false 
   btn.setAttribute('aria-label', dirty ? 'Save settings' : 'No changes to save');
 }
 
-function openSettings() {
+function openSettings(pane = 'personalization') {
   fillSettingsFormFromState();
   setCapabilityAdvancedOpen(
     document.getElementById('btnWebSearchAdvanced'),
@@ -1189,10 +1210,11 @@ function openSettings() {
     false
   );
   refreshLocalDataPane();
-  showSettingsPane('personalization');
+  showSettingsPane(pane);
   openBackdrop(settingsModal);
   syncSettingsSaveButton();
-  document.getElementById('settingName').focus();
+  if (pane === 'personalization') document.getElementById('settingName').focus();
+  else document.querySelector(`.settings-nav-btn[data-settings-pane="${pane}"]`)?.focus();
   loadUserSkills();
 }
 
@@ -1287,6 +1309,7 @@ function syncAttachmentFallbackControls() {
 }
 
 function closeSettings() {
+  setProviderSettingsFrameActive(false);
   closeBackdrop(settingsModal);
   hideSkillEditor();
 }

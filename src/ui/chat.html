@@ -102,14 +102,6 @@
       </div>
       <div class="sidebar-footer">
         <div class="sidebar-utility-panel">
-          <div class="sidebar-utility-row sidebar-server-row">
-            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="7" x="3" y="3" rx="2"/><rect width="18" height="7" x="3" y="14" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
-            <span class="sidebar-utility-copy">
-              <span class="sidebar-utility-label">Server</span>
-              <span class="sidebar-utility-detail sidebar-server-provider" id="serverProviderName">No provider</span>
-            </span>
-            <span id="serverChip" class="status-chip sidebar-server-status status-stopped">Not configured</span>
-          </div>
           <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-encryption-indicator is-hidden" id="encryptionIndicator" aria-label="Open encryption settings" aria-live="polite" title="Open encryption settings">
             <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><rect width="8" height="6" x="8" y="10" rx="1"/><path d="M10 10V8a2 2 0 0 1 4 0v2"/></svg>
             <span class="sidebar-utility-copy">
@@ -118,24 +110,13 @@
             </span>
             <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
-          <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-footer-prefs" id="btnSettings">
+          <button type="button" class="btn btn-ghost sidebar-utility-row" id="btnSettings">
             <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
             <span class="sidebar-utility-copy">
               <span class="sidebar-utility-label">Settings</span>
-              <span class="sidebar-utility-detail">Preferences</span>
             </span>
             <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
-        </div>
-        <div class="mode-switch" role="navigation" aria-label="Mode">
-          <a href="/" class="is-active" aria-current="page">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span>Agent</span>
-          </a>
-          <a href="/settings">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
-            <span>Server</span>
-          </a>
         </div>
       </div>
     </aside>
@@ -399,11 +380,15 @@
     <button type="button" id="btnSelectionReply">Reply</button>
   </div>
 
-  <div id="settingsModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div id="settingsModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="Settings">
     <div class="dialog settings-dialog">
       <button type="button" class="dialog-close" id="btnSettingsClose" aria-label="Close">×</button>
       <aside class="settings-nav" aria-label="Settings sections">
         <p class="settings-nav-group">Settings</p>
+        <button type="button" class="settings-nav-btn" data-settings-pane="providers">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="7" x="3" y="3" rx="2"/><rect width="18" height="7" x="3" y="14" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+          <span>Providers</span>
+        </button>
         <button type="button" class="settings-nav-btn is-active" data-settings-pane="personalization">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span>Personalization</span>
@@ -439,6 +424,15 @@
       </aside>
       <div class="settings-main">
         <div class="settings-scroll" id="settingsScroll">
+          <section class="settings-pane settings-providers-pane" data-settings-pane="providers" aria-label="Providers">
+            <iframe
+              class="settings-providers-frame"
+              id="settingsProvidersFrame"
+              data-src="/settings?embedded=1"
+              title="Provider and local model settings"
+            ></iframe>
+          </section>
+
           <section class="settings-pane is-active" data-settings-pane="personalization" aria-labelledby="settingsTitle">
             <h2 class="settings-pane-title" id="settingsTitle">Personalization</h2>
             <p class="settings-pane-lede">Saved with your local data. Sent as a system prompt with each message.</p>
@@ -569,7 +563,7 @@
             <div class="settings-section">
               <h3 class="settings-section-title">Reset</h3>
               <button type="button" class="btn btn-outline" id="btnAppearanceReset">Reset to defaults</button>
-              <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size for Chat and Server.</p>
+              <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size throughout the app.</p>
             </div>
           </section>
 

@@ -439,13 +439,18 @@ async fn chat_page(State(app): State<SharedApp>, OriginalUri(uri): OriginalUri) 
     }
 }
 
-async fn settings_page(State(app): State<SharedApp>) -> Response {
+async fn settings_page(State(app): State<SharedApp>, OriginalUri(uri): OriginalUri) -> Response {
     let locked = app
         .lock()
         .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
         .unwrap_or(true);
     if locked {
         Redirect::temporary("/").into_response()
+    } else if !uri
+        .query()
+        .is_some_and(|query| query.split('&').any(|part| part == "embedded=1"))
+    {
+        Redirect::temporary("/?settings=providers").into_response()
     } else {
         Html(SETTINGS_HTML).into_response()
     }
@@ -640,7 +645,7 @@ async fn chat_title(
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
-                    "No provider configured. Add one in Server.",
+                    "No provider configured. Add one in Settings > Providers.",
                 ));
             };
             let api_base = normalize_openai_base(&active.base)
@@ -701,7 +706,7 @@ async fn chat_completions(
         } else {
             let Some(active) = providers.active() else {
                 return Err(ApiError::bad_request(
-                    "No provider configured. Add one in Server.",
+                    "No provider configured. Add one in Settings > Providers.",
                 ));
             };
             let api_base = normalize_openai_base(&active.base)
@@ -728,7 +733,7 @@ async fn chat_completions(
 
     let Some((api_base, token, api_style, allow_insecure_tls)) = remote else {
         return Err(ApiError::bad_request(
-            "No provider configured. Add one in Server.",
+            "No provider configured. Add one in Settings > Providers.",
         ));
     };
 

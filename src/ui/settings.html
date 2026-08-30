@@ -3,9 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TensorMI Harness | Server</title>
+  <title>TensorMI Harness | Providers</title>
   <link rel="icon" type="image/png" href="/browser-favicon.png">
   <meta name="color-scheme" content="dark">
+  <script>
+    if (new URLSearchParams(window.location.search).get('embedded') === '1') {
+      document.documentElement.classList.add('is-embedded');
+    }
+  </script>
   <script defer src="/optional-fonts.js"></script>
   <style>
     /* Token set is kept identical to chat.html so both surfaces stay in step. */
@@ -489,45 +494,6 @@
       font-size: var(--text-xs);
       color: var(--color-muted);
     }
-    .mode-switch {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2px;
-      padding: 3px;
-      border: 1px solid var(--color-rule);
-      background: color-mix(in oklch, var(--color-graphite) 60%, transparent);
-      border-radius: var(--radius-pill);
-    }
-    .mode-switch a {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.35rem;
-      padding: 0.34rem 0.5rem;
-      border-radius: var(--radius-pill);
-      font-size: var(--text-sm);
-      font-weight: 500;
-      color: var(--color-muted);
-      text-decoration: none;
-      background: transparent;
-      transition: color var(--dur-short) var(--ease-out), background var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out);
-    }
-    .mode-switch a svg {
-      width: 0.95rem;
-      height: 0.95rem;
-      flex: 0 0 auto;
-    }
-    .mode-switch a:hover {
-      color: var(--color-ink);
-      text-decoration: none;
-      background: var(--surface-hover);
-    }
-    .mode-switch a.is-active {
-      color: var(--color-ink);
-      background: var(--color-paper-2);
-      box-shadow: var(--shadow-1);
-    }
-
     .main {
       flex: 1 1 auto;
       min-width: 0;
@@ -575,6 +541,29 @@
       margin: 0 auto;
       display: grid;
       gap: var(--space-lg);
+    }
+    html.is-embedded .shell {
+      display: block;
+      height: 100%;
+    }
+    html.is-embedded .sidebar,
+    html.is-embedded .sidebar-backdrop,
+    html.is-embedded .sidebar-expand-fab,
+    html.is-embedded .topbar,
+    html.is-embedded .statusbar {
+      display: none !important;
+    }
+    html.is-embedded .main {
+      height: 100%;
+      background: var(--color-paper);
+    }
+    html.is-embedded .content {
+      padding: var(--space-lg) 1.75rem;
+      overscroll-behavior: contain;
+    }
+    html.is-embedded .content-inner {
+      width: 100%;
+      max-width: var(--content-max);
     }
     .section {
       scroll-margin-top: var(--space-lg);
@@ -1262,16 +1251,16 @@
     </button>
     <aside class="sidebar">
       <div class="sidebar-head">
-        <a class="wordmark" href="/" aria-label="TensorMI Harness Server">
+        <a class="wordmark" href="/" aria-label="TensorMI Harness Providers">
           <span class="wordmark-brand">Tensor<span>MI</span></span>
-          <span class="wordmark-surface">Server</span>
+          <span class="wordmark-surface">Providers</span>
         </a>
         <button type="button" class="btn btn-ghost btn-icon btn-toggle-sidebar" id="btnToggleSidebar" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
         </button>
       </div>
       <div class="sidebar-nav">
-        <p class="sidebar-label">Server</p>
+        <p class="sidebar-label">Providers</p>
         <button type="button" class="nav-jump is-active" data-jump="providers">Providers</button>
         <button type="button" class="nav-jump" data-jump="local-llms">Local LLMs</button>
       </div>
@@ -1280,23 +1269,13 @@
           <span>Default</span>
           <span id="activeChip" class="status-chip status-failed">none</span>
         </div>
-        <div class="mode-switch" role="navigation" aria-label="Mode">
-          <a href="/">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span>Agent</span>
-          </a>
-          <a href="/settings" class="is-active" aria-current="page">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
-            <span>Server</span>
-          </a>
-        </div>
       </div>
     </aside>
 
     <div class="main">
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:0.5rem;min-width:0">
-          <div class="topbar-title">Server</div>
+          <div class="topbar-title">Providers</div>
         </div>
         <div class="topbar-meta" id="topbarMeta">Loading…</div>
       </header>

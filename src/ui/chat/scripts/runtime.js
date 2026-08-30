@@ -666,7 +666,7 @@ function chooseModelOption(value) {
     persistModelPickerState();
   }
   closeModelMenu({ restoreFocus: true });
-  if (latestState) updateServerChip(latestState);
+  if (latestState) updateInferenceState(latestState);
   if (typeof updateSendEnabled === 'function') updateSendEnabled();
   if (typeof fillDefaultModelSetting === 'function'
     && settingsModal
@@ -875,21 +875,13 @@ function selectedRemoteModel(data) {
   return saved ? null : (models[0] || null);
 }
 
-function updateServerChip(data) {
+function updateInferenceState(data) {
   latestState = data;
   applyAppearance(data);
   syncModelSelector(data);
   const network = data.network || {};
   if (network.inference_mode === 'locked' || diskEncryptionLocked()) {
     serverReady = false;
-    serverChip.className = 'status-chip sidebar-server-status status-stopped';
-    serverChip.textContent = 'Locked';
-    serverChip.dataset.detailTitle = 'Unlock encrypted data to view server status';
-    serverChip.title = 'Server details unavailable while encrypted data is locked';
-    if (serverProviderName) {
-      serverProviderName.textContent = 'Encrypted';
-      serverProviderName.title = '';
-    }
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
     hideComposerHint();
@@ -912,24 +904,6 @@ function updateServerChip(data) {
   // catalog to talk to. Don't disable Send/resend across that blip.
   if (!(remoteChecking && !connected && serverReady && selectedChatModel)) {
     serverReady = connected;
-  }
-
-  serverChip.className = 'status-chip sidebar-server-status status-' + (
-    connected ? 'ready' : (remoteChecking ? 'checking' : (!network.remote_saved ? 'stopped' : 'failed'))
-  );
-  serverChip.textContent = connected
-    ? 'Connected'
-    : (remoteChecking ? 'Checking…' : (!network.remote_saved ? 'Not configured' : 'Unavailable'));
-  const serverDetailTitle = connected
-    ? 'Connected to ' + providerLabel
-    : (remoteChecking ? 'Checking ' + providerLabel + ' connection' : 'Provider connection unavailable');
-  serverChip.dataset.detailTitle = serverDetailTitle;
-  serverChip.title = chatShell.classList.contains('privacy-mode')
-    ? 'Server connection status'
-    : serverDetailTitle;
-  if (serverProviderName) {
-    serverProviderName.textContent = network.remote_saved ? providerLabel : 'No provider';
-    setIdentityTitle(serverProviderName, network.remote_saved ? providerLabel : '');
   }
 
   const project = inProjectChat() ? getProject(activeProjectId) : null;
@@ -1008,7 +982,7 @@ async function pollState() {
     if (!response.ok) return;
     const data = await response.json();
     syncExternalEncryptionState(data);
-    updateServerChip(data);
+    updateInferenceState(data);
     await resumeLiveTurns(data.live_turns);
   } catch {
     // control server briefly unreachable — retry on the next tick
@@ -3158,11 +3132,6 @@ function setSidebarOpen(open) {
 function syncPrivacyModeUi(enabled) {
   chatShell.classList.toggle('privacy-mode', enabled);
   syncIdentityTitles(enabled);
-  if (serverChip) {
-    serverChip.title = enabled
-      ? 'Server connection status'
-      : (serverChip.dataset.detailTitle || serverChip.title);
-  }
   const selected = modelMenuOptions.find((option) => option.value === selectedChatModel);
   if (chatModelSelect) {
     setIdentityTitle(
@@ -3388,7 +3357,7 @@ searchModalInput?.addEventListener('keydown', (event) => {
 searchModal?.addEventListener('click', (event) => {
   if (event.target === searchModal) closeSearchModal();
 });
-document.getElementById('btnSettings').addEventListener('click', openSettings);
+document.getElementById('btnSettings').addEventListener('click', () => openSettings());
 encryptionIndicator?.addEventListener('click', () => {
   openSettings();
   showSettingsPane('data');
@@ -4183,6 +4152,16 @@ btnUpdateDismiss?.addEventListener('click', () => {
   renderSidebar();
   await pollState();
   applyLocationRoute();
+  const startupUrl = new URL(window.location.href);
+  if (startupUrl.searchParams.get('settings') === 'providers' && !diskEncryptionLocked()) {
+    openSettings('providers');
+    startupUrl.searchParams.delete('settings');
+    history.replaceState(
+      { tensorui: 1 },
+      '',
+      startupUrl.pathname + startupUrl.search + startupUrl.hash
+    );
+  }
   // Route rendering focuses the composer. When encrypted data is locked, put
   // focus back in the blocking unlock field after that startup work completes.
   if (diskEncryptionLocked()) focusUnlockPassphrase();

@@ -78,10 +78,12 @@ mod tests {
     }
 
     #[test]
-    fn chat_and_server_sidebars_use_the_same_width() {
-        const SIDEBAR_WIDTH: &str = "--sidebar-w: 17.75rem;";
-        assert!(CHAT_CSS.contains(SIDEBAR_WIDTH));
-        assert!(SETTINGS_HTML.contains(SIDEBAR_WIDTH));
+    fn provider_manager_is_integrated_into_settings() {
+        assert!(CHAT_HTML.contains("data-settings-pane=\"providers\""));
+        assert!(CHAT_HTML.contains("data-src=\"/settings?embedded=1\""));
+        assert!(!CHAT_HTML.contains("id=\"btnProviders\""));
+        assert!(!CHAT_HTML.contains("class=\"mode-switch\""));
+        assert!(SETTINGS_HTML.contains("html.is-embedded .sidebar"));
     }
 
     #[test]
@@ -128,10 +130,10 @@ mod tests {
     }
 
     #[test]
-    fn locked_chat_ui_labels_provider_state_as_unavailable() {
+    fn locked_chat_ui_disables_inference() {
         assert!(CHAT_JS.contains("network.inference_mode === 'locked'"));
-        assert!(CHAT_JS.contains("serverProviderName.textContent = 'Encrypted'"));
-        assert!(CHAT_JS.contains("serverChip.textContent = 'Locked'"));
+        assert!(CHAT_JS.contains("serverReady = false;"));
+        assert!(CHAT_JS.contains("syncComposerThinkVisibility(null);"));
     }
 
     #[test]

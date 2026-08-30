@@ -2,103 +2,92 @@
 
 A local, lightweight, open source LLM harness for humanity.
 
-<p align="center">
-  <img width="49%" src="https://github.com/user-attachments/assets/f7b7e455-f61e-4978-a5ff-bc587c3200c4" />
-  <img width="49%" src="https://github.com/user-attachments/assets/e5ef9c8a-5401-46c0-81c5-a3c0531e5386" />
-</p>
+A more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui), with:
 
-A more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui): connect to LLM APIs on your machine (Ollama, llama-server) or in the cloud (OpenAI, Gemini, Anthropic, and other OpenAI-compatible or **Anthropic Messages**–compatible endpoints).
+- OpenAI-compatible and Anthropic Messages–compatible providers, local or cloud
+- Chats, projects, custom bots, group chats, memory, model pins, and attachments
+- Agent mode with approvals, web search, URL fetching, deep research, browser control, filesystem access, terminal access, and custom skills
+- Optional local GGUF model management through an installed `llama-server`
+- Passphrase-based encryption at rest for chats, preferences, provider credentials, and skills
 
-**Encryption at rest** is a first-class feature: lock chats and preferences on disk with a passphrase (Argon2id + AES-256-GCM). After each restart you unlock once for the session; **Lock session** clears the key from memory without turning encryption off.
+TensorMI does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anthropic, or another compatible endpoint; or install `llama-server` and launch a Hugging Face/GGUF model from **Settings → Providers → Local LLMs**.
 
-Turn models into agents with **Agent mode**: toggle **Agent** in the composer for every message, or `@web_search` / `@fetch_url` once, and the model can call **Agent Capabilities** — web search, URL fetch, custom skills, and more.
+## Install and run
 
-TensorMI Harness does **not** run an inference server. You point it at a base URL such as `http://127.0.0.1:11434/v1`, `https://api.openai.com/v1`, or `https://api.anthropic.com/v1`, and it proxies chat through a loopback-only control plane.
+Download a platform archive from [GitHub Releases](https://github.com/jacobzymet/tensorUI/releases). Releases include a standalone `tensorui` executable for Windows x64, Linux x64/ARM64, and macOS Apple Silicon/Intel.
 
-## Requirements
+To run from source:
 
-- [Rust](https://www.rust-lang.org/tools/install) (for building from source)
-- An OpenAI-compatible or Anthropic Messages–compatible API endpoint
-
-On Linux, the desktop shell needs WebKitGTK (`webkit2gtk-4.1`). Building from source also needs the matching `-dev` packages:
-
-```
-sudo apt install pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
-```
-
-## Run
-
-Official release archives are a single `tensorui` executable. Web search uses DuckDuckGo HTML and Lite. A configured SearXNG instance is tried first, with DuckDuckGo as fallback.
-
-```
+```powershell
 cargo run
 ```
 
-This starts the local control plane and opens **TensorMI Harness** in a native desktop window (not a browser tab).
+This starts a loopback-only control plane and, by default, opens TensorMI Harness in a native desktop window.
 
-| Flag | Behavior |
+| Option | Behavior |
 | --- | --- |
-| _(default)_ | Desktop app window |
-| `--browser` | Open in the default browser instead |
-| `--headless` | Server only (no window) |
+| `--browser` | Open the UI in the default browser |
+| `--headless` | Run without opening a window or browser |
+| `--bind ADDR` | Override the loopback listen address |
+| `--config PATH` | Use another `config.toml`; other data is stored beside it |
 
-Default URL: `http://tensormi.localhost:3930`
+Default URL: `http://tensormi.localhost:3930`. `/settings` redirects to **Settings → Providers**.
 
-| Path | Surface |
+### Platform requirements
+
+- Building from source requires [Rust](https://www.rust-lang.org/tools/install).
+- The Linux desktop window requires WebKitGTK 4.1; source builds also need its development packages:
+
+```sh
+sudo apt install pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+```
+
+- Using **Local LLMs** requires `llama-server` on `PATH`, or `TENSORUI_LLAMA_SERVER` set to its executable.
+- The optional browser-control tool requires Chrome or Edge.
+
+## Web search
+
+Configure search under **Settings → Agent Capabilities → Web search**:
+
+| Provider | Behavior |
 | --- | --- |
-| `/` | **Chat** — conversations, projects, agent mode |
-| `/settings` | **Server** — API providers (base URL, tokens, API style) |
+| Auto | Uses a configured SearXNG instance first; otherwise DuckDuckGo |
+| Parallel | Uses free MCP without a key, or the Search API with a key |
+| TinyFish | Uses its Search API and requires a key |
+| SearXNG | Uses the configured instance only |
+| DuckDuckGo | Uses the HTML and Lite endpoints |
 
-## Data & config
+Parallel and TinyFish keys can be entered in Settings or supplied as `PARALLEL_API_KEY` and `TINYFISH_API_KEY`. Result count, recency, region, SafeSearch, and optional result-page fetching are configurable.
 
-On-disk paths still use the legacy folder name **`tensorUI`** (so renaming the product does not move or orphan chats). UI branding is TensorMI Harness.
+## Data and configuration
 
-| OS | Typical path |
+On-disk paths retain the legacy **`tensorUI`** folder name so upgrades do not orphan existing data:
+
+| OS | Default directory |
 | --- | --- |
 | Windows | `%APPDATA%\tensorUI\` |
 | macOS | `~/Library/Application Support/tensorUI/` |
 | Linux | `~/.config/tensorUI/` |
 
-| File / folder | Contents |
+| Path | Contents |
 | --- | --- |
-| `config.toml` | Boot and appearance configuration; provider definitions are removed when encryption is on |
-| `chats.json` | Conversations and projects (encrypted when encryption is on) |
-| `preferences.json` | Chat preferences (encrypted when encryption is on) |
-| `provider-tokens.json` | Authenticated encrypted provider definitions and credentials (present only while encryption is on) |
-| `encryption.json` | Salt / meta for disk encryption (no passphrase stored) |
-| `encryption-transition.json` | Temporary authenticated recovery snapshot used only during encryption-mode changes |
-| `chat-skills/skills.json` | Atomic skill snapshot (encrypted when encryption is on) |
+| `config.toml` | Bind, appearance, and unencrypted provider configuration |
+| `chats.json` | Conversations and projects |
+| `preferences.json` | Settings, model state, and search credentials |
+| `provider-tokens.json` | Encrypted provider definitions and credentials; present only when encryption is enabled |
+| `encryption.json` | Encryption salt, KDF parameters, and key verifier |
+| `encryption-transition.json` | Recovery state used only during encryption-mode changes |
+| `chat-skills/skills.json` | Atomic custom-skill snapshot |
 
-Pass `--config PATH` to use a different `config.toml` (chats/preferences still sit beside it).
+Chats, preferences, and skills are encrypted in place when encryption is enabled. Provider configuration is then removed from plaintext `config.toml` and stored in `provider-tokens.json`.
 
-LLM system/tool prompts are markdown under [`prompts/`](prompts/) in this repo (compile-time `include_str!`) — see that folder’s README.
-
-### Encryption at rest
-
-In **Chat → Settings → Local Data**, enable encryption with a passphrase. TensorMI Harness then:
-
-- Derives a 256-bit key with **Argon2id** (64 MiB memory, 3 iterations, one lane)
-- Encrypts chats, preferences, provider definitions/credentials, and skill contents/metadata with **AES-256-GCM** (random 96-bit nonces and purpose-bound AAD)
-- Stores only salt + KDF params + a key **verifier** in `encryption.json` (never the passphrase or raw key)
-- Uses an authenticated, encrypted transition snapshot so interrupted enable/disable operations fail closed and can resume after the passphrase is entered
-- Uses owner-private, flush-and-atomic-replace file writes; skill metadata and content commit as one snapshot
-- Holds an operating-system-released exclusive data lock so concurrent app processes cannot interleave writes
-- Keeps the session key in process memory only until you **Lock session** or quit (memory is zeroized on lock)
-- Prompts you to unlock on launch (and after lock)
-
-**Threat model:** offline confidentiality and integrity of chats, preferences, provider definitions/credentials, and skill data (stolen disk, backups, casual filesystem access).
-
-**Not covered:** plaintext copies created before encryption, filesystem snapshots/backups, malware or another process in your logged-in session, rollback to an older complete encrypted data set by an attacker with write access, cold-boot/core-dump memory forensics while unlocked, forgotten passphrases, physical hardware failure, or network exposure of the loopback UI. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems.
-
-Encryption covers chats, preferences (including model pins and recent-model state), provider definitions and credentials, and skill contents stored on disk. Prefer a long passphrase; **forgotten passphrases cannot be recovered.**
-
-In **Settings → Local Data** you can also open the data folder. Chats and preferences are stored on disk only.
+The UI manages these settings, but a minimal configuration is:
 
 ```toml
 [ui]
 host = "127.0.0.1"
 port = 3930
-theme = "dark"
+theme = "dark" # dark, light, or system
 
 [data]
 storage = "disk"
@@ -109,20 +98,31 @@ active_provider_id = "…"
 id = "…"
 name = "ollama"
 base = "http://127.0.0.1:11434/v1"
-api_style = "openai"   # or "anthropic"; auto-detected in the Server UI on add/save
-token = ""   # optional; leave empty for local servers that need no key
+api_style = "openai" # openai or anthropic
+token = ""           # optional for local endpoints
 ```
 
-On the **Server** page, adding a provider probes the endpoint and picks OpenAI-compatible vs Anthropic Messages (host/`sk-ant-` hints, `/models` auth, and whether `/chat/completions` or `/messages` exists). Existing configs without `api_style` still default to `openai`. Anthropic-style providers talk to `{base}/messages` and translate streams so Chat stays on one SSE shape.
+Provider API style is detected when a provider is added or saved. Existing entries without `api_style` default to `openai`.
 
-Env override for bind: `TENSORUI_BIND=127.0.0.1:3930`. Non-loopback binds (`0.0.0.0`, LAN IPs, etc.) print a warning and **refuse to start** — the UI has no authentication.
+Bind precedence is `--bind`, then `TENSORUI_BIND`, then `[ui]`. Network-reachable addresses are refused because the local UI has no authentication.
 
-## Build
+LLM system and tool prompts live under [`prompts/`](prompts/) and are embedded at compile time.
 
-The Rust binary embeds Chat and Server HTML, the Chat CSS/JavaScript modules, `orb.js`, highlight.js, marked, DOMPurify, and icons:
+## Encryption at rest
+
+Enable encryption under **Settings → Local Data**. TensorMI derives a 256-bit key with Argon2id (64 MiB, three iterations, one lane) and encrypts protected data with AES-256-GCM using random 96-bit nonces and purpose-bound authenticated data. The passphrase and raw key are never stored; the session key remains in memory until **Lock session** or exit and is then zeroized. Writes use private permissions, atomic replacement, and an exclusive data-directory lock.
+
+The protection covers offline confidentiality and integrity of chats, preferences, provider definitions and credentials, and skills. It does not protect plaintext copies or backups made before encryption, filesystem snapshots, malware or another process in the logged-in session, rollback to an older complete encrypted data set, memory forensics while unlocked, forgotten passphrases, or hardware failure. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems. **Forgotten passphrases cannot be recovered.**
+
+## Build and verify
 
 ```powershell
 cargo build --release
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
 ```
 
-That command builds the full application, including native web search (DuckDuckGo HTML and Lite, with optional SearXNG tried first).
+The binary embeds the UI, prompts, fonts loader, syntax highlighting, Markdown renderer, sanitizer, terminal assets, and icons.
+
+Licensed under the [MIT License](LICENSE).

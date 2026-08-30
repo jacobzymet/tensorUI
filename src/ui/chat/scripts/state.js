@@ -622,9 +622,6 @@ function setModelHintWithProvider(prefix, providerLabel) {
   applyPrivacyMosaic(protectedProvider, 'model-hint-provider:' + provider);
   modelHintEl.appendChild(protectedProvider);
 }
-const serverChip = document.getElementById('serverChip');
-const serverProviderName = document.getElementById('serverProviderName');
-applyPrivacyMosaic(serverProviderName, 'server-provider');
 const chatModelSelect = document.getElementById('chatModelSelect');
 const chatModelSelectWrap = document.getElementById('chatModelSelectWrap');
 const chatModelOriginPill = document.getElementById('chatModelOriginPill');
