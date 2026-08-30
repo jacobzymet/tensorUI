@@ -73,10 +73,6 @@ impl App {
         self.lock_disk_encryption();
     }
 
-    pub fn persist_config(&mut self) {
-        let _ = self.try_persist_config();
-    }
-
     fn try_persist_config(&mut self) -> Result<(), String> {
         self.config.providers.migrate();
         self.config.keep_ui_private();
@@ -386,18 +382,20 @@ impl App {
         activate: bool,
     ) -> Result<(), String> {
         self.require_provider_persistence_unlocked()?;
-        self.config.providers.upsert(
-            None,
-            name,
-            base,
-            Some(token),
-            api_style,
-            ProviderUpsertOptions {
-                allow_insecure_tls: Some(allow_insecure_tls),
-                activate,
-            },
-        )?;
-        self.persist_providers("provider added")
+        self.mutate_providers(|providers| {
+            providers.upsert(
+                None,
+                name,
+                base,
+                Some(token),
+                api_style,
+                ProviderUpsertOptions {
+                    allow_insecure_tls: Some(allow_insecure_tls),
+                    activate,
+                },
+            )?;
+            Ok(())
+        })
     }
 
     pub fn update_provider(
@@ -410,39 +408,37 @@ impl App {
         allow_insecure_tls: Option<bool>,
     ) -> Result<(), String> {
         self.require_provider_persistence_unlocked()?;
-        self.config.providers.migrate();
-        let current = self
-            .config
-            .providers
-            .items
-            .iter()
-            .find(|p| p.id == id)
-            .cloned()
-            .ok_or_else(|| "Provider not found.".to_string())?;
-        self.config.providers.upsert(
-            Some(id),
-            name.unwrap_or(&current.name),
-            base.unwrap_or(&current.base),
-            token,
-            api_style.unwrap_or(current.api_style),
-            ProviderUpsertOptions {
-                allow_insecure_tls,
-                activate: false,
-            },
-        )?;
-        self.persist_providers("provider updated")
+        self.mutate_providers(|providers| {
+            providers.migrate();
+            let current = providers
+                .items
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .ok_or_else(|| "Provider not found.".to_string())?;
+            providers.upsert(
+                Some(id),
+                name.unwrap_or(&current.name),
+                base.unwrap_or(&current.base),
+                token,
+                api_style.unwrap_or(current.api_style),
+                ProviderUpsertOptions {
+                    allow_insecure_tls,
+                    activate: false,
+                },
+            )?;
+            Ok(())
+        })
     }
 
     pub fn delete_provider(&mut self, id: &str) -> Result<(), String> {
         self.require_provider_persistence_unlocked()?;
-        self.config.providers.delete(id)?;
-        self.persist_providers("provider removed")
+        self.mutate_providers(|providers| providers.delete(id))
     }
 
     pub fn activate_provider(&mut self, id: &str) -> Result<(), String> {
         self.require_provider_persistence_unlocked()?;
-        self.config.providers.set_active(id)?;
-        self.persist_providers("provider activated")
+        self.mutate_providers(|providers| providers.set_active(id))
     }
 
     /// Register or refresh the managed llama-server provider and make it default.
@@ -453,28 +449,45 @@ impl App {
         let Some(normalized) = normalize_provider_base(base_url, ApiStyle::Openai) else {
             return Err("Invalid local llama-server base URL.".into());
         };
-        if let Some(provider) = self.config.providers.items.iter_mut().find(|p| p.id == id) {
-            provider.name = name.to_string();
-            provider.base = normalized;
-            provider.api_style = ApiStyle::Openai;
-            provider.allow_insecure_tls = false;
-            provider.token.clear();
-            self.config.providers.active_provider_id = id.to_string();
-        } else {
-            if self.config.providers.items.len() >= 32 {
-                return Err("Maximum of 32 providers reached.".into());
+        self.mutate_providers(|providers| {
+            if let Some(provider) = providers.items.iter_mut().find(|p| p.id == id) {
+                provider.name = name.to_string();
+                provider.base = normalized;
+                provider.api_style = ApiStyle::Openai;
+                provider.allow_insecure_tls = false;
+                provider.token.clear();
+                providers.active_provider_id = id.to_string();
+            } else {
+                if providers.items.len() >= 32 {
+                    return Err("Maximum of 32 providers reached.".into());
+                }
+                let mut provider =
+                    crate::providers::Provider::new(name, normalized, "", ApiStyle::Openai);
+                provider.id = id.to_string();
+                providers.active_provider_id = id.to_string();
+                providers.items.push(provider);
             }
-            let mut provider =
-                crate::providers::Provider::new(name, normalized, "", ApiStyle::Openai);
-            provider.id = id.to_string();
-            self.config.providers.active_provider_id = id.to_string();
-            self.config.providers.items.push(provider);
-        }
-        self.persist_providers("local llama provider")
+            Ok(())
+        })
     }
 
-    fn persist_providers(&mut self, _action: &str) -> Result<(), String> {
-        self.try_persist_config()
+    fn mutate_providers(
+        &mut self,
+        action: impl FnOnce(&mut ProvidersConfig) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let previous = self.config.providers.clone();
+        if let Err(error) = action(&mut self.config.providers) {
+            self.config.providers = previous;
+            return Err(error);
+        }
+        if let Err(error) = self.try_persist_config() {
+            self.config.providers = previous;
+            // Best effort: an encrypted provider payload may have been written
+            // before a later configuration write failed.
+            let _ = self.try_persist_config();
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn require_provider_persistence_unlocked(&self) -> Result<(), String> {
@@ -485,12 +498,17 @@ impl App {
         }
     }
 
-    pub fn set_ui_theme(&mut self, theme: crate::config::UiTheme) {
+    pub fn set_ui_theme(&mut self, theme: crate::config::UiTheme) -> Result<(), String> {
         if self.config.ui.theme == theme {
-            return;
+            return Ok(());
         }
+        let previous = self.config.ui.theme;
         self.config.ui.theme = theme;
-        self.persist_config();
+        if let Err(error) = self.try_persist_config() {
+            self.config.ui.theme = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn set_ui_appearance(
@@ -501,12 +519,9 @@ impl App {
         font_mono: Option<String>,
         font_scale: Option<crate::config::UiFontScale>,
     ) -> Result<(), String> {
-        let mut changed = false;
-        if let Some(theme) = theme
-            && self.config.ui.theme != theme
-        {
-            self.config.ui.theme = theme;
-            changed = true;
+        let mut next = self.config.ui.clone();
+        if let Some(theme) = theme {
+            next.theme = theme;
         }
         if let Some(font_body) = font_body {
             let id = font_body.trim().to_ascii_lowercase();
@@ -516,10 +531,7 @@ impl App {
                     crate::config::UI_FONT_BODY_IDS.join(", ")
                 ));
             }
-            if self.config.ui.font_body != id {
-                self.config.ui.font_body = id;
-                changed = true;
-            }
+            next.font_body = id;
         }
         if let Some(font_display) = font_display {
             let id = font_display.trim().to_ascii_lowercase();
@@ -529,10 +541,7 @@ impl App {
                     crate::config::UI_FONT_DISPLAY_IDS.join(", ")
                 ));
             }
-            if self.config.ui.font_display != id {
-                self.config.ui.font_display = id;
-                changed = true;
-            }
+            next.font_display = id;
         }
         if let Some(font_mono) = font_mono {
             let id = font_mono.trim().to_ascii_lowercase();
@@ -542,29 +551,31 @@ impl App {
                     crate::config::UI_FONT_MONO_IDS.join(", ")
                 ));
             }
-            if self.config.ui.font_mono != id {
-                self.config.ui.font_mono = id;
-                changed = true;
+            next.font_mono = id;
+        }
+        if let Some(font_scale) = font_scale {
+            next.font_scale = font_scale;
+        }
+        if next != self.config.ui {
+            let previous = std::mem::replace(&mut self.config.ui, next);
+            if let Err(error) = self.try_persist_config() {
+                self.config.ui = previous;
+                return Err(error);
             }
-        }
-        if let Some(font_scale) = font_scale
-            && self.config.ui.font_scale != font_scale
-        {
-            self.config.ui.font_scale = font_scale;
-            changed = true;
-        }
-        if changed {
-            self.persist_config();
         }
         Ok(())
     }
 
-    pub fn reset_ui_appearance(&mut self) {
+    pub fn reset_ui_appearance(&mut self) -> Result<(), String> {
         let before = self.config.ui.clone();
         self.config.ui.reset_appearance();
         if self.config.ui != before {
-            self.persist_config();
+            if let Err(error) = self.try_persist_config() {
+                self.config.ui = before;
+                return Err(error);
+            }
         }
+        Ok(())
     }
 
     pub fn app_version(&self) -> &'static str {
@@ -583,16 +594,21 @@ impl App {
         self.config.data.storage
     }
 
-    pub fn set_storage_mode(&mut self, mode: StorageMode) {
+    pub fn set_storage_mode(&mut self, mode: StorageMode) -> Result<(), String> {
         let mode = if mode.is_browser() {
             StorageMode::Disk
         } else {
             mode
         };
         if self.config.data.storage != mode {
+            let previous = self.config.data.storage;
             self.config.data.storage = mode;
-            self.persist_config();
+            if let Err(error) = self.try_persist_config() {
+                self.config.data.storage = previous;
+                return Err(error);
+            }
         }
+        Ok(())
     }
 
     pub fn encryption_enabled(&self) -> bool {

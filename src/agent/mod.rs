@@ -12,8 +12,8 @@ pub mod terminal;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU32, Ordering},
         Mutex, OnceLock,
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -184,12 +184,7 @@ impl Drop for EphemeralBrowserGuard {
 }
 
 fn new_steer_id() -> String {
-    let mut bytes = [0u8; 6];
-    let _ = getrandom::fill(&mut bytes);
-    format!(
-        "steer_{}",
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    )
+    new_runtime_id("steer")
 }
 
 fn drain_steers(rx: &mut mpsc::UnboundedReceiver<SteerPayload>) -> Vec<SteerPayload> {
@@ -691,12 +686,21 @@ fn lookup_retry_guidance(name: &str, err: &str) -> String {
 }
 
 fn new_tool_call_id() -> String {
+    new_runtime_id("call")
+}
+
+fn new_runtime_id(prefix: &str) -> String {
     let mut bytes = [0u8; 6];
-    let _ = getrandom::fill(&mut bytes);
-    format!(
-        "call_{}",
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    )
+    if getrandom::fill(&mut bytes).is_ok() {
+        return format!(
+            "{prefix}_{}",
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+    }
+
+    static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let count = FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_fallback_{:08x}{count:016x}", std::process::id())
 }
 
 pub fn stream_agent(
@@ -1028,14 +1032,9 @@ async fn run_agent_loop(
                 send_tool_call(tx, call, approval_rx.contains_key(&call.id)).await?;
             }
 
-            let executed = approve_and_execute_tools(
-                calls,
-                &request.skills,
-                user_skills,
-                tx,
-                approval_rx,
-            )
-            .await?;
+            let executed =
+                approve_and_execute_tools(calls, &request.skills, user_skills, tx, approval_rx)
+                    .await?;
             let mut results = Vec::new();
             for (call, outcome) in executed {
                 if call.name == "web_search" && outcome.ok {
@@ -1189,9 +1188,8 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
         "fetch_url" => skills.fetch_url,
         "ask_user" => true,
         "activate_skill" | "read_skill" => !user_skills.is_empty(),
-        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace" | "delete_file" => {
-            skills.filesystem_ready()
-        }
+        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace"
+        | "delete_file" => skills.filesystem_ready(),
         "run_terminal" => skills.terminal_ready(),
         name if browser::is_browser_tool(name) => skills.browser,
         "show_image" => true,
@@ -1370,7 +1368,10 @@ fn agent_system_block(
     if skills.filesystem_ready() {
         lines.push(fill(
             agent::FILESYSTEM,
-            &[("workspace", &fs::workspace_prompt_line(&skills.workspace_root))],
+            &[(
+                "workspace",
+                &fs::workspace_prompt_line(&skills.workspace_root),
+            )],
         ));
     } else if skills.filesystem {
         lines.push(trim_prompt(agent::FILESYSTEM_NO_WORKSPACE).to_string());
@@ -1838,7 +1839,10 @@ fn preview_tool_arguments(raw: &str) -> Value {
 fn json_string_field(raw: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"");
     let idx = raw.find(&needle)?;
-    let rest = raw[idx + needle.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let rest = raw[idx + needle.len()..]
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start();
     let rest = rest.strip_prefix('"')?;
     let mut out = String::new();
     let mut chars = rest.chars();
@@ -2790,7 +2794,8 @@ async fn execute_tool(
                     v.as_u64()
                         .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
                 })
-                .unwrap_or(0) as usize;
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(0);
             let custom_max = call
                 .arguments
                 .get("max_chars")
@@ -2799,12 +2804,13 @@ async fn execute_tool(
                     v.as_u64()
                         .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
                 })
-                .map(|n| n as usize);
+                .and_then(|value| usize::try_from(value).ok());
             Ok(ToolOutcome::text(
                 fetch_single_url(url, skills, offset, custom_max).await?,
             ))
         }
-        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace" | "delete_file" => {
+        "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace"
+        | "delete_file" => {
             let name = call.name.clone();
             let args = call.arguments.clone();
             let root = skills.workspace_root.clone();
@@ -2964,9 +2970,9 @@ async fn execute_tool_batch(
                 async move {
                     let outcome = match execute_tool(&call, &skills, &user_skills).await {
                         Ok(outcome) => Ok(outcome),
-                        Err(err) if is_recoverable_tool(&call.name) => Ok(ToolOutcome::soft_failure(
-                            lookup_retry_guidance(&call.name, &err),
-                        )),
+                        Err(err) if is_recoverable_tool(&call.name) => Ok(
+                            ToolOutcome::soft_failure(lookup_retry_guidance(&call.name, &err)),
+                        ),
                         Err(err) => Err(err),
                     };
                     (index, call, outcome)
@@ -3221,11 +3227,21 @@ async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
         ));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("read failed: {error}"))?;
-    let html = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_PAGE_BYTES as usize)]);
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::with_capacity(MAX_PAGE_BYTES as usize);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("read failed: {error}"))?;
+        let remaining = (MAX_PAGE_BYTES as usize).saturating_sub(bytes.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        bytes.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    let html = String::from_utf8_lossy(&bytes);
     Ok(html_to_full_text(&html, Some(url)))
 }
 
@@ -3664,11 +3680,19 @@ mod tests {
             ..AgentSkills::default()
         };
         assert!(!capability_allowed("read_file", &off, &[]));
-        assert!(!capability_allowed("write_file", &filesystem_no_folder, &[]));
+        assert!(!capability_allowed(
+            "write_file",
+            &filesystem_no_folder,
+            &[]
+        ));
         assert!(!capability_allowed("read_file", &filesystem_no_folder, &[]));
         assert!(capability_allowed("read_file", &on, &[]));
         assert!(capability_allowed("str_replace", &on, &[]));
-        assert!(!capability_allowed("run_terminal", &terminal_no_folder, &[]));
+        assert!(!capability_allowed(
+            "run_terminal",
+            &terminal_no_folder,
+            &[]
+        ));
         assert!(capability_allowed("run_terminal", &on, &[]));
         assert!(!capability_allowed("run_terminal", &off, &[]));
         assert!(on.any_enabled());
@@ -3780,7 +3804,10 @@ mod tests {
         .unwrap();
         assert_eq!(skills.web_search_provider, WebSearchProvider::Parallel);
         assert_eq!(skills.web_search_parallel_api_key, "pk_test");
-        assert_eq!(skills.web_search_parallel_mode, WebSearchParallelMode::Advanced);
+        assert_eq!(
+            skills.web_search_parallel_mode,
+            WebSearchParallelMode::Advanced
+        );
     }
 
     #[test]

@@ -1,7 +1,11 @@
 use std::{
-    collections::{HashMap, hash_map::RandomState},
+    collections::{HashMap, HashSet, hash_map::RandomState},
     hash::BuildHasher,
-    sync::Mutex,
+    io::Read,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -15,6 +19,7 @@ use crate::{anthropic, http};
 const HEALTH_CACHE: Duration = Duration::from_secs(30);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
+const MAX_PROBE_BODY_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -119,9 +124,16 @@ pub struct ProviderUpsertOptions {
 impl ProvidersConfig {
     pub fn migrate(&mut self) {
         self.items.retain(|p| !p.base.trim().is_empty());
+        let mut used_ids = HashSet::with_capacity(self.items.len());
         for provider in &mut self.items {
-            if provider.id.trim().is_empty() {
-                provider.id = generate_provider_id();
+            if provider.id.trim().is_empty() || !used_ids.insert(provider.id.clone()) {
+                loop {
+                    let id = generate_provider_id();
+                    if used_ids.insert(id.clone()) {
+                        provider.id = id;
+                        break;
+                    }
+                }
             }
             if provider.name.trim().is_empty() {
                 provider.name = label_from_base(&provider.base);
@@ -216,7 +228,10 @@ impl ProvidersConfig {
         if self.items.len() >= 32 {
             return Err("Maximum of 32 providers reached.".into());
         }
-        let provider = Provider::new(cleaned_name, normalized, token.unwrap_or(""), api_style);
+        let mut provider = Provider::new(cleaned_name, normalized, token.unwrap_or(""), api_style);
+        while self.items.iter().any(|item| item.id == provider.id) {
+            provider.id = generate_provider_id();
+        }
         let created = provider.clone();
         self.items.push(provider);
         if options.activate || self.items.len() == 1 {
@@ -239,17 +254,30 @@ impl ProvidersConfig {
 }
 
 pub fn normalize_provider_base(raw: &str, _style: ApiStyle) -> Option<String> {
-    let mut base = raw.trim().trim_end_matches('/').to_string();
-    if base.is_empty() {
+    let raw = raw.trim();
+    if raw.is_empty() {
         return None;
     }
-    if !base.contains("://") {
-        base = format!("http://{base}");
+    let candidate = if raw.contains("://") {
+        raw.to_string()
+    } else {
+        format!("http://{raw}")
+    };
+    let mut url = reqwest::Url::parse(&candidate).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
     }
-    if !base.ends_with("/v1") {
-        base = format!("{base}/v1");
+    let path = url.path().trim_end_matches('/').to_string();
+    if !path.ends_with("/v1") {
+        url.set_path(&format!("{path}/v1"));
     }
-    Some(base)
+    Some(url.as_str().trim_end_matches('/').to_string())
 }
 
 pub fn normalize_openai_base(raw: &str) -> Option<String> {
@@ -296,22 +324,22 @@ fn label_from_base(base: &str) -> String {
     }
 }
 
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn generate_provider_id() -> String {
     let mut bytes = [0u8; 8];
-    if getrandom::fill(&mut bytes).is_err() {
-        return format!("provider-{}", unix_now());
+    if getrandom::fill(&mut bytes).is_ok() {
+        return format!(
+            "provider-{}",
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
     }
-    format!(
-        "provider-{}",
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    )
+
+    static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let count = FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("provider-{nanos:032x}{count:016x}")
 }
 
 fn sanitize_name(raw: impl Into<String>) -> String {
@@ -1604,11 +1632,20 @@ fn fetch_remote_props_body(
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
-    let response = request.send().ok()?;
+    let mut response = request.send().ok()?;
     if response.status().as_u16() != 200 {
         return None;
     }
-    response.text().ok()
+    let mut bytes = Vec::new();
+    response
+        .by_ref()
+        .take(MAX_PROBE_BODY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_PROBE_BODY_BYTES {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 fn urlencoding_path(value: &str) -> String {
@@ -1641,13 +1678,20 @@ fn fetch_models_payload(
     for (name, value) in provider_auth_headers(style, token) {
         request = request.header(&name, &value);
     }
-    let response = request.send().map_err(probe_http_error)?;
+    let mut response = request.send().map_err(probe_http_error)?;
     if response.status().as_u16() != 200 {
         return Err(format!("Remote responded with {}", response.status()));
     }
+    let mut bytes = Vec::new();
     response
-        .json::<serde_json::Value>()
-        .map_err(|error| error.to_string())
+        .by_ref()
+        .take(MAX_PROBE_BODY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_PROBE_BODY_BYTES {
+        return Err("Remote model catalog is too large.".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
 fn model_ids_from_body(body: &serde_json::Value) -> Result<Vec<String>, String> {
@@ -1835,6 +1879,22 @@ fn jinja_mentions_ident(template: &str, ident: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_base_normalization_rejects_non_http_urls() {
+        assert_eq!(
+            normalize_openai_base("localhost:11434"),
+            Some("http://localhost:11434/v1".into())
+        );
+        assert_eq!(
+            normalize_openai_base("https://example.com/api/"),
+            Some("https://example.com/api/v1".into())
+        );
+        assert!(normalize_openai_base("file:///tmp/provider").is_none());
+        assert!(normalize_openai_base("https://user:secret@example.com").is_none());
+        assert!(normalize_openai_base("https://example.com/v1?token=secret").is_none());
+        assert!(normalize_openai_base("not a host").is_none());
+    }
 
     #[test]
     fn masks_unicode_tokens_without_byte_slicing() {

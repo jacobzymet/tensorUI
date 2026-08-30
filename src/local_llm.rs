@@ -378,11 +378,16 @@ fn default_threads() -> u32 {
 }
 
 fn pick_port(preferred: u16) -> Result<u16, String> {
+    if preferred == 0 {
+        return Err("Port must be between 1 and 65535.".into());
+    }
     if port_free(preferred) {
         return Ok(preferred);
     }
-    for offset in 1..20u16 {
-        let candidate = preferred.saturating_add(offset);
+    for candidate in preferred.saturating_add(1)..=preferred.saturating_add(19) {
+        if candidate == preferred {
+            continue;
+        }
         if port_free(candidate) {
             return Ok(candidate);
         }
@@ -643,6 +648,11 @@ mod tests {
             "ggml-org/gpt-oss-120b-GGUF"
         );
         assert!(normalize_hf_id("not-a-repo").is_err());
+    }
+
+    #[test]
+    fn rejects_ephemeral_port_zero() {
+        assert!(pick_port(0).is_err());
     }
 
     #[test]

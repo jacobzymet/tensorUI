@@ -138,8 +138,8 @@ fn empty_store() -> Value {
     })
 }
 
-fn normalize_store(value: Value) -> Value {
-    match value {
+fn normalize_store(value: Value) -> Result<Value> {
+    let normalized = match value {
         Value::Array(conversations) => serde_json::json!({
             "version": 2,
             "projects": [],
@@ -161,8 +161,15 @@ fn normalize_store(value: Value) -> Value {
             }
             Value::Object(map)
         }
-        _ => empty_store(),
+        _ => anyhow::bail!("store must be a JSON object or a legacy conversations array"),
+    };
+    if !normalized.get("projects").is_some_and(Value::is_array)
+        || !normalized.get("conversations").is_some_and(Value::is_array)
+        || !normalized.get("bots").is_some_and(Value::is_array)
+    {
+        anyhow::bail!("store must include projects, conversations, and bots arrays");
     }
+    Ok(normalized)
 }
 
 fn decode_stored(
@@ -215,7 +222,7 @@ pub fn load_chats(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Value, S
             key,
             crypto::AAD_CHATS,
             encryption_on,
-        )?)),
+        )?)?),
         None if encryption_on => Err(StoreError::Other(anyhow::anyhow!(
             "Encrypted chat data is missing. Restore the encrypted file from backup."
         ))),
@@ -232,24 +239,7 @@ pub fn save_chats(
     if encryption_enabled(root) && key.is_none() {
         return Err(StoreError::Locked);
     }
-    let normalized = normalize_store(value);
-    if !normalized
-        .get("projects")
-        .map(|v| v.is_array())
-        .unwrap_or(false)
-        || !normalized
-            .get("conversations")
-            .map(|v| v.is_array())
-            .unwrap_or(false)
-        || !normalized
-            .get("bots")
-            .map(|v| v.is_array())
-            .unwrap_or(false)
-    {
-        return Err(StoreError::Other(anyhow::anyhow!(
-            "store must include projects, conversations, and bots arrays"
-        )));
-    }
+    let normalized = normalize_store(value)?;
     let on_disk = encode_for_disk(&normalized, key, crypto::AAD_CHATS)?;
     atomic_write_json(&chats_path(root), &on_disk)?;
     Ok(())
@@ -264,7 +254,9 @@ pub fn load_preferences(root: &Path, key: Option<&crypto::DiskKey>) -> Result<Va
     match read_json_file(&preferences_path(root))? {
         Some(value) => match decode_stored(value, key, crypto::AAD_PREFERENCES, encryption_on)? {
             Value::Object(map) => Ok(Value::Object(map)),
-            _ => Ok(serde_json::json!({})),
+            _ => Err(StoreError::Other(anyhow::anyhow!(
+                "preferences must be a JSON object"
+            ))),
         },
         None if encryption_on => Err(StoreError::Other(anyhow::anyhow!(
             "Encrypted preferences are missing. Restore the encrypted file from backup."
@@ -295,7 +287,7 @@ pub fn save_preferences(
 /// Write plaintext while encryption meta still exists (disable path only).
 pub fn save_chats_plaintext_for_disable(root: &Path, value: Value) -> Result<(), StoreError> {
     ensure_data_dir(root)?;
-    let normalized = normalize_store(value);
+    let normalized = normalize_store(value)?;
     atomic_write_json(&chats_path(root), &normalized)?;
     Ok(())
 }
@@ -332,6 +324,18 @@ mod tests {
         assert!(loaded["projects"].as_array().unwrap().is_empty());
         assert_eq!(loaded["conversations"][0]["id"], "c1");
         assert!(loaded["bots"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_store_instead_of_erasing_it() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        assert!(save_chats(root, serde_json::json!("invalid"), None).is_err());
+        assert!(!chats_path(root).exists());
+
+        secure_fs::atomic_write_json(&chats_path(root), &serde_json::json!(42)).unwrap();
+        assert!(load_chats(root, None).is_err());
     }
 
     #[test]

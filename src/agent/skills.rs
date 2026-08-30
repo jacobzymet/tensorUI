@@ -131,7 +131,12 @@ impl SkillStore {
             bail!("At most {MAX_SKILLS} skills are allowed.");
         }
         let now = unix_now();
-        let id = generate_id();
+        let id = loop {
+            let candidate = generate_id()?;
+            if skills.iter().all(|skill| skill.id != candidate) {
+                break candidate;
+            }
+        };
         let name = sanitize_name(upsert.name.as_deref().unwrap_or("Untitled skill"))?;
         let description = sanitize_description(upsert.description.as_deref().unwrap_or(""))?;
         let content = sanitize_content(upsert.content.as_deref().unwrap_or(""))?;
@@ -280,14 +285,31 @@ impl SkillStore {
         let value = serde_json::to_value(skills).context("serialize skill store")?;
         let value = self.encode(&value, crypto::AAD_SKILLS)?;
         secure_fs::atomic_write_json(&self.snapshot_path(), &value)?;
-        self.remove_legacy_files(skills)
+        self.remove_legacy_files()
     }
 
-    fn remove_legacy_files(&self, skills: &[UserSkill]) -> Result<()> {
+    fn remove_legacy_files(&self) -> Result<()> {
         secure_fs::remove_file(&self.index_path())?;
-        for skill in skills {
-            if is_safe_skill_id(&skill.id) {
-                secure_fs::remove_file(&self.content_path(&skill.id))?;
+        for entry in std::fs::read_dir(&self.root)
+            .with_context(|| format!("could not inspect {}", self.root.display()))?
+        {
+            let entry =
+                entry.with_context(|| format!("could not inspect {}", self.root.display()))?;
+            if !entry
+                .file_type()
+                .with_context(|| format!("could not inspect {}", entry.path().display()))?
+                .is_file()
+            {
+                continue;
+            }
+            let path = entry.path();
+            let Some(id) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if path.extension().and_then(|value| value.to_str()) == Some("md")
+                && is_safe_skill_id(id)
+            {
+                secure_fs::remove_file(&path)?;
             }
         }
         Ok(())
@@ -420,13 +442,13 @@ fn sanitize_filename(raw: Option<String>) -> Option<String> {
     .filter(|s: &String| !s.is_empty())
 }
 
-fn generate_id() -> String {
+fn generate_id() -> Result<String> {
     let mut bytes = [0u8; 8];
-    let _ = getrandom::fill(&mut bytes);
-    format!(
+    getrandom::fill(&mut bytes).context("could not generate skill id")?;
+    Ok(format!(
         "sk-{}",
         bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    )
+    ))
 }
 
 fn unix_now() -> u64 {

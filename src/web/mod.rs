@@ -522,7 +522,10 @@ async fn xterm_fit_script() -> impl IntoResponse {
 }
 
 async fn xterm_stylesheet() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], XTERM_CSS)
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        XTERM_CSS,
+    )
 }
 
 async fn app_icon_png() -> impl IntoResponse {
@@ -948,10 +951,7 @@ struct TerminalResizeCtrl {
     rows: Option<u16>,
 }
 
-async fn terminal_ws(
-    ws: WebSocketUpgrade,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
+async fn terminal_ws(ws: WebSocketUpgrade, Path(id): Path<String>) -> Result<Response, ApiError> {
     let id = validate_live_id(id)?;
     let io = agent::terminal::attach_session(&id)
         .await
@@ -1028,10 +1028,8 @@ fn apply_terminal_ctrl(
     if ctrl.kind != "resize" {
         return Ok(());
     }
-    let (cols, rows) = agent::terminal::clamp_pty_size(
-        ctrl.cols.unwrap_or(0),
-        ctrl.rows.unwrap_or(0),
-    );
+    let (cols, rows) =
+        agent::terminal::clamp_pty_size(ctrl.cols.unwrap_or(0), ctrl.rows.unwrap_or(0));
     to_pty
         .send(agent::terminal::ToPty::Resize { cols, rows })
         .map_err(|_| ())
@@ -1389,8 +1387,10 @@ async fn local_llms_start(
             },
         )
         .map_err(ApiError::bad_request)?;
-        app.ensure_local_llama_provider(&meta.base_url)
-            .map_err(ApiError::bad_request)?;
+        if let Err(error) = app.ensure_local_llama_provider(&meta.base_url) {
+            let _ = app.local_llm.stop();
+            return Err(ApiError::bad_request(error));
+        }
     }
     schedule_provider_cache_warm(Arc::clone(&app));
     local_llms_status(State(app)).await
@@ -1489,7 +1489,8 @@ async fn set_storage_mode(
         ));
     }
     let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    app.set_storage_mode(StorageMode::Disk);
+    app.set_storage_mode(StorageMode::Disk)
+        .map_err(ApiError::bad_request)?;
     Ok(Json(data_info_from_app(&app)))
 }
 
@@ -1748,9 +1749,12 @@ async fn check_updates(
     Ok(Json(crate::updates::check(force).await))
 }
 
-fn with_app(app: SharedApp, action: impl FnOnce(&mut App)) -> Result<Json<AppState>, ApiError> {
+fn with_app(
+    app: SharedApp,
+    action: impl FnOnce(&mut App) -> Result<(), String>,
+) -> Result<Json<AppState>, ApiError> {
     let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    action(&mut app);
+    action(&mut app).map_err(ApiError::bad_request)?;
     Ok(Json(AppState::from_app(&app)))
 }
 

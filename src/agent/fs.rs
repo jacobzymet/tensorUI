@@ -102,13 +102,19 @@ pub fn read_file(ws: &Workspace, args: &Value) -> Result<String, String> {
     file.read_to_end(&mut buf)
         .map_err(|err| format!("Could not read {path}: {err}"))?;
     if buf.contains(&0) {
-        return Err("Refusing to read a binary file. Use the terminal for binary inspection.".into());
+        return Err(
+            "Refusing to read a binary file. Use the terminal for binary inspection.".into(),
+        );
     }
-    let text = String::from_utf8(buf)
-        .map_err(|_| "File is not valid UTF-8.".to_string())?;
+    let text = String::from_utf8(buf).map_err(|_| "File is not valid UTF-8.".to_string())?;
     let offset = arg_usize(args, "offset").unwrap_or(0);
     let limit = arg_usize(args, "limit");
-    Ok(slice_lines(&text, offset, limit, &ws.relative_display(&abs)))
+    Ok(slice_lines(
+        &text,
+        offset,
+        limit,
+        &ws.relative_display(&abs),
+    ))
 }
 
 pub fn list_dir(ws: &Workspace, args: &Value) -> Result<String, String> {
@@ -141,7 +147,10 @@ pub fn list_dir(ws: &Workspace, args: &Value) -> Result<String, String> {
             break;
         }
     }
-    entries.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+    entries.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(a.1.to_lowercase().cmp(&b.1.to_lowercase()))
+    });
     let mut lines = vec![format!(
         "Listing {} ({} entries):",
         ws.relative_display(&abs),
@@ -403,7 +412,7 @@ fn arg_usize(args: &Value, key: &str) -> Option<usize> {
     args.get(key).and_then(|v| {
         v.as_u64()
             .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
-            .map(|n| n as usize)
+            .and_then(|n| usize::try_from(n).ok())
     })
 }
 
@@ -414,17 +423,13 @@ fn slice_lines(text: &str, offset: usize, limit: Option<usize>, label: &str) -> 
         return format!("{label} has {total} lines; offset {offset} is past the end.");
     }
     let end = limit
-        .map(|n| (offset + n).min(total))
+        .map(|n| offset.saturating_add(n).min(total))
         .unwrap_or(total);
     let slice = lines[offset..end].join("\n");
     if offset == 0 && end == total {
         format!("{label} ({total} lines)\n{slice}")
     } else {
-        format!(
-            "{label} lines {}–{} of {total}\n{slice}",
-            offset + 1,
-            end
-        )
+        format!("{label} lines {}–{} of {total}\n{slice}", offset + 1, end)
     }
 }
 
@@ -481,19 +486,83 @@ fn ensure_parent_in_workspace(ws: &Workspace, parent: &Path) -> Result<(), Strin
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension("tensorui-tmp");
-    {
-        let mut file =
-            File::create(&tmp).map_err(|err| format!("Could not write {}: {err}", path.display()))?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("Could not write {}: path has no file name", path.display()))?
+        .to_string_lossy();
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random)
+        .map_err(|err| format!("Could not prepare write for {}: {err}", path.display()))?;
+    let suffix = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let tmp = parent.join(format!(
+        ".{file_name}.{}.{}.tensorui-tmp",
+        std::process::id(),
+        suffix
+    ));
+    let result = (|| -> Result<(), String> {
+        let mut file = File::options()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+            .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
         file.write_all(bytes)
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
         file.sync_all()
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
-    }
-    fs::rename(&tmp, path).map_err(|err| {
+        drop(file);
+        replace_file(&tmp, path)
+    })();
+    if result.is_err() {
         let _ = fs::remove_file(&tmp);
-        format!("Could not replace {}: {err}", path.display())
-    })?;
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<(), String> {
+    fs::rename(temporary, destination)
+        .map_err(|err| format!("Could not replace {}: {err}", destination.display()))
+}
+
+#[cfg(windows)]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<(), String> {
+    use std::{iter, os::windows::ffi::OsStrExt};
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let existing: Vec<u16> = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect();
+    let replacement: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect();
+    let result = unsafe {
+        MoveFileExW(
+            existing.as_ptr(),
+            replacement.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        return Err(format!(
+            "Could not replace {}: {}",
+            destination.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
     Ok(())
 }
 
@@ -577,18 +646,24 @@ fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf, String> {
 }
 
 fn is_within(root: &Path, candidate: &Path) -> bool {
-    let root_s = display_path(root).to_ascii_lowercase();
-    let cand_s = display_path(candidate).to_ascii_lowercase();
-    cand_s == root_s
-        || cand_s.starts_with(&(root_s.clone() + std::path::MAIN_SEPARATOR_STR))
-        || cand_s.starts_with(&(root_s + "/"))
+    #[cfg(not(windows))]
+    {
+        candidate == root || candidate.starts_with(root)
+    }
+
+    #[cfg(windows)]
+    {
+        let root_s = display_path(root).to_ascii_lowercase();
+        let cand_s = display_path(candidate).to_ascii_lowercase();
+        cand_s == root_s
+            || cand_s.starts_with(&(root_s.clone() + std::path::MAIN_SEPARATOR_STR))
+            || cand_s.starts_with(&(root_s + "/"))
+    }
 }
 
 fn display_path(path: &Path) -> String {
     let raw = path.to_string_lossy();
-    raw.strip_prefix(r"\\?\")
-        .unwrap_or(&raw)
-        .to_string()
+    raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
 }
 
 pub fn glob_match(pattern: &str, path: &str) -> bool {
@@ -643,9 +718,12 @@ fn glob_rec(pat: &[u8], text: &[u8]) -> bool {
 pub fn workspace_prompt_line(root: &str) -> String {
     let trimmed = root.trim();
     if trimmed.is_empty() {
-        "No workspace folder is set for this chat; file tools will fail until the user chooses one.".into()
+        "No workspace folder is set for this chat; file tools will fail until the user chooses one."
+            .into()
     } else {
-        format!("Workspace root: {trimmed}. Stay inside it. Prefer these tools over shell for files.")
+        format!(
+            "Workspace root: {trimmed}. Stay inside it. Prefer these tools over shell for files."
+        )
     }
 }
 
@@ -676,6 +754,17 @@ mod tests {
         let (_dir, ws) = temp_ws();
         assert!(ws.resolve("../secret.txt").is_err());
         assert!(ws.resolve("..").is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn case_distinct_sibling_is_outside_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Workspace");
+        fs::create_dir(&root).unwrap();
+        let ws = Workspace::open(root.to_str().unwrap()).unwrap();
+
+        assert!(ws.resolve("../workspace/escape.txt").is_err());
     }
 
     #[test]
@@ -719,7 +808,11 @@ mod tests {
     fn list_and_glob_see_created_files() {
         let (_dir, ws) = temp_ws();
         fs::create_dir_all(ws.root.join("src")).unwrap();
-        write_file(&ws, &json!({ "path": "src/lib.rs", "content": "fn x() {}" })).unwrap();
+        write_file(
+            &ws,
+            &json!({ "path": "src/lib.rs", "content": "fn x() {}" }),
+        )
+        .unwrap();
         let listing = list_dir(&ws, &json!({ "path": "src" })).unwrap();
         assert!(listing.contains("lib.rs"));
         let globbed = glob_files(&ws, &json!({ "pattern": "**/*.rs" })).unwrap();

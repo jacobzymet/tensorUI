@@ -13,6 +13,7 @@ use crate::{
 /// window for the whole streamed response rather than a short request timeout.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub(crate) const CHANNEL_CAPACITY: usize = 32;
+const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 
 /// SSE byte frames. Work runs as a child of this stream: client disconnect
 /// drops the body → drops the worker → drops the upstream HTTP response.
@@ -170,7 +171,7 @@ pub(crate) async fn open_llm_sse(
 
     if response.status() != reqwest::StatusCode::OK {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = response_text_limited(response).await;
         return Err(StreamFail::Other(format!(
             "LLM API responded with {status}: {body}"
         )));
@@ -395,10 +396,11 @@ async fn post_title_completion(
 
     if !response.status().is_success() {
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
+        let text = response_text_limited(response).await;
         return Err(format!("title request failed ({status}): {text}"));
     }
-    response.json().await.map_err(|error| error.to_string())
+    let text = response_text_limited(response).await;
+    serde_json::from_str(&text).map_err(|error| error.to_string())
 }
 
 fn truncate_for_error(raw: &str) -> String {
@@ -408,6 +410,26 @@ fn truncate_for_error(raw: &str) -> String {
     } else {
         format!("{}…", compact.chars().take(120).collect::<String>())
     }
+}
+
+async fn response_text_limited(response: reqwest::Response) -> String {
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::with_capacity(MAX_ERROR_BODY_BYTES);
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else {
+            break;
+        };
+        let remaining = MAX_ERROR_BODY_BYTES.saturating_sub(bytes.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        bytes.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn extract_openai_title_text(value: &serde_json::Value) -> String {

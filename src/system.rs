@@ -62,7 +62,9 @@ pub fn open_in_browser(url: &str) -> io::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd").args(["/C", "start", "", url]).spawn()?;
+        // URL metacharacters such as `&` are valid content but become command
+        // separators if this is routed through cmd.exe.
+        Command::new("explorer.exe").arg(url).spawn()?;
     }
     #[cfg(target_os = "macos")]
     {

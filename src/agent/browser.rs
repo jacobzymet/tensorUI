@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 use super::fs::Workspace;
-use crate::store;
+use crate::{secure_fs, store};
 
 const MAX_EVAL_CHARS: usize = 8_000;
 const MAX_TYPE_CHARS: usize = 8_000;
@@ -90,9 +90,8 @@ pub fn ensure_http_url(raw: &str) -> Result<String, String> {
     if url.is_empty() {
         return Err("browser_navigate requires a non-empty \"url\".".into());
     }
-    let parsed = reqwest::Url::parse(url).map_err(|_| {
-        format!("Invalid URL '{url}'. Use an absolute http(s) address.")
-    })?;
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| format!("Invalid URL '{url}'. Use an absolute http(s) address."))?;
     match parsed.scheme() {
         "http" | "https" => Ok(parsed.to_string()),
         other => Err(format!(
@@ -119,7 +118,12 @@ pub fn session_key(raw: &str) -> String {
         .collect()
 }
 
-pub async fn execute(name: &str, args: &Value, session_id: &str, workspace_root: &str) -> Result<BrowserOutcome, String> {
+pub async fn execute(
+    name: &str,
+    args: &Value,
+    session_id: &str,
+    workspace_root: &str,
+) -> Result<BrowserOutcome, String> {
     match name {
         "browser_close" => close_session(session_id).await.map(BrowserOutcome::from),
         "browser_navigate" => {
@@ -135,11 +139,9 @@ pub async fn execute(name: &str, args: &Value, session_id: &str, workspace_root:
             .await
             .map(BrowserOutcome::from)
         }
-        "browser_snapshot" => {
-            with_page(session_id, |page| async move { snapshot(&page).await })
-                .await
-                .map(BrowserOutcome::from)
-        }
+        "browser_snapshot" => with_page(session_id, |page| async move { snapshot(&page).await })
+            .await
+            .map(BrowserOutcome::from),
         "browser_click" => {
             let ref_id = require_ref(args)?;
             with_page(session_id, |page| async move {
@@ -166,13 +168,17 @@ pub async fn execute(name: &str, args: &Value, session_id: &str, workspace_root:
         }
         "browser_type" => {
             let ref_id = require_ref(args)?;
-            let text = arg_str(args, "text").ok_or_else(|| {
-                "browser_type requires a \"text\" string.".to_string()
-            })?;
+            let text = arg_str(args, "text")
+                .ok_or_else(|| "browser_type requires a \"text\" string.".to_string())?;
             if text.chars().count() > MAX_TYPE_CHARS {
-                return Err(format!("text is too long (max {MAX_TYPE_CHARS} characters)."));
+                return Err(format!(
+                    "text is too long (max {MAX_TYPE_CHARS} characters)."
+                ));
             }
-            let submit = args.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+            let submit = args
+                .get("submit")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let escaped = json!(text).to_string();
             with_page(session_id, move |page| async move {
                 let result = eval_json(
@@ -301,9 +307,8 @@ pub async fn execute(name: &str, args: &Value, session_id: &str, workspace_root:
             Ok(png_outcome(text, bytes))
         }
         "browser_evaluate" => {
-            let expression = arg_str(args, "expression").ok_or_else(|| {
-                "browser_evaluate requires an \"expression\" string.".to_string()
-            })?;
+            let expression = arg_str(args, "expression")
+                .ok_or_else(|| "browser_evaluate requires an \"expression\" string.".to_string())?;
             if expression.chars().count() > MAX_EVAL_CHARS {
                 return Err(format!(
                     "expression is too long (max {MAX_EVAL_CHARS} characters)."
@@ -316,7 +321,8 @@ pub async fn execute(name: &str, args: &Value, session_id: &str, workspace_root:
                     .map_err(|_| "Evaluate timed out.".to_string())?
                     .map_err(|err| format!("Evaluate failed: {err}"))?;
                 let parsed: Value = value.into_value().unwrap_or(Value::Null);
-                let text = serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| parsed.to_string());
+                let text =
+                    serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| parsed.to_string());
                 let clipped: String = text.chars().take(12_000).collect();
                 Ok(clipped)
             })
@@ -406,13 +412,10 @@ async fn launch_session(session_id: &str) -> Result<Session, String> {
 }
 
 async fn snapshot(page: &Page) -> Result<String, String> {
-    let value = timeout(
-        ACTION_TIMEOUT,
-        page.evaluate_function(SNAPSHOT_JS),
-    )
-    .await
-    .map_err(|_| "Snapshot timed out.".to_string())?
-    .map_err(|err| format!("Snapshot failed: {err}"))?;
+    let value = timeout(ACTION_TIMEOUT, page.evaluate_function(SNAPSHOT_JS))
+        .await
+        .map_err(|_| "Snapshot timed out.".to_string())?
+        .map_err(|err| format!("Snapshot failed: {err}"))?;
     let data: Value = value
         .into_value()
         .map_err(|err| format!("Snapshot was not JSON: {err}"))?;
@@ -548,25 +551,30 @@ fn save_screenshot(
     if let Ok(ws) = Workspace::open(workspace_root) {
         let abs = ws.resolve(&rel)?;
         if let Some(parent) = abs.parent() {
-            fs::create_dir_all(parent).map_err(|err| format!("Could not create screenshot folder: {err}"))?;
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Could not create screenshot folder: {err}"))?;
         }
         fs::write(&abs, bytes).map_err(|err| format!("Could not write screenshot: {err}"))?;
         return Ok(ws.relative_display(&abs));
     }
     let dir = store::data_dir().join("browser-screenshots");
-    fs::create_dir_all(&dir).map_err(|err| format!("Could not create screenshot folder: {err}"))?;
+    secure_fs::ensure_private_dir(&dir)
+        .map_err(|err| format!("Could not create screenshot folder: {err:#}"))?;
     let name = Path::new(&rel)
         .file_name()
         .and_then(|n| n.to_str())
         .filter(|n| n.ends_with(".png") || n.ends_with(".jpg"))
         .unwrap_or("browser.png");
     let abs = dir.join(name);
-    fs::write(&abs, bytes).map_err(|err| format!("Could not write screenshot: {err}"))?;
+    secure_fs::atomic_write(&abs, bytes)
+        .map_err(|err| format!("Could not write screenshot: {err:#}"))?;
     Ok(abs.display().to_string())
 }
 
 fn profile_dir(session_id: &str) -> PathBuf {
-    store::data_dir().join("browser-profiles").join(session_key(session_id))
+    store::data_dir()
+        .join("browser-profiles")
+        .join(session_key(session_id))
 }
 
 pub fn find_browser_executable() -> Option<PathBuf> {

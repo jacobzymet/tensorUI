@@ -5,16 +5,19 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU32, Ordering},
-        mpsc as std_mpsc,
         Arc, Mutex as StdMutex, OnceLock,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        mpsc as std_mpsc,
     },
     time::Duration,
 };
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde_json::Value;
-use tokio::{process::Command, sync::{Mutex, broadcast}};
+use tokio::{
+    process::Command,
+    sync::{Mutex, broadcast},
+};
 
 use super::fs::Workspace;
 
@@ -117,7 +120,14 @@ pub async fn open_session(
     let (to_pty_tx, to_pty_rx) = std_mpsc::channel();
     let (out_tx, _) = broadcast::channel(1024);
     let replay = Arc::new(StdMutex::new(Vec::new()));
-    let pid = spawn_pty(&cwd, cols, rows, to_pty_rx, out_tx.clone(), Arc::clone(&replay))?;
+    let pid = spawn_pty(
+        &cwd,
+        cols,
+        rows,
+        to_pty_rx,
+        out_tx.clone(),
+        Arc::clone(&replay),
+    )?;
 
     let mut map = sessions().lock().await;
     if map.len() >= MAX_LIVE_SESSIONS {
@@ -171,7 +181,11 @@ pub async fn attach_session(id: &str) -> Option<SessionIo> {
     })
 }
 
-pub async fn run_agent_command(workspace_root: &str, args: &Value, timeout_secs: u64) -> Result<String, String> {
+pub async fn run_agent_command(
+    workspace_root: &str,
+    args: &Value,
+    timeout_secs: u64,
+) -> Result<String, String> {
     let command = args
         .get("command")
         .and_then(|v| v.as_str())
@@ -185,7 +199,11 @@ pub async fn run_agent_command(workspace_root: &str, args: &Value, timeout_secs:
         return Err(format!("Blocked: {reason}"));
     }
     let ws = Workspace::open(workspace_root)?;
-    let cwd = if let Some(raw) = args.get("cwd").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty())
+    let cwd = if let Some(raw) = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
     {
         ws.resolve(raw)?
     } else {
@@ -199,7 +217,10 @@ pub async fn run_agent_command(workspace_root: &str, args: &Value, timeout_secs:
     let mut out = format!(
         "$ {command}\ncwd: {}\nexit: {}\n",
         result.cwd,
-        result.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into())
+        result
+            .exit_code
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "unknown".into())
     );
     if result.timed_out {
         out.push_str(&format!(
@@ -351,7 +372,13 @@ fn detect_unix_shell() -> UserShell {
     let fallbacks: &[&str] = if cfg!(target_os = "macos") {
         &["/bin/zsh", "/bin/bash", "/bin/sh"]
     } else {
-        &["/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh", "/bin/sh"]
+        &[
+            "/bin/bash",
+            "/usr/bin/bash",
+            "/bin/zsh",
+            "/usr/bin/zsh",
+            "/bin/sh",
+        ]
     };
     for candidate in fallbacks {
         if let Some(spec) = unix_shell_from_path(Some(PathBuf::from(candidate))) {
@@ -465,31 +492,29 @@ async fn run_command(
         .map_err(|err| format!("Could not start command: {err}"))?;
     #[cfg(unix)]
     let pid = child.id();
-    let (output, timed_out) = match tokio::time::timeout(
-        Duration::from_secs(timeout_secs),
-        child.wait_with_output(),
-    )
-    .await
-    {
-        Ok(Ok(output)) => (output, false),
-        Ok(Err(err)) => return Err(format!("Command failed to run: {err}")),
-        Err(_) => {
-            #[cfg(unix)]
-            if let Some(pid) = pid {
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
+    let (output, timed_out) =
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+            .await
+        {
+            Ok(Ok(output)) => (output, false),
+            Ok(Err(err)) => return Err(format!("Command failed to run: {err}")),
+            Err(_) => {
+                #[cfg(unix)]
+                if let Some(pid) = pid {
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
                 }
+                return Ok(CommandResult {
+                    command: command.to_string(),
+                    cwd: cwd.display().to_string(),
+                    output: format!("Timed out after {timeout_secs}s; process killed."),
+                    exit_code: None,
+                    ok: false,
+                    timed_out: true,
+                });
             }
-            return Ok(CommandResult {
-                command: command.to_string(),
-                cwd: cwd.display().to_string(),
-                output: format!("Timed out after {timeout_secs}s; process killed."),
-                exit_code: None,
-                ok: false,
-                timed_out: true,
-            });
-        }
-    };
+        };
 
     let mut text = String::new();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -542,11 +567,7 @@ fn truncate_output(text: &str, max_bytes: usize) -> String {
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!(
-        "{}\n… truncated ({} bytes total)",
-        &text[..end],
-        text.len()
-    )
+    format!("{}\n… truncated ({} bytes total)", &text[..end], text.len())
 }
 
 pub fn block_reason(command: &str) -> Option<&'static str> {
@@ -577,13 +598,31 @@ fn collapse_ws(s: &str) -> String {
 }
 
 const DANGEROUS: &[(&str, &str)] = &[
-    ("rm -rf /", "refusing recursive delete of the filesystem root"),
-    ("rm -rf /*", "refusing recursive delete of the filesystem root"),
-    ("rm -fr /", "refusing recursive delete of the filesystem root"),
-    ("del /s /q c:\\", "refusing recursive delete of a drive root"),
+    (
+        "rm -rf /",
+        "refusing recursive delete of the filesystem root",
+    ),
+    (
+        "rm -rf /*",
+        "refusing recursive delete of the filesystem root",
+    ),
+    (
+        "rm -fr /",
+        "refusing recursive delete of the filesystem root",
+    ),
+    (
+        "del /s /q c:\\",
+        "refusing recursive delete of a drive root",
+    ),
     ("rd /s /q c:\\", "refusing recursive delete of a drive root"),
-    ("remove-item -recurse -force c:\\", "refusing recursive delete of a drive root"),
-    ("remove-item -recurse -force /", "refusing recursive delete of the filesystem root"),
+    (
+        "remove-item -recurse -force c:\\",
+        "refusing recursive delete of a drive root",
+    ),
+    (
+        "remove-item -recurse -force /",
+        "refusing recursive delete of the filesystem root",
+    ),
     ("format c:", "refusing disk format"),
     ("format d:", "refusing disk format"),
     ("mkfs.", "refusing filesystem format"),
@@ -622,11 +661,16 @@ const DANGEROUS: &[(&str, &str)] = &[
 
 fn new_id(prefix: &str) -> String {
     let mut bytes = [0u8; 6];
-    let _ = getrandom::fill(&mut bytes);
-    format!(
-        "{prefix}_{}",
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    )
+    if getrandom::fill(&mut bytes).is_ok() {
+        return format!(
+            "{prefix}_{}",
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+    }
+
+    static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let count = FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_fallback_{:08x}{count:016x}", std::process::id())
 }
 
 #[cfg(test)]
@@ -723,11 +767,7 @@ mod tests {
         );
     }
 
-    fn answer_cursor_probes(
-        to_pty: &std_mpsc::Sender<ToPty>,
-        buf: &str,
-        mut from: usize,
-    ) -> usize {
+    fn answer_cursor_probes(to_pty: &std_mpsc::Sender<ToPty>, buf: &str, mut from: usize) -> usize {
         while let Some(rel) = buf[from..].find("\u{1b}[6n") {
             let _ = to_pty.send(ToPty::Data(b"\x1b[24;80R".to_vec()));
             from += rel + 4;

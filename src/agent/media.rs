@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use base64::Engine;
+use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::time::timeout;
 
@@ -73,24 +74,27 @@ async fn load_remote_image(url: &str) -> Result<(Vec<u8>, &'static str), String>
             return Err(format!("Refusing {other} URL. show_image only fetches http(s)."));
         }
     }
-    let response = timeout(FETCH_TIMEOUT, http::public_client().get(parsed).send())
+    let response = timeout(FETCH_TIMEOUT, http::safe_public_get(parsed.as_str(), true))
         .await
         .map_err(|_| "Image fetch timed out.".to_string())?
         .map_err(|err| format!("Image fetch failed: {err}"))?;
     if !response.status().is_success() {
         return Err(format!("Image fetch returned HTTP {}.", response.status()));
     }
-    let bytes = timeout(FETCH_TIMEOUT, response.bytes())
-        .await
-        .map_err(|_| "Image fetch timed out.".to_string())?
-        .map_err(|err| format!("Image fetch failed: {err}"))?;
-    if bytes.len() > MAX_IMAGE_BYTES {
-        return Err(format!(
-            "Image is {} bytes; max is {MAX_IMAGE_BYTES} bytes.",
-            bytes.len()
-        ));
-    }
-    let bytes = bytes.to_vec();
+    let bytes = timeout(FETCH_TIMEOUT, async move {
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| format!("Image fetch failed: {err}"))?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_IMAGE_BYTES {
+                return Err(format!("Image exceeds the {MAX_IMAGE_BYTES}-byte limit."));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok::<_, String>(bytes)
+    })
+    .await
+    .map_err(|_| "Image fetch timed out.".to_string())??;
     let mime = sniff_image_mime(&bytes).ok_or_else(|| {
         "That URL is not a PNG, JPEG, GIF, or WebP image.".to_string()
     })?;
