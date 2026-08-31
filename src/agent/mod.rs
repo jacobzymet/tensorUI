@@ -1378,7 +1378,13 @@ fn agent_system_block(
     }
     if skills.terminal_ready() {
         let timeout = terminal::clamp_timeout_secs(skills.terminal_timeout_secs).to_string();
-        lines.push(fill(agent::TERMINAL, &[("timeout", &timeout)]));
+        lines.push(fill(
+            agent::TERMINAL,
+            &[
+                ("timeout", &timeout),
+                ("shell_context", &terminal::agent_shell_context()),
+            ],
+        ));
     } else if skills.terminal {
         lines.push(trim_prompt(agent::TERMINAL_NO_WORKSPACE).to_string());
     }
@@ -2066,7 +2072,8 @@ fn openai_tools_payload(
             trim_prompt(tools::WRITE_FILE),
             json!({
                 "path": { "type": "string" },
-                "content": { "type": "string" }
+                "content": { "type": "string" },
+                "overwrite": { "type": "boolean", "description": "Default false. True only for an intentional whole-file rewrite after reading the entire existing file; content must contain the complete replacement." }
             }),
             &["path", "content"],
         ));
@@ -2091,7 +2098,7 @@ fn openai_tools_payload(
     if skills.terminal_ready() {
         tools_out.push(function_tool(
             "run_terminal",
-            trim_prompt(tools::RUN_TERMINAL),
+            &crate::prompts::fill(tools::RUN_TERMINAL, &[("shell_context", &terminal::agent_shell_context())]),
             json!({
                 "command": { "type": "string" },
                 "cwd": { "type": "string", "description": "Optional path relative to the workspace" }
@@ -2730,7 +2737,7 @@ impl ToolOutcome {
         Self {
             ui_text: text.clone(),
             text,
-            note: Some("retry with a different query".into()),
+            note: Some("Tool failed".into()),
             image: None,
             image_id: None,
             ok: false,
@@ -2819,14 +2826,27 @@ async fn execute_tool(
                 .map_err(|err| err.to_string())?
                 .map(ToolOutcome::text)
         }
-        "run_terminal" => Ok(ToolOutcome::text(
-            terminal::run_agent_command(
+        "run_terminal" => {
+            let result = terminal::run_agent_command(
                 &skills.workspace_root,
                 &call.arguments,
                 skills.terminal_timeout_secs,
             )
-            .await?,
-        )),
+            .await?;
+            let mut outcome = ToolOutcome::text(result.tool_output());
+            outcome.ok = result.ok;
+            if !result.ok {
+                outcome.note = Some(
+                    if result.timed_out {
+                        "Command timed out"
+                    } else {
+                        "Command failed"
+                    }
+                    .into(),
+                );
+            }
+            Ok(outcome)
+        }
         name if browser::is_browser_tool(name) => {
             let out = browser::execute(
                 name,
@@ -2962,6 +2982,16 @@ async fn execute_tool_batch(
 ) -> Result<Vec<(ToolCall, ToolOutcome)>, StreamFail> {
     let skills = skills.clone();
     let user_skills = user_skills.to_vec();
+    // Workspace reads, writes, and commands may depend on each other. Keep
+    // their call order; only batches of independent web lookups run in parallel.
+    let concurrency = if calls
+        .iter()
+        .all(|call| matches!(call.name.as_str(), "web_search" | "fetch_url"))
+    {
+        MAX_CONCURRENT_TOOL_CALLS
+    } else {
+        1
+    };
     let mut finished: Vec<(usize, ToolCall, Result<ToolOutcome, String>)> =
         stream::iter(calls.into_iter().enumerate())
             .map(|(index, call)| {
@@ -2970,15 +3000,17 @@ async fn execute_tool_batch(
                 async move {
                     let outcome = match execute_tool(&call, &skills, &user_skills).await {
                         Ok(outcome) => Ok(outcome),
-                        Err(err) if is_recoverable_tool(&call.name) => Ok(
-                            ToolOutcome::soft_failure(lookup_retry_guidance(&call.name, &err)),
-                        ),
+                        Err(err) if is_recoverable_tool(&call.name) => {
+                            let mut outcome = ToolOutcome::soft_failure(&err);
+                            outcome.text = lookup_retry_guidance(&call.name, &err);
+                            Ok(outcome)
+                        }
                         Err(err) => Err(err),
                     };
                     (index, call, outcome)
                 }
             })
-            .buffer_unordered(MAX_CONCURRENT_TOOL_CALLS)
+            .buffer_unordered(concurrency)
             .collect()
             .await;
     if let Some((_, _, Err(err))) = finished.iter().find(|(_, _, result)| result.is_err()) {
@@ -3703,6 +3735,81 @@ mod tests {
         assert!(!needs_approval("ask_user", ApprovalMode::Manual));
         assert_eq!(tool_risk("run_terminal"), "terminal");
         assert_eq!(tool_risk("read_file"), "safe");
+    }
+
+    #[tokio::test]
+    async fn workspace_tool_batches_run_in_order_and_keep_failure_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = AgentSkills {
+            filesystem: true,
+            terminal: true,
+            workspace_root: dir.path().display().to_string(),
+            ..AgentSkills::default()
+        };
+        let calls = vec![
+            (
+                "write_file",
+                json!({"path": "a.txt", "content": "original\r\n"}),
+            ),
+            (
+                "str_replace",
+                json!({"path": "a.txt", "old_string": "original\n", "new_string": "edited\n"}),
+            ),
+            ("read_file", json!({"path": "a.txt"})),
+            (
+                "write_file",
+                json!({"path": "a.txt", "content": "accidental snippet"}),
+            ),
+            ("run_terminal", json!({"command": "exit 7"})),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, arguments))| ToolCall {
+            id: i.to_string(),
+            name: name.into(),
+            arguments,
+        })
+        .collect();
+        let batch = execute_tool_batch(calls, &skills, &[]).await.unwrap();
+        assert!(batch[0].1.ok);
+        assert!(batch[1].1.ok);
+        assert!(batch[2].1.ui_text.contains("edited"));
+        assert!(!batch[3].1.ok);
+        assert!(batch[3].1.ui_text.contains("already exists"));
+        assert!(!batch[3].1.ui_text.contains("Fix the arguments and retry"));
+        assert!(batch[3].1.text.contains("Fix the arguments and retry"));
+        assert!(!batch[4].1.ok);
+        assert!(batch[4].1.ui_text.contains("exit: 7"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "edited\r\n"
+        );
+    }
+
+    #[test]
+    fn file_and_terminal_schemas_advertise_safe_defaults_and_actual_shell() {
+        let skills = AgentSkills {
+            filesystem: true,
+            terminal: true,
+            workspace_root: "/tmp/ws".into(),
+            ..AgentSkills::default()
+        };
+        let tools = openai_tools_payload(&skills, &[], false);
+        let write = tools
+            .iter()
+            .find(|t| t["function"]["name"] == "write_file")
+            .unwrap();
+        assert_eq!(
+            write["function"]["parameters"]["properties"]["overwrite"]["type"],
+            "boolean"
+        );
+        let terminal = tools
+            .iter()
+            .find(|t| t["function"]["name"] == "run_terminal")
+            .unwrap();
+        let description = terminal["function"]["description"].as_str().unwrap();
+        assert!(description.contains(std::env::consts::OS));
+        assert!(!description.contains("{{shell_context}}"));
     }
 
     #[test]

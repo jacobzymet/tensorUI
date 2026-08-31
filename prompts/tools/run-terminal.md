@@ -1,1 +1,1 @@
-Run one shell command in the workspace. Pass {"command": "..."}. Optional cwd relative to the workspace. Do not use this to read or edit files.
+Run one shell command in the workspace. Pass {"command": "..."}. Optional cwd relative to the workspace. {{shell_context}} Do not use this to read or edit files; use file tools instead. Nonzero exits and timeouts are reported as failures.

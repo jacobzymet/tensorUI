@@ -284,6 +284,10 @@ pub fn write_file(ws: &Workspace, args: &Value) -> Result<String, String> {
         ));
     }
     let abs = ws.resolve(&path)?;
+    let overwrite = args
+        .get("overwrite")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     if let Ok(meta) = fs::symlink_metadata(&abs) {
         if meta.file_type().is_symlink() {
             return Err("Refusing to overwrite a symlink.".into());
@@ -291,12 +295,17 @@ pub fn write_file(ws: &Workspace, args: &Value) -> Result<String, String> {
         if meta.is_dir() {
             return Err(format!("{path} is a directory."));
         }
+        if !overwrite {
+            return Err(format!(
+                "{path} already exists; no changes were made. Use str_replace for edits or additions. Only use overwrite=true with the complete file content after reading the entire file."
+            ));
+        }
     }
     if let Some(parent) = abs.parent() {
         ensure_parent_in_workspace(ws, parent)?;
         fs::create_dir_all(parent).map_err(|err| format!("Could not create directories: {err}"))?;
     }
-    atomic_write(&abs, content.as_bytes())?;
+    atomic_write(&abs, content.as_bytes(), overwrite)?;
     Ok(format!(
         "Wrote {} bytes to {}.",
         content.len(),
@@ -332,10 +341,15 @@ pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
         return Err(format!("{path} is not a file."));
     }
     let text = fs::read_to_string(&abs).map_err(|err| format!("Could not read {path}: {err}"))?;
-    let count = text.matches(old).count();
+    // read_file presents LF line breaks. Match that representation without
+    // rewriting the line endings (or any other bytes) outside the edited span.
+    let normalized = text.replace("\r\n", "\n");
+    let old = old.replace("\r\n", "\n");
+    let matches: Vec<usize> = normalized.match_indices(&old).map(|(at, _)| at).collect();
+    let count = matches.len();
     if count == 0 {
         return Err(
-            "old_string was not found. Re-read the file and copy the exact text to replace.".into(),
+            "old_string was not found; no changes were made. LF and CRLF line endings are already treated as equivalent. Re-read the relevant lines and copy a unique snippet exactly, including indentation; do not include the read_file header or invent a trailing newline.".into(),
         );
     }
     if count > 1 && !replace_all {
@@ -343,12 +357,36 @@ pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
             "old_string matched {count} times. Pass a unique snippet, or set replace_all=true."
         ));
     }
-    let next = if replace_all {
-        text.replace(old, new)
-    } else {
-        text.replacen(old, new, 1)
-    };
-    atomic_write(&abs, next.as_bytes())?;
+    let removed_cr: Vec<usize> = text
+        .match_indices("\r\n")
+        .enumerate()
+        .map(|(removed, (at, _))| at - removed)
+        .collect();
+    let original_offset = |at| at + removed_cr.partition_point(|&cr| cr < at);
+    let new = new.replace("\r\n", "\n");
+    let mut next = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for at in matches {
+        let start = original_offset(at);
+        let end = original_offset(at + old.len());
+        let matched = &text[start..end];
+        let crlf = matched
+            .find('\n')
+            .map(|i| i > 0 && matched.as_bytes()[i - 1] == b'\r')
+            .unwrap_or_else(|| {
+                text.find('\n')
+                    .is_some_and(|i| i > 0 && text.as_bytes()[i - 1] == b'\r')
+            });
+        next.push_str(&text[cursor..start]);
+        if crlf {
+            next.push_str(&new.replace('\n', "\r\n"));
+        } else {
+            next.push_str(&new);
+        }
+        cursor = end;
+    }
+    next.push_str(&text[cursor..]);
+    atomic_write(&abs, next.as_bytes(), true)?;
     let n = if replace_all { count } else { 1 };
     Ok(format!(
         "Updated {} ({} replacement{}).",
@@ -425,7 +463,10 @@ fn slice_lines(text: &str, offset: usize, limit: Option<usize>, label: &str) -> 
     let end = limit
         .map(|n| offset.saturating_add(n).min(total))
         .unwrap_or(total);
-    let slice = lines[offset..end].join("\n");
+    let mut slice = lines[offset..end].join("\n");
+    if end > offset && (end < total || text.ends_with('\n')) {
+        slice.push('\n');
+    }
     if offset == 0 && end == total {
         format!("{label} ({total} lines)\n{slice}")
     } else {
@@ -485,7 +526,7 @@ fn ensure_parent_in_workspace(ws: &Workspace, parent: &Path) -> Result<(), Strin
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn atomic_write(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
@@ -514,7 +555,20 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         file.sync_all()
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
         drop(file);
-        replace_file(&tmp, path)
+        if overwrite {
+            replace_file(&tmp, path)
+        } else {
+            // Publishing by hard link is atomic and cannot clobber a file that
+            // appeared after the existence check above. Fail closed if unsupported.
+            fs::hard_link(&tmp, path).map_err(|err| {
+                format!(
+                    "Could not create {} without overwriting: {err}",
+                    path.display()
+                )
+            })?;
+            let _ = fs::remove_file(&tmp);
+            Ok(())
+        }
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
@@ -802,6 +856,139 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("2 times"));
+    }
+
+    #[test]
+    fn write_requires_explicit_overwrite_and_preserves_existing_content() {
+        let (_dir, ws) = temp_ws();
+        let path = ws.root.join("styles.css");
+        let original = "/* uncommitted styles */\r\nbody { color: white; }\r\n";
+        fs::write(&path, original).unwrap();
+        let err = write_file(
+            &ws,
+            &json!({
+                "path": "styles.css", "content": "select option { color: white; }"
+            }),
+        )
+        .unwrap_err();
+        assert!(err.contains("already exists"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        write_file(
+            &ws,
+            &json!({
+                "path": "styles.css", "content": "intentional full rewrite", "overwrite": true
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "intentional full rewrite"
+        );
+    }
+
+    #[test]
+    fn atomic_creation_cannot_clobber_a_file_created_after_preflight() {
+        let (_dir, ws) = temp_ws();
+        let path = ws.root.join("raced.txt");
+        fs::write(&path, "another writer").unwrap();
+        assert!(atomic_write(&path, b"replacement", false).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "another writer");
+        assert_eq!(fs::read_dir(&ws.root).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn replacements_handle_line_endings_and_preserve_unrelated_bytes() {
+        let (_dir, ws) = temp_ws();
+        let path = ws.root.join("a.txt");
+        for (original, old, new, expected) in [
+            (
+                "head\r\na\r\nb\r\ntail\r\n",
+                "a\nb",
+                "x\ny",
+                "head\r\nx\r\ny\r\ntail\r\n",
+            ),
+            (
+                "head\na\nb\ntail\n",
+                "a\r\nb",
+                "x\r\ny",
+                "head\nx\ny\ntail\n",
+            ),
+            (
+                "head\r\n100% {\r\n  x\r\n}\r\n",
+                "100% {\n  x\n}",
+                "100% {\n  x\n}\n\nselect option {}",
+                "head\r\n100% {\r\n  x\r\n}\r\n\r\nselect option {}\r\n",
+            ),
+            ("é\r\na\r\nb\n末尾", "a\nb", "α\nβ", "é\r\nα\r\nβ\n末尾"),
+            (
+                "head\r\nend",
+                "end",
+                "end\naddition",
+                "head\r\nend\r\naddition",
+            ),
+            ("a\r\nb", "\nb", "\nc", "a\r\nc"),
+            ("a\r\nb", "a\n", "", "b"),
+        ] {
+            fs::write(&path, original).unwrap();
+            str_replace(
+                &ws,
+                &json!({"path": "a.txt", "old_string": old, "new_string": new}),
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                expected,
+                "original: {original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalized_matches_still_require_uniqueness_and_exact_indentation() {
+        let (_dir, ws) = temp_ws();
+        let path = ws.root.join("a.txt");
+        let original = "a\r\nb\r\na\nb\n";
+        fs::write(&path, original).unwrap();
+        let err = str_replace(
+            &ws,
+            &json!({
+                "path": "a.txt", "old_string": "a\nb", "new_string": "x\ny"
+            }),
+        )
+        .unwrap_err();
+        assert!(err.contains("2 times"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(
+            str_replace(
+                &ws,
+                &json!({
+                    "path": "a.txt", "old_string": "  a\nb", "new_string": "x"
+                })
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        str_replace(
+            &ws,
+            &json!({
+                "path": "a.txt", "old_string": "a\nb", "new_string": "x\ny", "replace_all": true
+            }),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "x\r\ny\r\nx\ny\n");
+    }
+
+    #[test]
+    fn read_excerpts_preserve_whether_the_final_line_has_a_newline() {
+        assert_eq!(
+            slice_lines("a\r\nb\r\n", 1, None, "f"),
+            "f lines 2–2 of 2\nb\n"
+        );
+        assert_eq!(slice_lines("a\r\nb", 1, None, "f"), "f lines 2–2 of 2\nb");
+        assert_eq!(
+            slice_lines("a\r\nb", 0, Some(1), "f"),
+            "f lines 1–1 of 2\na\n"
+        );
     }
 
     #[test]

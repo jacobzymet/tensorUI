@@ -39,6 +39,9 @@ function agentStepRailHtml() {
         '<svg class="agent-step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">' +
           '<path d="M20 6 9 17l-5-5"/>' +
         '</svg>' +
+        '<svg class="agent-step-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round">' +
+          '<path d="m7 7 10 10M17 7 7 17"/>' +
+        '</svg>' +
         '<span class="agent-step-spinner"></span>' +
       '</span>' +
     '</div>'
@@ -49,6 +52,7 @@ function wrapTimelineStep(innerHtml, {
   think = false,
   live = false,
   done = false,
+  failed = false,
   justSettled = false,
   startedAt = 0,
   toolName = '',
@@ -58,6 +62,7 @@ function wrapTimelineStep(innerHtml, {
   if (think) classes.push('is-think');
   if (live) classes.push('is-live');
   if (done) classes.push('is-done');
+  if (failed) classes.push('is-failed');
   if (justSettled) classes.push('is-just-done');
   const attrs = [];
   if (toolId) attrs.push('data-tool-id="' + escapeHtml(toolId) + '"');
@@ -1365,6 +1370,7 @@ function agentStepHtml({
   detail,
   result,
   note,
+  ok,
   live,
   kind,
   startedAt,
@@ -1388,9 +1394,10 @@ function agentStepHtml({
   const elapsed = elapsedMs > 0 || live ? formatToolElapsed(elapsedMs) : '';
   const waitingApproval = approval === 'pending';
   const executing = !!executingFlag;
+  const failed = !live && ok === false;
   const status = live
     ? '<span class="agent-step-status">' + escapeHtml(waitingApproval ? 'Needs approval' : skillLiveVerb(name, { kind, approval, executing })) + '</span>'
-    : '';
+    : failed ? '<span class="agent-step-status">' + (approval === 'denied' ? 'Denied' : 'Failed') + '</span>' : '';
   const meta = (status || elapsed)
     ? '<span class="agent-step-meta">' + status +
       (elapsed ? '<span class="agent-step-elapsed">' + escapeHtml(elapsed) + '</span>' : '') +
@@ -1449,8 +1456,9 @@ function agentStepHtml({
     '</div>',
     {
       live: !!live,
-      done: !live,
-      justSettled: !!justSettled,
+      done: !live && !failed,
+      failed,
+      justSettled: !!justSettled && !failed,
       startedAt: live ? Number(startedAt) || 0 : 0,
       toolName: name || '',
       toolId: id || '',

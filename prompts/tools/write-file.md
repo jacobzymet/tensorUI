@@ -1,1 +1,1 @@
-Create or overwrite a UTF-8 file in the workspace. Pass {"path": "...", "content": "..."}. Prefer str_replace when the file already exists.
+Create a new UTF-8 file in the workspace. Pass {"path": "...", "content": "..."}. Existing files are protected by default: use str_replace for edits or additions. For an intentional whole-file rewrite only, read the entire file first, then pass overwrite=true and its complete replacement content. This replaces the whole file; it never appends or patches.

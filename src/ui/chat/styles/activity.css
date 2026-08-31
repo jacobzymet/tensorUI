@@ -65,6 +65,18 @@
   color: var(--color-ok);
   flex: 0 0 auto;
 }
+.agent-step-error {
+  display: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  color: var(--color-danger);
+}
+.agent-step.is-failed .agent-step-dot {
+  background: color-mix(in oklch, var(--color-danger) 12%, var(--color-paper-2));
+  border-color: color-mix(in oklch, var(--color-danger) 34%, transparent);
+}
+.agent-step.is-failed .agent-step-error { display: block; }
+.agent-step.is-failed .agent-step-status { color: var(--color-danger); }
 .agent-step-spinner {
   display: none;
   width: 100%;

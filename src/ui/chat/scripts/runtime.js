@@ -1355,6 +1355,7 @@ function timelineSignature(timeline) {
         part.detail,
         part.result,
         part.note || '',
+        typeof part.ok === 'boolean' ? String(part.ok) : '',
         part.live ? '1' : '0',
         part.approval || '',
         part.approvalRisk || '',
@@ -2111,13 +2112,14 @@ async function driveAssistantSse(convo, stream, response) {
         last.live = false;
         last.executing = false;
         last.result = resultText;
+        last.ok = payload.ok !== false;
         last.endedAt = Date.now();
         last.durationMs = last.startedAt
           ? Math.max(0, last.endedAt - last.startedAt)
           : 0;
         last.justSettled = true;
         scheduleJustSettledClear(last);
-        if (note) last.note = note;
+        last.note = note;
         last.approval = payload.ok === false && /denied/i.test(resultText) ? 'denied' : '';
         if (payload.image && /^data:image\//i.test(String(payload.image))) {
           last.image = String(payload.image);
@@ -2133,9 +2135,12 @@ async function driveAssistantSse(convo, stream, response) {
       } else {
         stream.timeline.push({
           type: 'tool',
+          id,
           name: payload.name || 'skill',
           detail: '',
           result: resultText,
+          ok: payload.ok !== false,
+          approval: payload.ok === false && /denied/i.test(resultText) ? 'denied' : '',
           note,
           ...(payload.image && /^data:image\//i.test(String(payload.image))
             ? { image: String(payload.image) }
@@ -2447,6 +2452,8 @@ async function driveAssistantSse(convo, stream, response) {
           name: part.name,
           detail: part.detail,
           result: part.result,
+          ...(typeof part.ok === 'boolean' ? { ok: part.ok } : {}),
+          ...(part.approval === 'denied' ? { approval: 'denied' } : {}),
           ...(part.note ? { note: part.note } : {}),
           ...(part.kind ? { kind: part.kind } : {}),
           ...(Number.isFinite(part.durationMs) ? { durationMs: Math.round(part.durationMs) } : {}),

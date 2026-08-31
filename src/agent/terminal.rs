@@ -75,6 +75,35 @@ pub struct CommandResult {
     pub timed_out: bool,
 }
 
+impl CommandResult {
+    pub fn tool_output(&self) -> String {
+        let mut out = format!(
+            "$ {}\ncwd: {}\nexit: {}\n",
+            self.command,
+            self.cwd,
+            self.exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "unknown".into())
+        );
+        out.push_str(&self.output);
+        if self.output.trim().is_empty() && self.ok {
+            out.push_str("(no output)");
+        }
+        out
+    }
+}
+
+pub fn agent_shell_context() -> String {
+    #[cfg(windows)]
+    let shell = "Windows PowerShell 5.1 (-NoProfile, -NonInteractive). Send PowerShell syntax directly, without a powershell -Command wrapper. Unix commands such as tail/sed are not built in. && and || are not supported; use separate calls or explicit exit-code checks.";
+    #[cfg(not(windows))]
+    let shell = "/bin/sh -c (POSIX shell). Do not assume Bash-only syntax.";
+    format!(
+        "Host OS: {}. run_terminal shell: {shell}",
+        std::env::consts::OS
+    )
+}
+
 pub fn clamp_timeout_secs(raw: u64) -> u64 {
     if raw == 0 {
         DEFAULT_TIMEOUT_SECS
@@ -185,7 +214,7 @@ pub async fn run_agent_command(
     workspace_root: &str,
     args: &Value,
     timeout_secs: u64,
-) -> Result<String, String> {
+) -> Result<CommandResult, String> {
     let command = args
         .get("command")
         .and_then(|v| v.as_str())
@@ -213,27 +242,7 @@ pub async fn run_agent_command(
         return Err(format!("cwd is not a directory: {}", cwd.display()));
     }
     let timeout_secs = clamp_timeout_secs(timeout_secs);
-    let result = run_command(command, &cwd, timeout_secs, MAX_OUTPUT_BYTES).await?;
-    let mut out = format!(
-        "$ {command}\ncwd: {}\nexit: {}\n",
-        result.cwd,
-        result
-            .exit_code
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "unknown".into())
-    );
-    if result.timed_out {
-        out.push_str(&format!(
-            "Timed out after {timeout_secs}s. Output so far:\n{}",
-            result.output
-        ));
-    } else {
-        out.push_str(&result.output);
-    }
-    if result.output.trim().is_empty() && result.ok {
-        out.push_str("(no output)");
-    }
-    Ok(out)
+    run_command(command, &cwd, timeout_secs, MAX_OUTPUT_BYTES).await
 }
 
 fn spawn_pty(
@@ -490,20 +499,18 @@ async fn run_command(
     let child = cmd
         .spawn()
         .map_err(|err| format!("Could not start command: {err}"))?;
-    #[cfg(unix)]
     let pid = child.id();
+    // Keep the child alive until tree cleanup runs on timeout. Dropping the
+    // wait future first would kill only the parent and orphan Windows children.
+    let output_future = child.wait_with_output();
+    tokio::pin!(output_future);
     let (output, timed_out) =
-        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
-            .await
-        {
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), &mut output_future).await {
             Ok(Ok(output)) => (output, false),
             Ok(Err(err)) => return Err(format!("Command failed to run: {err}")),
             Err(_) => {
-                #[cfg(unix)]
                 if let Some(pid) = pid {
-                    unsafe {
-                        libc::kill(-(pid as i32), libc::SIGKILL);
-                    }
+                    kill_process_tree(pid);
                 }
                 return Ok(CommandResult {
                     command: command.to_string(),
@@ -546,9 +553,26 @@ async fn run_command(
 fn shell_command(command: &str) -> Command {
     #[cfg(windows)]
     {
-        let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
-        let mut cmd = Command::new(comspec);
-        cmd.args(["/D", "/S", "/C", command]);
+        use base64::Engine;
+
+        // Avoid cmd.exe and a second layer of quote/$ expansion. PowerShell's
+        // encoded input is UTF-16LE, while captured output should be UTF-8.
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\n\
+             $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n\
+             {command}\n\
+             if (-not $?) {{ if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}; exit 1 }}"
+        );
+        let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let mut cmd = Command::new(windows_powershell());
+        cmd.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            &encoded,
+        ]);
         cmd
     }
     #[cfg(not(windows))]
@@ -696,6 +720,66 @@ mod tests {
         assert_eq!(clamp_timeout_secs(0), 30);
         assert_eq!(clamp_timeout_secs(2), 5);
         assert_eq!(clamp_timeout_secs(999), 120);
+    }
+
+    #[tokio::test]
+    async fn agent_commands_preserve_exit_status_and_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = run_command("exit 7", dir.path(), 5, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, Some(7));
+        assert!(!result.ok);
+        assert!(!result.timed_out);
+        assert!(result.tool_output().contains("exit: 7"));
+        let result = run_command("echo tensorui-command-ok", dir.path(), 5, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap();
+        assert!(result.ok, "{}", result.tool_output());
+        assert!(result.output.contains("tensorui-command-ok"));
+    }
+
+    #[tokio::test]
+    async fn agent_command_timeout_is_not_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = if cfg!(windows) {
+            "Start-Sleep -Seconds 10"
+        } else {
+            "sleep 10"
+        };
+        let result = run_command(command, dir.path(), 1, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap();
+        assert!(!result.ok);
+        assert!(result.timed_out);
+        assert_eq!(result.exit_code, None);
+        assert!(result.tool_output().contains("Timed out"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_handles_variables_quotes_unicode_and_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = run_command(
+            "$probe = '你好 $literal'; Write-Output $probe",
+            dir.path(),
+            5,
+            MAX_OUTPUT_BYTES,
+        )
+        .await
+        .unwrap();
+        assert!(result.ok, "{}", result.tool_output());
+        assert!(result.output.contains("你好 $literal"));
+        let result = run_command("cmd.exe /D /C exit 9", dir.path(), 5, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, Some(9));
+        assert!(!result.ok);
+        let result = run_command("Write-Error 'probe error'", dir.path(), 5, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap();
+        assert!(!result.ok);
+        assert!(result.output.contains("probe error"));
     }
 
     #[test]
