@@ -819,10 +819,10 @@
                 </button>
                 <div id="terminalOptions" class="capability-advanced-panel is-collapsed" hidden>
                   <div class="settings-row">
-                    <label class="field-label" for="settingTerminalTimeout">Timeout (seconds)</label>
+                    <label class="field-label" for="settingTerminalTimeout">Initial wait (seconds)</label>
                     <div>
-                      <input class="field-input" id="settingTerminalTimeout" type="number" min="5" max="120" step="1" value="30">
-                      <p class="field-hint">Commands are killed after this many seconds (5–120). Use the composer terminal button to open a panel under the chat box.</p>
+                      <input class="field-input" id="settingTerminalTimeout" type="number" min="5" max="30" step="1" value="30">
+                      <p class="field-hint">Agent commands yield within this many seconds (5–30), then continue in a session the agent can poll or stop. Sessions expire after 30 minutes without a poll. The composer terminal button opens a separate interactive panel.</p>
                     </div>
                   </div>
                 </div>

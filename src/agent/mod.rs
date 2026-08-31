@@ -3,8 +3,11 @@
 
 pub mod browser;
 pub mod chat;
+mod context;
 pub mod fs;
 pub mod media;
+mod output;
+mod patch;
 pub mod search;
 pub mod skills;
 pub mod terminal;
@@ -12,7 +15,7 @@ pub mod terminal;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        Mutex, OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
@@ -244,6 +247,12 @@ pub struct AgentRequest {
     pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub reasoning: Option<Value>,
+    /// Estimated total context window, including tool schemas and response reserve.
+    #[serde(default)]
+    pub context_window_tokens: Option<usize>,
+    /// Host-reported model context; explicit request/environment settings win.
+    #[serde(skip)]
+    pub(crate) model_context_window_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -462,6 +471,10 @@ pub struct AgentSkills {
     /// Set by the server from the live conversation id. Ignored if the client sends it.
     #[serde(default, skip_deserializing)]
     pub session_id: String,
+    #[serde(skip)]
+    history: Option<Arc<context::History>>,
+    #[serde(skip)]
+    tool_output_bytes: usize,
 }
 
 impl Default for AgentSkills {
@@ -489,6 +502,8 @@ impl Default for AgentSkills {
             terminal_timeout_secs: default_terminal_timeout_secs(),
             browser: false,
             session_id: String::new(),
+            history: None,
+            tool_output_bytes: output::TOOL_OUTPUT_BYTES,
         }
     }
 }
@@ -656,8 +671,11 @@ fn is_recoverable_tool(name: &str) -> bool {
             | "grep"
             | "write_file"
             | "str_replace"
+            | "apply_patch"
             | "delete_file"
             | "run_terminal"
+            | "wait_terminal"
+            | "read_tool_history"
             | "browser_navigate"
             | "browser_snapshot"
             | "browser_click"
@@ -741,8 +759,23 @@ async fn run_agent_loop(
 ) -> Result<(), StreamFail> {
     request.apply_deep_research();
     request.normalize_force_tools();
+    let history = Arc::new(context::History::new().map_err(StreamFail::Other)?);
+    request.skills.history = Some(history.clone());
+    let context_window = request
+        .context_window_tokens
+        .or_else(|| {
+            std::env::var("TENSORUI_AGENT_CONTEXT_TOKENS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+        })
+        .or(request.model_context_window_tokens)
+        .unwrap_or(if api_key.is_some() { 32_768 } else { 8192 })
+        .min(2_000_000);
+    let mut context_notice_sent = false;
     let ephemeral_browser = request.skills.browser && request.skills.session_id.trim().is_empty();
-    if ephemeral_browser {
+    if request.skills.session_id.trim().is_empty()
+        && (request.skills.browser || request.skills.terminal)
+    {
         request.skills.session_id = format!("ephemeral_{}", new_tool_call_id());
     }
     let _browser_guard = EphemeralBrowserGuard {
@@ -869,6 +902,28 @@ async fn run_agent_loop(
         )
         .await?;
 
+        let definitions = if allow_tools {
+            openai_tools_payload(&request.skills, user_skills, request.deep_research)
+        } else {
+            Vec::new()
+        };
+        let message_budget =
+            context::message_budget(context_window, &definitions).map_err(StreamFail::Other)?;
+        request.skills.tool_output_bytes = message_budget.clamp(1024, output::TOOL_OUTPUT_BYTES);
+        let mut messages = std::mem::take(&mut request.messages);
+        let archive = history.clone();
+        let (messages, compacted) = tokio::task::spawn_blocking(move || {
+            let compacted = archive.fit(&mut messages, message_budget)?;
+            Ok::<_, String>((messages, compacted))
+        })
+        .await
+        .map_err(|err| StreamFail::Other(err.to_string()))?
+        .map_err(StreamFail::Other)?;
+        request.messages = messages;
+        if compacted && !context_notice_sent {
+            context_notice_sent = true;
+            send_sse(tx, sse_agent(json!({"phase":"notice", "message":"Older tool activity was archived to stay within the context budget. The agent can retrieve it; user instructions were preserved."}))).await?;
+        }
         let turn = stream_once(
             api_base,
             api_key,
@@ -1023,9 +1078,13 @@ async fn run_agent_loop(
             }
 
             let mut approval_rx = HashMap::new();
+            let mut approval_guards = Vec::new();
             for call in &calls {
                 if needs_approval(&call.name, request.skills.approval_mode) {
                     approval_rx.insert(call.id.clone(), arm_tool_approval(&call.id)?);
+                    approval_guards.push(ApprovalWaitGuard {
+                        id: call.id.clone(),
+                    });
                 }
             }
             for call in &calls {
@@ -1189,8 +1248,9 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
         "ask_user" => true,
         "activate_skill" | "read_skill" => !user_skills.is_empty(),
         "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace"
-        | "delete_file" => skills.filesystem_ready(),
-        "run_terminal" => skills.terminal_ready(),
+        | "delete_file" | "apply_patch" => skills.filesystem_ready(),
+        "run_terminal" | "wait_terminal" => skills.terminal_ready(),
+        "read_tool_history" => skills.history.is_some(),
         name if browser::is_browser_tool(name) => skills.browser,
         "show_image" => true,
         _ => false,
@@ -1199,7 +1259,7 @@ fn capability_allowed(name: &str, skills: &AgentSkills, user_skills: &[UserSkill
 
 fn tool_risk(name: &str) -> &'static str {
     match name {
-        "write_file" | "str_replace" | "delete_file" => "write",
+        "write_file" | "str_replace" | "delete_file" | "apply_patch" => "write",
         "run_terminal" => "terminal",
         name if browser::is_browser_tool(name) => "browser",
         _ => "safe",
@@ -1207,7 +1267,7 @@ fn tool_risk(name: &str) -> &'static str {
 }
 
 fn needs_approval(name: &str, mode: ApprovalMode) -> bool {
-    if name == "ask_user" {
+    if matches!(name, "ask_user" | "wait_terminal" | "read_tool_history") {
         return false;
     }
     match mode {
@@ -1238,7 +1298,32 @@ fn tool_call_summary(call: &ToolCall) -> String {
             .unwrap_or("")
             .to_string(),
         "run_terminal" => terminal::tool_summary(&call.arguments),
+        "wait_terminal" => call
+            .arguments
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .into(),
+        "apply_patch" => call
+            .arguments
+            .get("patch")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("*** Update File: ")
+                    .or_else(|| line.strip_prefix("*** Add File: "))
+                    .or_else(|| line.strip_prefix("*** Delete File: "))
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
         "show_image" => media::tool_summary(&call.arguments),
+        "read_tool_history" => call
+            .arguments
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("Archived tool activity")
+            .into(),
         name if browser::is_browser_tool(name) => browser::tool_summary(name, &call.arguments),
         _ => fs::tool_summary(&call.name, &call.arguments),
     }
@@ -1824,6 +1909,9 @@ fn preview_tool_arguments(raw: &str) -> Value {
         "content",
         "old_string",
         "new_string",
+        "patch",
+        "session_id",
+        "id",
         "command",
         "query",
         "url",
@@ -2034,6 +2122,16 @@ fn openai_tools_payload(
             }
         }));
     }
+    if skills.history.is_some() {
+        tools_out.push(function_tool("read_tool_history", trim_prompt(tools::READ_TOOL_HISTORY),
+            json!({
+                "id": { "type": "string", "description": "Optional history_N id; omit to list the archive index" },
+                "offset": { "type": "integer", "description": "Index listing offset, default 0" },
+                "limit": { "type": "integer", "description": "Index page size, 1–20; default 10" },
+                "byte_offset": { "type": "integer", "description": "Resume reading an individual record at its returned byte offset" },
+                "max_bytes": { "type": "integer", "description": "Record page budget, 256–12000 bytes; the active context budget may lower it" }
+            }), &[]));
+    }
     if skills.filesystem_ready() {
         tools_out.push(function_tool(
             "read_file",
@@ -2041,7 +2139,9 @@ fn openai_tools_payload(
             json!({
                 "path": { "type": "string" },
                 "offset": { "type": "integer", "description": "Optional 0-based line offset" },
-                "limit": { "type": "integer", "description": "Optional max lines to return" }
+                "limit": { "type": "integer", "description": "Max lines to return (default 200, maximum 2000)" },
+                "byte_offset": { "type": "integer", "description": "Resume at the exact byte offset returned by a previous page; do not combine with offset" },
+                "max_bytes": { "type": "integer", "description": "Page content budget, 256–32000 bytes (default 32000)" }
             }),
             &["path"],
         ));
@@ -2066,6 +2166,10 @@ fn openai_tools_payload(
                 "case_insensitive": { "type": "boolean" }
             }),
             &["query"],
+        ));
+        tools_out.push(function_tool(
+            "apply_patch", trim_prompt(tools::APPLY_PATCH),
+            json!({ "patch": { "type": "string", "description": "A *** Begin Patch / *** End Patch block containing file operations and context hunks" } }), &["patch"],
         ));
         tools_out.push(function_tool(
             "write_file",
@@ -2101,9 +2205,18 @@ fn openai_tools_payload(
             &crate::prompts::fill(tools::RUN_TERMINAL, &[("shell_context", &terminal::agent_shell_context())]),
             json!({
                 "command": { "type": "string" },
-                "cwd": { "type": "string", "description": "Optional path relative to the workspace" }
+                "cwd": { "type": "string", "description": "Optional path relative to the workspace" },
+                "yield_time_ms": { "type": "integer", "description": "Return after at most this many milliseconds (0–30000) without killing a running process" }
             }),
             &["command"],
+        ));
+        tools_out.push(function_tool(
+            "wait_terminal", trim_prompt(tools::WAIT_TERMINAL),
+            json!({
+                "session_id": { "type": "string" },
+                "yield_time_ms": { "type": "integer", "description": "Wait for new output or exit, 0–30000 ms; default 1000" },
+                "terminate": { "type": "boolean", "description": "Stop this previously authorized command and its process tree; default false" }
+            }), &["session_id"],
         ));
     }
     if skills.browser {
@@ -2368,6 +2481,8 @@ async fn send_tool_result(
         "id": call.id,
         "name": call.name,
         "ok": outcome.ok,
+        "running": outcome.running,
+        "command_session_id": outcome.command_session_id,
         "preview": preview,
         "result": ui_result,
     });
@@ -2690,6 +2805,7 @@ fn parse_tool_call_json(raw: &str) -> Option<ToolCall> {
     })
 }
 
+#[derive(Clone)]
 struct ToolOutcome {
     /// Full result passed back to the model, including any operational guidance.
     text: String,
@@ -2702,6 +2818,8 @@ struct ToolOutcome {
     image_id: Option<String>,
     /// False when the tool failed softly and the model should try another approach.
     ok: bool,
+    running: bool,
+    command_session_id: Option<String>,
 }
 
 impl ToolOutcome {
@@ -2714,6 +2832,8 @@ impl ToolOutcome {
             image: None,
             image_id: None,
             ok: true,
+            running: false,
+            command_session_id: None,
         }
     }
 
@@ -2729,6 +2849,8 @@ impl ToolOutcome {
             image: None,
             image_id: None,
             ok: true,
+            running: false,
+            command_session_id: None,
         }
     }
 
@@ -2741,6 +2863,8 @@ impl ToolOutcome {
             image: None,
             image_id: None,
             ok: false,
+            running: false,
+            command_session_id: None,
         }
     }
 }
@@ -2817,25 +2941,60 @@ async fn execute_tool(
             ))
         }
         "read_file" | "list_dir" | "glob" | "grep" | "write_file" | "str_replace"
-        | "delete_file" => {
+        | "delete_file" | "apply_patch" => {
             let name = call.name.clone();
-            let args = call.arguments.clone();
+            let mut args = call.arguments.clone();
+            if name == "read_file" {
+                cap_page_bytes(
+                    &mut args,
+                    skills.tool_output_bytes.max(1024).saturating_sub(768),
+                );
+            }
             let root = skills.workspace_root.clone();
             tokio::task::spawn_blocking(move || execute_fs_tool(&name, &root, &args))
                 .await
                 .map_err(|err| err.to_string())?
                 .map(ToolOutcome::text)
         }
-        "run_terminal" => {
-            let result = terminal::run_agent_command(
-                &skills.workspace_root,
-                &call.arguments,
-                skills.terminal_timeout_secs,
-            )
-            .await?;
+        "read_tool_history" => {
+            let history = skills
+                .history
+                .clone()
+                .ok_or("Tool-history archive is unavailable")?;
+            let mut args = call.arguments.clone();
+            cap_page_bytes(
+                &mut args,
+                skills.tool_output_bytes.max(1024).saturating_sub(512),
+            );
+            tokio::task::spawn_blocking(move || history.read(&args))
+                .await
+                .map_err(|err| err.to_string())?
+                .map(ToolOutcome::text)
+        }
+        "run_terminal" | "wait_terminal" => {
+            let result = if call.name == "run_terminal" {
+                terminal::run_agent_command(
+                    &skills.workspace_root,
+                    &skills.session_id,
+                    &call.arguments,
+                    skills.terminal_timeout_secs,
+                )
+                .await?
+            } else {
+                terminal::wait_agent_command(
+                    &skills.workspace_root,
+                    &skills.session_id,
+                    &call.arguments,
+                )
+                .await?
+            };
             let mut outcome = ToolOutcome::text(result.tool_output());
             outcome.ok = result.ok;
-            if !result.ok {
+            outcome.running = result.running;
+            outcome.command_session_id = result.session_id;
+            if result.running {
+                outcome.note = Some("Process running; poll this session to continue".into());
+            } else if !result.ok {
                 outcome.note = Some(
                     if result.timed_out {
                         "Command timed out"
@@ -2900,6 +3059,7 @@ fn execute_fs_tool(name: &str, root: &str, args: &Value) -> Result<String, Strin
         "grep" => fs::grep_files(&ws, args),
         "write_file" => fs::write_file(&ws, args),
         "str_replace" => fs::str_replace(&ws, args),
+        "apply_patch" => patch::apply(&ws, args),
         "delete_file" => fs::delete_file(&ws, args),
         other => Err(format!("Unknown file tool '{other}'.")),
     }
@@ -2912,115 +3072,162 @@ async fn approve_and_execute_tools(
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
     mut approval_rx: HashMap<String, oneshot::Receiver<bool>>,
 ) -> Result<Vec<(ToolCall, ToolOutcome)>, StreamFail> {
-    let mut auto = Vec::new();
-    let mut pending = Vec::new();
-    for call in calls {
-        if approval_rx.contains_key(&call.id) {
-            send_tool_approval(tx, &call).await?;
-            pending.push(call);
-        } else {
-            auto.push(call);
-        }
-    }
-    let mut denied = Vec::new();
     let mut executed = Vec::new();
-    if !auto.is_empty() {
-        let batch = execute_tool_batch(auto, skills, user_skills).await?;
-        emit_executed_tools(tx, &batch).await?;
-        executed.extend(batch);
-    }
-    for call in pending {
-        let rx = approval_rx
-            .remove(&call.id)
-            .ok_or_else(|| StreamFail::Other("Missing tool approval waiter.".into()))?;
-        let allow = wait_for_approval(&call.id, rx, tx).await?;
-        if allow {
-            send_tool_executing(tx, &call).await?;
-            let batch = execute_tool_batch(vec![call], skills, user_skills).await?;
-            emit_executed_tools(tx, &batch).await?;
-            executed.extend(batch);
-        } else {
-            let outcome = ToolOutcome::soft_failure(
-                "The user denied this tool call. Continue without it, or ask them to approve a smaller request.",
-            );
-            send_tool_result(tx, &call, &outcome).await?;
-            denied.push((call, outcome));
+    for group in schedule_tool_batches(calls) {
+        // Announce all approvals in this independent group, but never move a
+        // later read ahead of a mutation awaiting approval.
+        for call in &group {
+            if approval_rx.contains_key(&call.id) {
+                send_tool_approval(tx, call).await?;
+            }
         }
+        let mut ready = Vec::new();
+        let mut results = Vec::new();
+        for (index, call) in group.into_iter().enumerate() {
+            let allow = if let Some(rx) = approval_rx.remove(&call.id) {
+                wait_for_approval(&call.id, rx, tx).await?
+            } else {
+                true
+            };
+            if allow {
+                send_tool_executing(tx, &call).await?;
+                ready.push((index, call));
+            } else {
+                let outcome = ToolOutcome::soft_failure(
+                    "The user denied this tool call. Continue without it; do not bypass this decision.",
+                );
+                send_tool_result(tx, &call, &outcome).await?;
+                results.push((index, call, outcome));
+            }
+        }
+        let mut running = stream::iter(ready)
+            .map(|(index, call)| async move {
+                let outcome = execute_recoverable_tool(&call, skills, user_skills).await;
+                (index, call, outcome)
+            })
+            .buffer_unordered(MAX_CONCURRENT_TOOL_CALLS);
+        while let Some((index, call, outcome)) = running.next().await {
+            let outcome = outcome.map_err(StreamFail::Other)?;
+            // Surface each completed read immediately, not after the slowest.
+            emit_executed_tool(tx, &call, &outcome).await?;
+            results.push((index, call, outcome));
+        }
+        results.sort_by_key(|(index, _, _)| *index);
+        executed.extend(
+            results
+                .into_iter()
+                .map(|(_, call, outcome)| (call, outcome)),
+        );
     }
-    let mut combined = denied;
-    combined.extend(executed);
-    Ok(combined)
+    Ok(executed)
 }
 
-async fn emit_executed_tools(
+async fn emit_executed_tool(
     tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
-    batch: &[(ToolCall, ToolOutcome)],
+    call: &ToolCall,
+    outcome: &ToolOutcome,
 ) -> Result<(), StreamFail> {
-    for (call, outcome) in batch {
-        if call.name == "run_terminal" {
-            send_sse(
-                tx,
-                sse_agent(json!({
-                    "phase": "terminal",
-                    "command": terminal::tool_summary(&call.arguments),
-                    "output": outcome.ui_text,
-                    "ok": outcome.ok,
-                    "source": "agent",
-                })),
-            )
-            .await?;
-        }
-        send_tool_result(tx, call, outcome).await?;
+    if matches!(call.name.as_str(), "run_terminal" | "wait_terminal") {
+        send_sse(
+            tx,
+            sse_agent(json!({
+                "phase": "terminal",
+                "command": terminal::tool_summary(&call.arguments),
+                "output": outcome.ui_text,
+                "ok": outcome.ok,
+                "running": outcome.running,
+                "session_id": outcome.command_session_id,
+                "source": "agent",
+            })),
+        )
+        .await?;
     }
+    send_tool_result(tx, call, outcome).await?;
     Ok(())
 }
 
+#[cfg(test)]
 async fn execute_tool_batch(
     calls: Vec<ToolCall>,
     skills: &AgentSkills,
     user_skills: &[UserSkill],
 ) -> Result<Vec<(ToolCall, ToolOutcome)>, StreamFail> {
-    let skills = skills.clone();
-    let user_skills = user_skills.to_vec();
-    // Workspace reads, writes, and commands may depend on each other. Keep
-    // their call order; only batches of independent web lookups run in parallel.
-    let concurrency = if calls
-        .iter()
-        .all(|call| matches!(call.name.as_str(), "web_search" | "fetch_url"))
-    {
-        MAX_CONCURRENT_TOOL_CALLS
-    } else {
-        1
-    };
-    let mut finished: Vec<(usize, ToolCall, Result<ToolOutcome, String>)> =
-        stream::iter(calls.into_iter().enumerate())
-            .map(|(index, call)| {
-                let skills = skills.clone();
-                let user_skills = user_skills.clone();
-                async move {
-                    let outcome = match execute_tool(&call, &skills, &user_skills).await {
-                        Ok(outcome) => Ok(outcome),
-                        Err(err) if is_recoverable_tool(&call.name) => {
-                            let mut outcome = ToolOutcome::soft_failure(&err);
-                            outcome.text = lookup_retry_guidance(&call.name, &err);
-                            Ok(outcome)
-                        }
-                        Err(err) => Err(err),
-                    };
-                    (index, call, outcome)
-                }
-            })
-            .buffer_unordered(concurrency)
-            .collect()
-            .await;
-    if let Some((_, _, Err(err))) = finished.iter().find(|(_, _, result)| result.is_err()) {
-        return Err(StreamFail::Other(err.clone()));
+    let mut finished = Vec::new();
+    for group in schedule_tool_batches(calls) {
+        let results = join_all(group.into_iter().map(|call| async move {
+            let outcome = execute_recoverable_tool(&call, skills, user_skills).await;
+            (call, outcome)
+        }))
+        .await;
+        for (call, outcome) in results {
+            finished.push((call, outcome.map_err(StreamFail::Other)?));
+        }
     }
-    finished.sort_by_key(|(index, _, _)| *index);
-    Ok(finished
-        .into_iter()
-        .map(|(_, call, outcome)| (call, outcome.expect("lookup errors were converted")))
-        .collect())
+    Ok(finished)
+}
+
+fn parallel_read(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "grep"
+            | "web_search"
+            | "fetch_url"
+            | "read_tool_history"
+    )
+}
+
+fn schedule_tool_batches(calls: Vec<ToolCall>) -> Vec<Vec<ToolCall>> {
+    let mut groups: Vec<Vec<ToolCall>> = Vec::new();
+    for call in calls {
+        if parallel_read(&call.name)
+            && let Some(group) = groups.last_mut()
+            && group.len() < MAX_CONCURRENT_TOOL_CALLS
+            && group.iter().all(|item| parallel_read(&item.name))
+        {
+            group.push(call);
+        } else {
+            groups.push(vec![call]);
+        }
+    }
+    groups
+}
+
+async fn execute_recoverable_tool(
+    call: &ToolCall,
+    skills: &AgentSkills,
+    user_skills: &[UserSkill],
+) -> Result<ToolOutcome, String> {
+    let mut outcome = match execute_tool(call, skills, user_skills).await {
+        Ok(outcome) => outcome,
+        Err(err) if is_recoverable_tool(&call.name) => {
+            let mut outcome = ToolOutcome::soft_failure(&err);
+            outcome.text = lookup_retry_guidance(&call.name, &err);
+            outcome
+        }
+        Err(err) => return Err(err),
+    };
+    outcome.text = output::truncate_text(
+        &outcome.text,
+        skills
+            .tool_output_bytes
+            .max(1024)
+            .min(output::TOOL_OUTPUT_BYTES),
+    );
+    outcome.ui_text = output::truncate_text(&outcome.ui_text, output::TOOL_OUTPUT_BYTES);
+    Ok(outcome)
+}
+
+fn cap_page_bytes(args: &mut Value, max_bytes: usize) {
+    if let Some(object) = args.as_object_mut() {
+        let requested = object
+            .get("max_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(max_bytes as u64);
+        object.insert("max_bytes".into(), json!(requested.min(max_bytes as u64)));
+    }
 }
 
 fn format_page_window(url: &str, full_text: &str, offset: usize, max_chars: usize) -> String {
@@ -3743,6 +3950,7 @@ mod tests {
         let skills = AgentSkills {
             filesystem: true,
             terminal: true,
+            session_id: new_runtime_id("test"),
             workspace_root: dir.path().display().to_string(),
             ..AgentSkills::default()
         };
@@ -3810,6 +4018,154 @@ mod tests {
         let description = terminal["function"]["description"].as_str().unwrap();
         assert!(description.contains(std::env::consts::OS));
         assert!(!description.contains("{{shell_context}}"));
+    }
+
+    #[test]
+    fn independent_reads_share_bounded_groups_and_mutations_form_barriers() {
+        let names = [
+            "read_file",
+            "grep",
+            "apply_patch",
+            "read_file",
+            "list_dir",
+            "run_terminal",
+            "read_file",
+            "browser_click",
+            "read_file",
+        ];
+        let calls = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| ToolCall {
+                id: i.to_string(),
+                name: (*name).into(),
+                arguments: json!({}),
+            })
+            .collect();
+        let groups = schedule_tool_batches(calls);
+        assert_eq!(
+            groups.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![2, 1, 2, 1, 1, 1, 1]
+        );
+        assert_eq!(
+            groups
+                .into_iter()
+                .flatten()
+                .map(|call| call.name)
+                .collect::<Vec<_>>(),
+            names
+        );
+        let many = (0..19)
+            .map(|i| ToolCall {
+                id: i.to_string(),
+                name: "read_file".into(),
+                arguments: json!({}),
+            })
+            .collect();
+        assert!(
+            schedule_tool_batches(many)
+                .iter()
+                .all(|group| group.len() <= MAX_CONCURRENT_TOOL_CALLS)
+        );
+    }
+
+    #[test]
+    fn shipped_coding_tools_and_instructions_fit_the_default_local_context() {
+        let skills = AgentSkills {
+            filesystem: true,
+            terminal: true,
+            workspace_root: "C:/workspace".into(),
+            history: Some(Arc::new(context::History::new().unwrap())),
+            ..AgentSkills::default()
+        };
+        let definitions = openai_tools_payload(&skills, &[], false);
+        let budget = context::message_budget(8192, &definitions).unwrap();
+        let mut messages = vec![
+            json!({"role":"user", "content":"Inspect this project and fix the reported bug."}),
+        ];
+        inject_agent_system_prompt(
+            &mut messages,
+            &skills,
+            &[],
+            false,
+            DeepResearchOutput::Brief,
+            &[],
+        );
+        assert!(
+            context::estimate_tokens(&json!(messages)) + 512 <= budget,
+            "Coding tools must leave room for a useful tool response: budget={budget}"
+        );
+        assert!(
+            !skills
+                .history
+                .as_ref()
+                .unwrap()
+                .fit(&mut messages, budget)
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_after_a_pending_write_waits_for_approval_or_denial() {
+        for allow in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("a.txt"), "original").unwrap();
+            let skills = AgentSkills {
+                filesystem: true,
+                workspace_root: dir.path().display().to_string(),
+                ..AgentSkills::default()
+            };
+            let id = new_runtime_id("approval_test");
+            let calls = vec![
+                ToolCall {
+                    id: id.clone(),
+                    name: "str_replace".into(),
+                    arguments: json!({"path":"a.txt", "old_string":"original", "new_string":"edited"}),
+                },
+                ToolCall {
+                    id: new_runtime_id("read"),
+                    name: "read_file".into(),
+                    arguments: json!({"path":"a.txt"}),
+                },
+            ];
+            let approvals = HashMap::from([(id.clone(), arm_tool_approval(&id).unwrap())]);
+            let (tx, mut events) = mpsc::channel(32);
+            let mut execution = std::pin::pin!(approve_and_execute_tools(
+                calls,
+                &skills,
+                &[],
+                &tx,
+                approvals
+            ));
+            assert!(
+                timeout(Duration::from_millis(40), &mut execution)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+                "original"
+            );
+            while let Ok(event) = events.try_recv() {
+                assert!(
+                    !String::from_utf8(event.unwrap())
+                        .unwrap()
+                        .contains("read_file")
+                );
+            }
+            submit_tool_approval(&id, allow).unwrap();
+            let results = timeout(Duration::from_secs(5), execution)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(results[0].1.ok, allow);
+            assert!(
+                results[1]
+                    .1
+                    .ui_text
+                    .contains(if allow { "edited" } else { "original" })
+            );
+        }
     }
 
     #[test]

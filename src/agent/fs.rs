@@ -1,14 +1,17 @@
 //! Workspace-scoped file tools. Paths are confined to `workspace_root`.
 
 use std::{
+    collections::HashMap,
     fs::{self, File},
-    io::{Read, Write},
+    io::{BufRead, BufReader, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, RwLock, Weak},
 };
 
 use serde_json::Value;
 
-const MAX_READ_BYTES: u64 = 512_000;
+const MAX_READ_BYTES: usize = 32_000;
+const DEFAULT_READ_LINES: usize = 200;
 const MAX_WRITE_BYTES: usize = 1_000_000;
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_GLOB_MATCHES: usize = 200;
@@ -29,6 +32,7 @@ const SKIP_DIR_NAMES: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct Workspace {
     root: PathBuf,
+    pub(super) access: Arc<RwLock<()>>,
 }
 
 impl Workspace {
@@ -57,7 +61,18 @@ impl Workspace {
             return Err("Workspace path is not a directory.".into());
         }
         let root = canonicalize_dir(&path)?;
-        Ok(Self { root })
+        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<RwLock<()>>>>> = OnceLock::new();
+        let mut locks = LOCKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let access = locks.get(&root).and_then(Weak::upgrade).unwrap_or_else(|| {
+            let lock = Arc::new(RwLock::new(()));
+            locks.insert(root.clone(), Arc::downgrade(&lock));
+            lock
+        });
+        Ok(Self { root, access })
     }
 
     pub fn root_display(&self) -> String {
@@ -82,6 +97,10 @@ impl Workspace {
 }
 
 pub fn read_file(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .read()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let path = arg_path(args, "path")?;
     let abs = ws.resolve(&path)?;
     let meta = fs::symlink_metadata(&abs).map_err(|_| format!("File not found: {path}"))?;
@@ -91,33 +110,128 @@ pub fn read_file(ws: &Workspace, args: &Value) -> Result<String, String> {
     if !meta.is_file() {
         return Err(format!("{path} is not a file."));
     }
-    if meta.len() > MAX_READ_BYTES {
-        return Err(format!(
-            "File is {} bytes; max read size is {MAX_READ_BYTES} bytes. Narrow with offset/limit or a smaller file.",
-            meta.len()
-        ));
-    }
-    let mut file = File::open(&abs).map_err(|err| format!("Could not read {path}: {err}"))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .map_err(|err| format!("Could not read {path}: {err}"))?;
-    if buf.contains(&0) {
-        return Err(
-            "Refusing to read a binary file. Use the terminal for binary inspection.".into(),
-        );
-    }
-    let text = String::from_utf8(buf).map_err(|_| "File is not valid UTF-8.".to_string())?;
     let offset = arg_usize(args, "offset").unwrap_or(0);
-    let limit = arg_usize(args, "limit");
-    Ok(slice_lines(
-        &text,
-        offset,
-        limit,
-        &ws.relative_display(&abs),
+    let limit = arg_usize(args, "limit")
+        .unwrap_or(DEFAULT_READ_LINES)
+        .clamp(1, 2000);
+    let max_bytes = arg_usize(args, "max_bytes")
+        .unwrap_or(MAX_READ_BYTES)
+        .clamp(256, MAX_READ_BYTES);
+    let byte_offset = args.get("byte_offset").and_then(Value::as_u64).unwrap_or(0);
+    if byte_offset > 0 && offset > 0 {
+        return Err("Use either offset (lines) or byte_offset, not both.".into());
+    }
+    if byte_offset > meta.len() {
+        return Err("byte_offset is past the end of the file.".into());
+    }
+    let file = File::open(&abs).map_err(|err| format!("Could not read {path}: {err}"))?;
+    let mut reader = BufReader::new(file);
+    reader
+        .seek(SeekFrom::Start(byte_offset))
+        .map_err(|err| err.to_string())?;
+    let page = read_page(&mut reader, offset, limit, max_bytes)
+        .map_err(|err| format!("Could not read {path}: {err}"))?;
+    let next = byte_offset + page.consumed;
+    let label = ws.relative_display(&abs);
+    let continuation = if page.more {
+        format!(
+            "More content available: call read_file with path={path:?}, byte_offset={next}. Do not combine it with offset.\n"
+        )
+    } else {
+        "End of file.\n".into()
+    };
+    Ok(format!(
+        "{label} ({} bytes; page starts at line offset {offset}, byte offset {byte_offset})\n{continuation}--- file content ---\n{}",
+        meta.len(),
+        page.text
     ))
 }
 
+struct ReadPage {
+    text: String,
+    consumed: u64,
+    more: bool,
+}
+
+// Only buffer the requested page. Even an enormous single line is bounded;
+// the byte cursor lets the next call resume without rescanning earlier pages.
+fn read_page(
+    reader: &mut impl BufRead,
+    offset: usize,
+    limit: usize,
+    max_bytes: usize,
+) -> Result<ReadPage, String> {
+    let mut consumed = 0u64;
+    let mut skipped = 0usize;
+    while skipped < offset {
+        let buf = reader.fill_buf().map_err(|err| err.to_string())?;
+        if buf.is_empty() {
+            break;
+        }
+        let take = buf
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(buf.len());
+        if buf[take - 1] == b'\n' {
+            skipped += 1;
+        }
+        reader.consume(take);
+        consumed += take as u64;
+    }
+    let mut bytes = Vec::new();
+    let mut lines = 0;
+    while lines < limit && bytes.len() < max_bytes {
+        let buf = reader.fill_buf().map_err(|err| err.to_string())?;
+        if buf.is_empty() {
+            break;
+        }
+        let available = buf.len().min(max_bytes - bytes.len());
+        let take = buf[..available]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(available);
+        if buf[take - 1] == b'\n' {
+            lines += 1;
+        }
+        bytes.extend_from_slice(&buf[..take]);
+        reader.consume(take);
+    }
+    let more = !reader.fill_buf().map_err(|err| err.to_string())?.is_empty();
+    if bytes.contains(&0) {
+        return Err("Refusing to read binary content.".into());
+    }
+    // A byte-limited page can end inside UTF-8. Leave that partial character
+    // for the next byte-offset request rather than returning corrupt text.
+    let mut valid = match std::str::from_utf8(&bytes) {
+        Ok(_) => bytes.len(),
+        Err(err) if err.error_len().is_none() && more => err.valid_up_to(),
+        Err(_) => {
+            return Err("Content is not valid UTF-8, or byte_offset is inside a character.".into());
+        }
+    };
+    if more && valid > 0 && bytes[valid - 1] == b'\r' {
+        valid -= 1;
+    }
+    let more = more || valid < bytes.len();
+    bytes.truncate(valid);
+    consumed += valid as u64;
+    let text = String::from_utf8(bytes)
+        .map_err(|err| err.to_string())?
+        .replace("\r\n", "\n");
+    Ok(ReadPage {
+        text,
+        consumed,
+        more,
+    })
+}
+
 pub fn list_dir(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .read()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
@@ -167,6 +281,10 @@ pub fn list_dir(ws: &Workspace, args: &Value) -> Result<String, String> {
 }
 
 pub fn glob_files(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .read()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let pattern = args
         .get("pattern")
         .or_else(|| args.get("glob"))
@@ -194,6 +312,10 @@ pub fn glob_files(ws: &Workspace, args: &Value) -> Result<String, String> {
 }
 
 pub fn grep_files(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .read()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let query = args
         .get("query")
         .or_else(|| args.get("pattern"))
@@ -272,6 +394,10 @@ pub fn grep_files(ws: &Workspace, args: &Value) -> Result<String, String> {
 }
 
 pub fn write_file(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .write()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let path = arg_path(args, "path")?;
     let content = args
         .get("content")
@@ -314,6 +440,10 @@ pub fn write_file(ws: &Workspace, args: &Value) -> Result<String, String> {
 }
 
 pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .write()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let path = arg_path(args, "path")?;
     let old = args
         .get("old_string")
@@ -397,6 +527,10 @@ pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
 }
 
 pub fn delete_file(ws: &Workspace, args: &Value) -> Result<String, String> {
+    let _access = ws
+        .access
+        .write()
+        .map_err(|_| "Workspace access lock poisoned")?;
     let path = arg_path(args, "path")?;
     let abs = ws.resolve(&path)?;
     if abs == ws.root {
@@ -454,6 +588,7 @@ fn arg_usize(args: &Value, key: &str) -> Option<usize> {
     })
 }
 
+#[cfg(test)]
 fn slice_lines(text: &str, offset: usize, limit: Option<usize>, label: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let total = lines.len();
@@ -526,7 +661,16 @@ fn ensure_parent_in_workspace(ws: &Workspace, parent: &Path) -> Result<(), Strin
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(), String> {
+pub(super) fn atomic_write(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(), String> {
+    atomic_write_with_permissions(path, bytes, overwrite, None)
+}
+
+pub(super) fn atomic_write_with_permissions(
+    path: &Path,
+    bytes: &[u8],
+    overwrite: bool,
+    permissions: Option<&fs::Permissions>,
+) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
@@ -552,6 +696,15 @@ fn atomic_write(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(), String
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
         file.write_all(bytes)
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
+        let permissions = permissions.cloned().or_else(|| {
+            overwrite
+                .then(|| fs::metadata(path).ok().map(|meta| meta.permissions()))
+                .flatten()
+        });
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)
+                .map_err(|err| format!("Could not preserve permissions: {err}"))?;
+        }
         file.sync_all()
             .map_err(|err| format!("Could not write {}: {err}", path.display()))?;
         drop(file);
@@ -791,6 +944,68 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ws = Workspace::open(dir.path().to_str().unwrap()).unwrap();
         (dir, ws)
+    }
+
+    #[test]
+    fn large_file_pages_resume_without_losing_unicode_or_crlf_boundaries() {
+        let (dir, ws) = temp_ws();
+        let original = format!("{}\r\n{}\r\nend", "x".repeat(254), "é🙂".repeat(100_000));
+        fs::write(dir.path().join("large.txt"), &original).unwrap();
+        let mut offset = 0;
+        let mut restored = String::new();
+        loop {
+            let page = read_file(
+                &ws,
+                &json!({"path":"large.txt", "byte_offset":offset, "max_bytes":256}),
+            )
+            .unwrap();
+            let (header, body) = page.split_once("--- file content ---\n").unwrap();
+            assert!(body.len() <= 256);
+            restored.push_str(body);
+            if header.contains("End of file.") {
+                break;
+            }
+            let next: u64 = header
+                .split("byte_offset=")
+                .nth(1)
+                .unwrap()
+                .split('.')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(restored, original.replace("\r\n", "\n"));
+    }
+
+    #[test]
+    fn defaults_to_200_lines_and_rejects_invalid_byte_cursors() {
+        let (dir, ws) = temp_ws();
+        fs::write(dir.path().join("lines.txt"), "é\r\n".repeat(1000)).unwrap();
+        let page = read_file(&ws, &json!({"path":"lines.txt"})).unwrap();
+        assert_eq!(
+            page.split_once("--- file content ---\n")
+                .unwrap()
+                .1
+                .lines()
+                .count(),
+            200
+        );
+        assert!(page.contains("byte_offset=800"));
+        let last = read_file(&ws, &json!({"path":"lines.txt", "offset":999})).unwrap();
+        assert!(last.ends_with("é\n"));
+        assert!(last.contains("End of file."));
+        for args in [
+            json!({"byte_offset":1}),
+            json!({"byte_offset":4001}),
+            json!({"byte_offset":4,"offset":1}),
+        ] {
+            let mut args = args;
+            args["path"] = json!("lines.txt");
+            assert!(read_file(&ws, &args).is_err());
+        }
     }
 
     #[test]

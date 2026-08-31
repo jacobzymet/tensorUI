@@ -91,7 +91,8 @@
   border-color: transparent;
   box-shadow: none;
 }
-.agent-step.is-live .agent-step-spinner {
+.agent-step.is-live .agent-step-spinner,
+.agent-step.is-running .agent-step-spinner {
   display: block;
   animation: agent-step-spin 0.75s linear infinite;
 }

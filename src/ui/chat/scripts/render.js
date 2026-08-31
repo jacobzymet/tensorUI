@@ -53,6 +53,7 @@ function wrapTimelineStep(innerHtml, {
   live = false,
   done = false,
   failed = false,
+  running = false,
   justSettled = false,
   startedAt = 0,
   toolName = '',
@@ -63,6 +64,7 @@ function wrapTimelineStep(innerHtml, {
   if (live) classes.push('is-live');
   if (done) classes.push('is-done');
   if (failed) classes.push('is-failed');
+  if (running) classes.push('is-running');
   if (justSettled) classes.push('is-just-done');
   const attrs = [];
   if (toolId) attrs.push('data-tool-id="' + escapeHtml(toolId) + '"');
@@ -749,6 +751,8 @@ function skillLabel(name, args) {
   if (name === 'ask_user') return 'Clarifying questions';
   if (name === 'activate_skill' || name === 'read_skill') return 'Activate skill';
   if (name === 'read_file') return 'Read file';
+  if (name === 'read_tool_history') return 'Read tool history';
+  if (name === 'apply_patch') return 'Apply patch';
   if (name === 'list_dir') return 'List folder';
   if (name === 'glob') return 'Find files';
   if (name === 'grep') return 'Search files';
@@ -756,6 +760,7 @@ function skillLabel(name, args) {
   if (name === 'str_replace') return 'Edit file';
   if (name === 'delete_file') return 'Delete file';
   if (name === 'run_terminal') return 'Terminal';
+  if (name === 'wait_terminal') return 'Command session';
   if (name === 'browser_navigate') return 'Open page';
   if (name === 'browser_snapshot') return 'Page snapshot';
   if (name === 'browser_click') return 'Click';
@@ -771,6 +776,7 @@ function skillLabel(name, args) {
 
 function toolBodyFromArgs(name, args) {
   const a = args && typeof args === 'object' ? args : {};
+  if (name === 'apply_patch') return String(a.patch || '');
   if (name === 'write_file') return String(a.content || '');
   if (name === 'str_replace') {
     const oldText = String(a.old_string || a.old || '');
@@ -779,6 +785,7 @@ function toolBodyFromArgs(name, args) {
     return (oldText ? ('- ' + oldText) : '') + (oldText && newText ? '\n\n' : '') + (newText ? ('+ ' + newText) : '');
   }
   if (name === 'run_terminal') return String(a.command || '');
+  if (name === 'wait_terminal') return a.terminate ? 'Terminate session ' + String(a.session_id || '') : '';
   if (name === 'browser_evaluate') return String(a.expression || '');
   if (name === 'browser_type') return String(a.text || '');
   return '';
@@ -791,18 +798,18 @@ function skillLiveVerb(name, args) {
   if (name === 'fetch_url') return 'Fetching';
   if (name === 'ask_user') return 'Waiting';
   if (name === 'activate_skill' || name === 'read_skill') return 'Loading skill';
-  if (name === 'read_file') return 'Reading';
+  if (name === 'read_file' || name === 'read_tool_history') return 'Reading';
   if (name === 'list_dir' || name === 'glob' || name === 'grep') return 'Scanning';
-  if (name === 'write_file' || name === 'str_replace' || name === 'delete_file') {
+  if (name === 'write_file' || name === 'str_replace' || name === 'apply_patch' || name === 'delete_file') {
     if (executing) {
       if (name === 'delete_file') return 'Deleting';
-      if (name === 'str_replace') return 'Editing';
+      if (name === 'str_replace' || name === 'apply_patch') return 'Editing';
       return 'Writing';
     }
     if (approval === 'allowed') return 'Queued';
     return 'Drafting';
   }
-  if (name === 'run_terminal') {
+  if (name === 'run_terminal' || name === 'wait_terminal') {
     if (executing) return 'Running';
     if (approval === 'allowed') return 'Queued';
     return 'Drafting';
@@ -862,7 +869,7 @@ function skillToolIcon(name, args) {
   if (name === 'ask_user') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>';
   }
-  if (name === 'run_terminal') {
+  if (name === 'run_terminal' || name === 'wait_terminal') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>';
   }
   if (name === 'show_image') {
@@ -871,7 +878,7 @@ function skillToolIcon(name, args) {
   if (String(name || '').startsWith('browser_')) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><circle cx="7" cy="6" r="0.6" fill="currentColor"/><circle cx="9.5" cy="6" r="0.6" fill="currentColor"/></svg>';
   }
-  if (name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir' || name === 'glob' || name === 'grep') {
+  if (name === 'read_tool_history' || name === 'apply_patch' || name === 'read_file' || name === 'write_file' || name === 'str_replace' || name === 'delete_file' || name === 'list_dir' || name === 'glob' || name === 'grep') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
   }
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>';
@@ -987,7 +994,8 @@ function patchLiveToolBodies(root, parts) {
     const step = findLiveToolStep(root, part);
     const card = step && step.querySelector('.agent-step-card');
     if (!card) return;
-    const bodyText = String(part.body || toolBodyFromArgs(part.name, part.args) || '').slice(0, 20000);
+    const fullBody = String(part.body || toolBodyFromArgs(part.name, part.args) || '');
+    const bodyText = part.approval === 'pending' ? fullBody : fullBody.length > 20000 ? fullBody.slice(0, 20000) + '\n[Preview truncated]' : fullBody;
     let bodyWrap = step.querySelector(':scope > .agent-step-card .agent-step-body');
     let streamEl = bodyWrap && bodyWrap.querySelector('.agent-step-body-stream');
     if (!bodyText) {
@@ -1336,6 +1344,9 @@ function skillDetailLabel(name) {
   if (name === 'fetch_url' || name === 'browser_navigate') return 'URL';
   if (name === 'activate_skill' || name === 'read_skill') return 'Skill';
   if (name === 'run_terminal') return 'Command';
+  if (name === 'wait_terminal') return 'Session';
+  if (name === 'apply_patch') return 'Files';
+  if (name === 'read_tool_history') return 'Record';
   if (name === 'browser_click' || name === 'browser_type' || name === 'browser_press' || name === 'browser_wait') {
     return 'Target';
   }
@@ -1371,6 +1382,7 @@ function agentStepHtml({
   result,
   note,
   ok,
+  running,
   live,
   kind,
   startedAt,
@@ -1397,7 +1409,8 @@ function agentStepHtml({
   const failed = !live && ok === false;
   const status = live
     ? '<span class="agent-step-status">' + escapeHtml(waitingApproval ? 'Needs approval' : skillLiveVerb(name, { kind, approval, executing })) + '</span>'
-    : failed ? '<span class="agent-step-status">' + (approval === 'denied' ? 'Denied' : 'Failed') + '</span>' : '';
+    : failed ? '<span class="agent-step-status">' + (approval === 'denied' ? 'Denied' : 'Failed') + '</span>'
+    : running ? '<span class="agent-step-status">Running</span>' : '';
   const meta = (status || elapsed)
     ? '<span class="agent-step-meta">' + status +
       (elapsed ? '<span class="agent-step-elapsed">' + escapeHtml(elapsed) + '</span>' : '') +
@@ -1422,7 +1435,8 @@ function agentStepHtml({
         '<button type="button" class="btn btn-outline" data-tool-deny="' + escapeHtml(id || '') + '">Deny</button>' +
       '</div>'
     : '';
-  const bodyText = String(body || toolBodyFromArgs(name, args) || '').slice(0, 20000);
+  const fullBody = String(body || toolBodyFromArgs(name, args) || '');
+  const bodyText = waitingApproval ? fullBody : fullBody.length > 20000 ? fullBody.slice(0, 20000) + '\n[Preview truncated]' : fullBody;
   const bodyHtml = bodyText
     ? '<div class="agent-step-body' + (live ? ' is-live' : '') + '"><pre class="agent-step-body-stream">' + escapeHtml(bodyText) + '</pre></div>'
     : '';
@@ -1456,9 +1470,10 @@ function agentStepHtml({
     '</div>',
     {
       live: !!live,
-      done: !live && !failed,
+      done: !live && !failed && !running,
       failed,
-      justSettled: !!justSettled && !failed,
+      running: !live && !!running,
+      justSettled: !!justSettled && !failed && !running,
       startedAt: live ? Number(startedAt) || 0 : 0,
       toolName: name || '',
       toolId: id || '',

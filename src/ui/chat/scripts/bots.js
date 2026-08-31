@@ -549,7 +549,7 @@ function defaultBotsTurn() {
       filesystem: !!settings.skillFilesystem,
       workspace_root: sessionWorkspaceRoot(),
       terminal: !!settings.skillTerminal,
-      terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
+      terminal_timeout_secs: Math.min(30, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
       browser: !!settings.skillBrowser,
     },
     deepResearch: false,

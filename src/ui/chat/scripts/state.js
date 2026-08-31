@@ -1403,7 +1403,7 @@ function normalizeSettings(parsed) {
     terminalTimeoutSecs: (() => {
       const n = Number(parsed.terminalTimeoutSecs);
       if (!Number.isFinite(n)) return DEFAULT_SETTINGS.terminalTimeoutSecs;
-      return Math.min(120, Math.max(5, Math.round(n)));
+      return Math.min(30, Math.max(5, Math.round(n)));
     })(),
     terminalHeightVh: (() => {
       const n = Number(parsed.terminalHeightVh);

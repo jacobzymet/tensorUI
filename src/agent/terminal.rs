@@ -1,4 +1,7 @@
-//! User terminals are real PTYs (ConPTY on Windows). Agent commands stay one-shot.
+//! User terminals are PTYs; agent processes use separate resumable sessions.
+
+mod commands;
+pub use commands::poll as wait_agent_command;
 
 use std::{
     collections::HashMap,
@@ -9,7 +12,6 @@ use std::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         mpsc as std_mpsc,
     },
-    time::Duration,
 };
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -21,10 +23,12 @@ use tokio::{
 
 use super::fs::Workspace;
 
+#[cfg(test)]
+use std::time::Duration;
+
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MIN_TIMEOUT_SECS: u64 = 5;
-const MAX_TIMEOUT_SECS: u64 = 120;
-const MAX_OUTPUT_BYTES: usize = 64_000;
+const MAX_TIMEOUT_SECS: u64 = 30;
 const MAX_COMMAND_CHARS: usize = 8_000;
 const MAX_LIVE_SESSIONS: usize = 8;
 const REPLAY_MAX: usize = 256_000;
@@ -73,18 +77,33 @@ pub struct CommandResult {
     pub exit_code: Option<i32>,
     pub ok: bool,
     pub timed_out: bool,
+    pub session_id: Option<String>,
+    pub running: bool,
 }
 
 impl CommandResult {
     pub fn tool_output(&self) -> String {
         let mut out = format!(
-            "$ {}\ncwd: {}\nexit: {}\n",
-            self.command,
-            self.cwd,
-            self.exit_code
-                .map(|code| code.to_string())
-                .unwrap_or_else(|| "unknown".into())
+            "session_id: {}\nexit: {}\n",
+            self.session_id.as_deref().unwrap_or("none"),
+            if self.running {
+                "running".into()
+            } else {
+                self.exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            }
         );
+        if self.running {
+            out.push_str("Process is still running. Call wait_terminal with this session_id; do not restart the command.\n");
+        }
+        // Keep the resumable ID and exit status ahead of potentially long
+        // commands so output budgeting never removes critical session metadata.
+        out.push_str(&format!(
+            "cwd: {}\n$ {}\n",
+            super::output::truncate_text(&self.cwd, 256),
+            super::output::truncate_text(&self.command, 1024)
+        ));
         out.push_str(&self.output);
         if self.output.trim().is_empty() && self.ok {
             out.push_str("(no output)");
@@ -212,6 +231,7 @@ pub async fn attach_session(id: &str) -> Option<SessionIo> {
 
 pub async fn run_agent_command(
     workspace_root: &str,
+    owner: &str,
     args: &Value,
     timeout_secs: u64,
 ) -> Result<CommandResult, String> {
@@ -241,8 +261,8 @@ pub async fn run_agent_command(
     if !cwd.is_dir() {
         return Err(format!("cwd is not a directory: {}", cwd.display()));
     }
-    let timeout_secs = clamp_timeout_secs(timeout_secs);
-    run_command(command, &cwd, timeout_secs, MAX_OUTPUT_BYTES).await
+    let wait_ms = commands::yield_ms(args, clamp_timeout_secs(timeout_secs).min(30) * 1000);
+    commands::start(command, &cwd, &ws, owner, wait_ms).await
 }
 
 fn spawn_pty(
@@ -475,81 +495,6 @@ fn next_title(used: &[String]) -> String {
     }
 }
 
-async fn run_command(
-    command: &str,
-    cwd: &Path,
-    timeout_secs: u64,
-    max_bytes: usize,
-) -> Result<CommandResult, String> {
-    let mut cmd = shell_command(command);
-    cmd.current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    hide_window(&mut cmd);
-    #[cfg(unix)]
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setpgid(0, 0);
-            Ok(())
-        });
-    }
-
-    let child = cmd
-        .spawn()
-        .map_err(|err| format!("Could not start command: {err}"))?;
-    let pid = child.id();
-    // Keep the child alive until tree cleanup runs on timeout. Dropping the
-    // wait future first would kill only the parent and orphan Windows children.
-    let output_future = child.wait_with_output();
-    tokio::pin!(output_future);
-    let (output, timed_out) =
-        match tokio::time::timeout(Duration::from_secs(timeout_secs), &mut output_future).await {
-            Ok(Ok(output)) => (output, false),
-            Ok(Err(err)) => return Err(format!("Command failed to run: {err}")),
-            Err(_) => {
-                if let Some(pid) = pid {
-                    kill_process_tree(pid);
-                }
-                return Ok(CommandResult {
-                    command: command.to_string(),
-                    cwd: cwd.display().to_string(),
-                    output: format!("Timed out after {timeout_secs}s; process killed."),
-                    exit_code: None,
-                    ok: false,
-                    timed_out: true,
-                });
-            }
-        };
-
-    let mut text = String::new();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stdout.trim().is_empty() {
-        text.push_str(&stdout);
-        if !text.ends_with('\n') {
-            text.push('\n');
-        }
-    }
-    if !stderr.trim().is_empty() {
-        if !text.is_empty() {
-            text.push_str("--- stderr ---\n");
-        }
-        text.push_str(&stderr);
-    }
-    let truncated = truncate_output(&text, max_bytes);
-    let code = output.status.code();
-    Ok(CommandResult {
-        command: command.to_string(),
-        cwd: cwd.display().to_string(),
-        output: truncated,
-        exit_code: code,
-        ok: output.status.success() && !timed_out,
-        timed_out,
-    })
-}
-
 fn shell_command(command: &str) -> Command {
     #[cfg(windows)]
     {
@@ -581,17 +526,6 @@ fn shell_command(command: &str) -> Command {
         cmd.args(["-c", command]);
         cmd
     }
-}
-
-fn truncate_output(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_string();
-    }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n… truncated ({} bytes total)", &text[..end], text.len())
 }
 
 pub fn block_reason(command: &str) -> Option<&'static str> {
@@ -719,67 +653,7 @@ mod tests {
     fn timeout_clamps() {
         assert_eq!(clamp_timeout_secs(0), 30);
         assert_eq!(clamp_timeout_secs(2), 5);
-        assert_eq!(clamp_timeout_secs(999), 120);
-    }
-
-    #[tokio::test]
-    async fn agent_commands_preserve_exit_status_and_output() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = run_command("exit 7", dir.path(), 5, MAX_OUTPUT_BYTES)
-            .await
-            .unwrap();
-        assert_eq!(result.exit_code, Some(7));
-        assert!(!result.ok);
-        assert!(!result.timed_out);
-        assert!(result.tool_output().contains("exit: 7"));
-        let result = run_command("echo tensorui-command-ok", dir.path(), 5, MAX_OUTPUT_BYTES)
-            .await
-            .unwrap();
-        assert!(result.ok, "{}", result.tool_output());
-        assert!(result.output.contains("tensorui-command-ok"));
-    }
-
-    #[tokio::test]
-    async fn agent_command_timeout_is_not_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let command = if cfg!(windows) {
-            "Start-Sleep -Seconds 10"
-        } else {
-            "sleep 10"
-        };
-        let result = run_command(command, dir.path(), 1, MAX_OUTPUT_BYTES)
-            .await
-            .unwrap();
-        assert!(!result.ok);
-        assert!(result.timed_out);
-        assert_eq!(result.exit_code, None);
-        assert!(result.tool_output().contains("Timed out"));
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn powershell_handles_variables_quotes_unicode_and_failures() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = run_command(
-            "$probe = '你好 $literal'; Write-Output $probe",
-            dir.path(),
-            5,
-            MAX_OUTPUT_BYTES,
-        )
-        .await
-        .unwrap();
-        assert!(result.ok, "{}", result.tool_output());
-        assert!(result.output.contains("你好 $literal"));
-        let result = run_command("cmd.exe /D /C exit 9", dir.path(), 5, MAX_OUTPUT_BYTES)
-            .await
-            .unwrap();
-        assert_eq!(result.exit_code, Some(9));
-        assert!(!result.ok);
-        let result = run_command("Write-Error 'probe error'", dir.path(), 5, MAX_OUTPUT_BYTES)
-            .await
-            .unwrap();
-        assert!(!result.ok);
-        assert!(result.output.contains("probe error"));
+        assert_eq!(clamp_timeout_secs(999), 30);
     }
 
     #[test]

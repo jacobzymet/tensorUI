@@ -1280,6 +1280,8 @@ function toolDetailFromPayload(payload) {
     ? payload.arguments
     : {};
   if (args.command) return String(args.command);
+  if (args.session_id) return String(args.session_id);
+  if (args.patch) return (String(args.patch).match(/^\*\*\* (?:Add|Update|Delete|Move to)(?: File)?: .+$/gm) || []).map((line) => line.replace(/^\*\*\* [^:]+: /, '').trim()).join(', ');
   if (args.path) return String(args.path);
   if (args.pattern) return String(args.pattern);
   if (args.url) return String(args.url);
@@ -1356,6 +1358,8 @@ function timelineSignature(timeline) {
         part.result,
         part.note || '',
         typeof part.ok === 'boolean' ? String(part.ok) : '',
+        part.running ? '1' : '0',
+        part.commandSessionId || '',
         part.live ? '1' : '0',
         part.approval || '',
         part.approvalRisk || '',
@@ -1658,7 +1662,7 @@ async function runAssistantTurn(convo, {
     filesystem: !!settings.skillFilesystem,
     workspace_root: sessionWorkspaceRoot(),
     terminal: !!settings.skillTerminal,
-    terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
+    terminal_timeout_secs: Math.min(30, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
     browser: !!settings.skillBrowser,
   };
   if (deepResearch) {
@@ -2105,6 +2109,16 @@ async function driveAssistantSse(convo, stream, response) {
       const note = payload.note ? String(payload.note).trim() : '';
       const name = payload.name || 'skill';
       const id = payload.id ? String(payload.id) : '';
+      const commandSessionId = payload.command_session_id ? String(payload.command_session_id) : '';
+      if (commandSessionId && !payload.running) {
+        for (const part of stream.timeline) {
+          if (part.type === 'tool' && part.commandSessionId === commandSessionId && part.running) {
+            part.running = false;
+            part.ok = payload.ok !== false;
+            part.note = payload.ok === false ? 'Process failed; see latest session result' : 'Process completed; see latest session result';
+          }
+        }
+      }
       const liveTools = stream.timeline.filter((part) => part.type === 'tool' && part.live);
       const last = (id && stream.timeline.find((part) => part.type === 'tool' && part.id === id))
         || (!id && (liveTools.find((part) => part.name === name) || liveTools[liveTools.length - 1]));
@@ -2113,6 +2127,8 @@ async function driveAssistantSse(convo, stream, response) {
         last.executing = false;
         last.result = resultText;
         last.ok = payload.ok !== false;
+        last.running = !!payload.running;
+        last.commandSessionId = commandSessionId;
         last.endedAt = Date.now();
         last.durationMs = last.startedAt
           ? Math.max(0, last.endedAt - last.startedAt)
@@ -2140,6 +2156,8 @@ async function driveAssistantSse(convo, stream, response) {
           detail: '',
           result: resultText,
           ok: payload.ok !== false,
+          running: !!payload.running,
+          commandSessionId,
           approval: payload.ok === false && /denied/i.test(resultText) ? 'denied' : '',
           note,
           ...(payload.image && /^data:image\//i.test(String(payload.image))
@@ -2453,6 +2471,7 @@ async function driveAssistantSse(convo, stream, response) {
           detail: part.detail,
           result: part.result,
           ...(typeof part.ok === 'boolean' ? { ok: part.ok } : {}),
+          ...(part.commandSessionId ? { commandSessionId: part.commandSessionId, running: !!part.running } : {}),
           ...(part.approval === 'denied' ? { approval: 'denied' } : {}),
           ...(part.note ? { note: part.note } : {}),
           ...(part.kind ? { kind: part.kind } : {}),

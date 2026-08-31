@@ -95,3 +95,42 @@ test('live tools and legacy saved cards remain compatible', () => {
   assert.match(context.agentStepHtml({ name: 'read_file', live: true }), /class="agent-step is-live"/);
   assert.match(context.agentStepHtml({ name: 'read_file', live: false }), /class="agent-step is-done"/);
 });
+
+test('yielded commands persist as running, never as successful completion', () => {
+  const context = harness();
+  context.onAgentEvent({ phase: 'tool_result', id: 'start', name: 'run_terminal', ok: true, running: true, command_session_id: 'cmd_1', result: 'exit: running' });
+  const part = context.persist()[0];
+  assert.equal(part.running, true);
+  assert.equal(part.commandSessionId, 'cmd_1');
+  const html = context.agentStepHtml(part);
+  assert.match(html, /is-running/);
+  assert.match(html, />Running<\/span>/);
+  assert.doesNotMatch(html, /is-done|is-just-done|is-failed/);
+  assert.notEqual(context.timelineSignature([part]), context.timelineSignature([{ ...part, running: false }]));
+});
+
+test('a final poll settles only earlier cards belonging to the same session', () => {
+  const context = harness([
+    { type: 'tool', id: 'a', name: 'run_terminal', commandSessionId: 'cmd_1', running: true, live: false, ok: true },
+    { type: 'tool', id: 'b', name: 'run_terminal', commandSessionId: 'cmd_2', running: true, live: false, ok: true },
+  ]);
+  context.onAgentEvent({ phase: 'tool_result', id: 'poll', name: 'wait_terminal', command_session_id: 'cmd_1', running: false, ok: false, result: 'exit: 7' });
+  const parts = context.persist();
+  assert.equal(parts[0].running, false);
+  assert.equal(parts[0].ok, false);
+  assert.equal(parts[1].running, true);
+  assert.match(context.agentStepHtml(parts[0]), /is-failed/);
+  assert.match(context.agentStepHtml(parts[2]), /is-failed/);
+});
+
+test('patch approval renders the complete patch and completed previews disclose truncation', () => {
+  const context = harness();
+  const patch = '*** Begin Patch\n*** Add File: a.txt\n+' + 'x'.repeat(21000) + '\n+REVIEW_THIS_TAIL\n*** End Patch';
+  assert.equal(context.toolBodyFromArgs('apply_patch', { patch }), patch);
+  const pending = context.agentStepHtml({ name: 'apply_patch', args: { patch }, live: true, approval: 'pending' });
+  assert.match(pending, /Apply patch/);
+  assert.match(pending, /REVIEW_THIS_TAIL/);
+  assert.doesNotMatch(pending, /Preview truncated/);
+  assert.match(context.agentStepHtml({ name: 'apply_patch', args: { patch }, live: false }), /Preview truncated/);
+  assert.equal(context.skillLabel('read_tool_history'), 'Read tool history');
+});

@@ -786,6 +786,11 @@ async fn chat_completions(
             if let Some(id) = conversation_id.as_deref() {
                 request.skills.session_id = id.to_string();
             }
+            request.model_context_window_tokens = thinking_model
+                .as_ref()
+                .and_then(|model| model.context_length)
+                .filter(|length| *length > 0)
+                .and_then(|length| usize::try_from(length).ok());
             agent::stream_agent(
                 &api_base,
                 key,

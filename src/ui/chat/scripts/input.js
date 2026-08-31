@@ -785,7 +785,7 @@ function resolveTurnSkills(mentionIds) {
       filesystem,
       workspace_root: sessionWorkspaceRoot(),
       terminal: terminalCap,
-      terminal_timeout_secs: Math.min(120, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
+      terminal_timeout_secs: Math.min(30, Math.max(5, Number(settings.terminalTimeoutSecs) || 30)),
       browser: browserCap,
   };
   if (deep) {

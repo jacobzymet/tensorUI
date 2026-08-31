@@ -117,13 +117,16 @@ pub mod tools {
         include_str!("../../prompts/tools/fetch-url-with-search.md");
     pub const ACTIVATE_SKILL: &str = include_str!("../../prompts/tools/activate-skill.md");
     pub const READ_FILE: &str = include_str!("../../prompts/tools/read-file.md");
+    pub const READ_TOOL_HISTORY: &str = include_str!("../../prompts/tools/read-tool-history.md");
     pub const LIST_DIR: &str = include_str!("../../prompts/tools/list-dir.md");
     pub const GLOB: &str = include_str!("../../prompts/tools/glob.md");
     pub const GREP: &str = include_str!("../../prompts/tools/grep.md");
     pub const WRITE_FILE: &str = include_str!("../../prompts/tools/write-file.md");
     pub const STR_REPLACE: &str = include_str!("../../prompts/tools/str-replace.md");
+    pub const APPLY_PATCH: &str = include_str!("../../prompts/tools/apply-patch.md");
     pub const DELETE_FILE: &str = include_str!("../../prompts/tools/delete-file.md");
     pub const RUN_TERMINAL: &str = include_str!("../../prompts/tools/run-terminal.md");
+    pub const WAIT_TERMINAL: &str = include_str!("../../prompts/tools/wait-terminal.md");
     pub const BROWSER_NAVIGATE: &str = include_str!("../../prompts/tools/browser-navigate.md");
     pub const BROWSER_SNAPSHOT: &str = include_str!("../../prompts/tools/browser-snapshot.md");
     pub const BROWSER_CLICK: &str = include_str!("../../prompts/tools/browser-click.md");

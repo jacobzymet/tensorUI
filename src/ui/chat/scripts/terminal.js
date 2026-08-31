@@ -576,7 +576,7 @@ async function ensureTerminalSession() {
 }
 
 function onAgentTerminalEvent(_payload) {
-  // Agent run_terminal is a separate one-shot process; do not write into the user's PTY.
+  // Agent command sessions are separate from the user's PTY. Results appear in Activity.
 }
 
 function initTerminalPanel() {
