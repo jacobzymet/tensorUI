@@ -326,6 +326,10 @@
   padding: 0.15rem 0.45rem 0.15rem 0.55rem;
   font-size: var(--text-xs);
 }
+.loop-agent-role {
+  min-height: 3.4rem;
+  resize: vertical;
+}
 .loop-agent-remove {
   flex: 0 0 auto;
   width: 1.7rem;
@@ -404,7 +408,7 @@
 }
 .trace-member {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   min-width: 0;
   padding: 0.4rem 0.4rem 0.4rem 0.5rem;
@@ -416,6 +420,7 @@
   flex: 0 0 auto;
   width: 1.65rem;
   height: 1.65rem;
+  margin-top: 0.15rem;
   border-radius: 50%;
   overflow: hidden;
   position: relative;
@@ -446,11 +451,14 @@
 }
 .trace-member-desc {
   display: block;
-  color: var(--color-muted);
+  width: 100%;
+  min-height: 2.4rem;
+  margin-top: 0.12rem;
+  padding: 0.28rem 0.45rem;
   font-size: var(--text-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  color: var(--color-ink);
+  resize: vertical;
 }
 .trace-member-kick {
   flex: 0 0 auto;
