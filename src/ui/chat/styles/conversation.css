@@ -876,7 +876,7 @@ html[data-theme="light"] .agent-process-note {
 .chat-model-select-wrap.is-hidden { display: none !important; }
 .chat-model-menu {
   position: fixed;
-  z-index: 200;
+  z-index: 240;
   width: min(22rem, calc(100vw - 1rem));
   min-width: 0;
   max-width: none;

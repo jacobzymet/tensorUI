@@ -357,6 +357,8 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/", get(chat_page))
         .route("/projects", get(chat_page))
         .route("/ghost", get(chat_page))
+        .route("/loops", get(chat_page))
+        .route("/loops/c/{id}", get(chat_page))
         .route("/bots", get(chat_page))
         .route("/bots/c/{id}", get(chat_page))
         .route("/c/{id}", get(chat_page))

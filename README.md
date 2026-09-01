@@ -5,7 +5,7 @@ A local, lightweight, open source LLM harness for humanity.
 A more permissive alternative to [Open WebUI](https://github.com/open-webui/open-webui), with:
 
 - OpenAI-compatible and Anthropic Messages–compatible providers, local or cloud
-- Chats, projects, custom bots, group chats, memory, model pins, and attachments
+- Chats, projects, Loops (multi-model group chats), memory, model pins, and attachments
 - Agent mode with approvals, web search, URL fetching, deep research, browser control, filesystem access, terminal access, and custom skills
 - Optional local GGUF model management through an installed `llama-server`
 - Passphrase-based encryption at rest for chats, preferences, provider credentials, and skills

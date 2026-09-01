@@ -474,7 +474,8 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
 }
 .dialog.bot-dialog {
   height: auto;
-  max-height: min(36rem, calc(100vh - 2rem));
+  max-height: min(44rem, calc(100vh - 2rem));
+  width: min(42rem, calc(100vw - 2rem));
 }
 .project-dialog-main {
   display: flex;

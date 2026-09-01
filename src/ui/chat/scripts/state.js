@@ -844,6 +844,9 @@ function normalizeConversation(convo) {
     participantBotIds: Array.isArray(convo.participantBotIds)
       ? convo.participantBotIds.filter((id) => typeof id === 'string')
       : [],
+    loopAgents: Array.isArray(convo.loopAgents)
+      ? convo.loopAgents.map((bot) => (typeof normalizeBot === 'function' ? normalizeBot(bot) : bot))
+      : [],
     groupMemory: typeof convo.groupMemory === 'string' ? convo.groupMemory : '',
     botsHeldBy: typeof convo.botsHeldBy === 'string' ? convo.botsHeldBy : null,
     sideThreadOf: typeof convo.sideThreadOf === 'string' ? convo.sideThreadOf : null,
@@ -1276,7 +1279,7 @@ let draftIncognito = false;
 let activeProjectId = null;
 /** 'chat' | 'projects' */
 let mainView = 'chat';
-/** 'chat' | 'bots' — wordmark surface. Bots is a label-only destination for now. */
+/** 'chat' | 'bots' — wordmark surface. Bots is shown as Loops. */
 let appSurface = 'chat';
 let suppressUrlSync = false;
 let editingProjectId = null;
@@ -2153,7 +2156,7 @@ function applyExtractedMemories(convo, extracted, speakerBotId = null) {
     result.globalUpdated = persistGlobalMemory(extracted.globalMemory);
   }
   if (extracted.botMemory != null && speakerBotId && typeof persistBotMemory === 'function') {
-    result.botUpdated = persistBotMemory(speakerBotId, extracted.botMemory);
+    result.botUpdated = persistBotMemory(speakerBotId, extracted.botMemory, convo);
   }
   if (extracted.groupMemory != null && typeof persistGroupMemory === 'function' && typeof isBotGroup === 'function' && isBotGroup(convo)) {
     result.groupUpdated = persistGroupMemory(convo, extracted.groupMemory);

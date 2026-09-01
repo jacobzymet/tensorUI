@@ -1836,8 +1836,8 @@ function inProjectChat() {
 function currentRoutePath() {
   if (mainView === 'projects') return '/projects';
   if (appSurface === 'bots') {
-    if (activeId) return '/bots/c/' + encodeURIComponent(activeId);
-    return '/bots';
+    if (activeId) return '/loops/c/' + encodeURIComponent(activeId);
+    return '/loops';
   }
   if (activeId) return '/c/' + encodeURIComponent(activeId);
   if (activeProjectId && getProject(activeProjectId)) {
@@ -1866,7 +1866,7 @@ function parseLocationRoute() {
       catch { return part; }
     });
   if (parts.length === 0) return { kind: 'draft', incognito: false, surface: 'chat' };
-  if (parts[0] === 'bots') {
+  if (parts[0] === 'loops' || parts[0] === 'bots') {
     if (parts[1] === 'c' && parts[2]) return { kind: 'convo', id: parts[2], surface: 'bots' };
     return { kind: 'draft', incognito: false, surface: 'bots' };
   }
@@ -1965,7 +1965,7 @@ function syncProjectChrome() {
       topbarBotsHold.textContent = 'Held by @' + holder.handle;
       setIdentityTitle(
         topbarBotsHold,
-        'Other bots wait until @' + holder.handle + ' resumes or you ping them'
+        'Other agents wait until @' + holder.handle + ' resumes or you ping them'
       );
     }
   }
@@ -1990,9 +1990,9 @@ function syncProjectChrome() {
     emptyEyebrow.classList.remove('is-hidden');
     greetingEl.textContent = project.name;
   } else if (!activeId && typeof isBotsSurface === 'function' && isBotsSurface()) {
-    emptyEyebrow.textContent = 'Bots';
+    emptyEyebrow.textContent = 'Loops';
     emptyEyebrow.classList.remove('is-hidden');
-    greetingEl.textContent = 'Create a bot';
+    greetingEl.textContent = 'Start a loop';
   } else if (!activeId) {
     emptyEyebrow.classList.add('is-hidden');
     const base = greetingForNow();
@@ -2029,7 +2029,7 @@ function syncProjectChrome() {
     composerInput.placeholder = project
       ? 'Message in ' + project.name + '… Type @ to mention'
       : (typeof isBotsSurface === 'function' && isBotsSurface()
-        ? (activeId ? 'Message this room… Type @ to ping' : 'Create a bot or group to start')
+        ? (activeId ? 'Give the room a hard problem… Type @ to ping' : 'Create a loop to start')
         : 'How can I help you today? Type @ to mention');
   }
 
@@ -2043,6 +2043,8 @@ function syncProjectChrome() {
     if (incognito && !activeId) {
       modelHintEl.textContent = 'Temporary session — stays in memory only until you close the tab.'
         + (project ? ' · Project: ' + project.name : '');
+    } else if (typeof paintLoopModelHint === 'function' && paintLoopModelHint()) {
+      /* loop-specific model line */
     } else if (current.startsWith('Chatting with ')) {
       const model = current.replace(/^Chatting with /, '').split(/ · | via /)[0];
       setModelHintWithProvider(
@@ -2121,8 +2123,8 @@ function updateComposerHint() {
     const holder = getBot(heldConvo.botsHeldBy);
     showComposerHint(
       holder
-        ? 'Held by @' + holder.handle + ' — other bots wait until they resume, or you ping someone'
-        : 'Room is held — other bots wait until resume'
+        ? 'Held by @' + holder.handle + ' — other agents wait until they resume, or you ping someone'
+        : 'Room is held — other agents wait until resume'
     );
     return;
   }
@@ -2424,7 +2426,7 @@ function openConversationMenu(anchor, convo, row) {
 
   const botsConvo = typeof isBotsConvo === 'function' && isBotsConvo(convo);
   if (botsConvo && typeof isBotGroup === 'function' && isBotGroup(convo)) {
-    menu.appendChild(convoMenuButton('Edit members', folderIcon, () => {
+    menu.appendChild(convoMenuButton('Edit loop', folderIcon, () => {
       closeConvoMenu();
       openGroupDialog(convo);
     }));
@@ -2456,7 +2458,7 @@ function openConversationMenu(anchor, convo, row) {
   separator.className = 'convo-menu-separator';
   separator.setAttribute('role', 'separator');
   menu.appendChild(separator);
-  menu.appendChild(convoMenuButton(botsConvo && convo.botKind === 'dm' ? 'Delete bot' : 'Delete', trashIcon, () => {
+  menu.appendChild(convoMenuButton(botsConvo && convo.botKind === 'dm' ? 'Delete bot' : (botsConvo ? 'Delete loop' : 'Delete'), trashIcon, () => {
     closeConvoMenu();
     if (botsConvo && convo.botKind === 'dm' && convo.botId && typeof deleteBotAndSession === 'function') {
       void deleteBotAndSession(convo.botId);
@@ -3526,13 +3528,13 @@ function syncMessageSpeaker(row, message) {
     if (row.classList.contains('msg-role-user')) {
       label = '@user';
     } else if (message?.speakerId && typeof getBot === 'function') {
-      speakerBot = getBot(message.speakerId);
+      speakerBot = getBot(message.speakerId, convo);
       label = speakerBot ? ('@' + speakerBot.handle) : (message.speakerHandle ? '@' + message.speakerHandle : '');
     } else if (message?.speakerHandle) {
       label = '@' + message.speakerHandle;
-      speakerBot = typeof botByHandle === 'function' ? botByHandle(message.speakerHandle) : null;
+      speakerBot = typeof botByHandle === 'function' ? botByHandle(message.speakerHandle, convo) : null;
     } else if (convo?.botKind === 'dm' && convo.botId && typeof getBot === 'function') {
-      speakerBot = getBot(convo.botId);
+      speakerBot = getBot(convo.botId, convo);
       if (speakerBot) label = '@' + speakerBot.handle;
     }
   }
@@ -3863,13 +3865,13 @@ function renderSidebar() {
     return;
   }
 
-  sidebarConvoLabel.textContent = (typeof isBotsSurface === 'function' && isBotsSurface()) ? 'Bots' : 'Recents';
+  sidebarConvoLabel.textContent = (typeof isBotsSurface === 'function' && isBotsSurface()) ? 'Loops' : 'Recents';
   const recent = uncategorizedConversations();
   if (recent.length === 0) {
     const hint = document.createElement('p');
     hint.className = 'convo-empty-hint';
     hint.textContent = (typeof isBotsSurface === 'function' && isBotsSurface())
-      ? 'No bots yet — create one to start a permanent session.'
+      ? 'No loops yet — create one so several models can work the same problem.'
       : (projects.length ? 'No general chats yet.' : 'No conversations yet.');
     list.appendChild(hint);
   } else {

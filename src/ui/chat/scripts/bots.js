@@ -3,6 +3,18 @@ const BOT_MENTION_RE = /@([a-z][a-z0-9_]{1,31}|everyone|user)\b/gi;
 const BOT_COMPACT_CHARS = 28000;
 const BOT_COMPACT_KEEP = 10;
 const BOT_GROUP_MAX_HOPS = 8;
+const LOOP_AGENT_MIN = 2;
+const LOOP_AGENT_MAX = 8;
+const LOOP_ROLE_PRESETS = [
+  { handle: 'solver', description: 'Propose a solution. Be concrete and show your work.' },
+  { handle: 'critic', description: 'Find errors, gaps, and weaker assumptions in the solution.' },
+  { handle: 'verifier', description: 'Independently check the result. Confirm or reject with evidence.' },
+  { handle: 'analyst', description: 'Break the problem into parts and name what would change the answer.' },
+  { handle: 'skeptic', description: 'Ask what would have to be true for this to be wrong.' },
+  { handle: 'synthesizer', description: 'Merge the strongest points into one answer the room can stand behind.' },
+  { handle: 'redteam', description: 'Try to break the current answer. Prefer a counterexample over vibes.' },
+  { handle: 'auditor', description: 'Check units, edge cases, citations, and whether the claim is actually supported.' },
+];
 /** Bumped on Stop so in-flight group hop loops exit instead of spawning more turns. */
 const botsOutboundEpoch = new Map();
 /** Refcount: a group stays busy between hops, not only while a stream is live. */
@@ -62,6 +74,25 @@ function isBotsSurface() {
   return appSurface === 'bots';
 }
 
+function paintLoopModelHint() {
+  if (!isBotsSurface() || !modelHintEl) return false;
+  modelHintEl.classList.remove('is-hidden');
+  const convo = conversations.find((item) => item.id === activeId);
+  const members = convo && typeof participantBots === 'function' ? participantBots(convo) : [];
+  if (!members.length) {
+    modelHintEl.textContent = 'Several models, one problem — they debate until the answer holds.';
+    return true;
+  }
+  const labels = members.map((bot) => {
+    const model = loopAgentModelLabel(bot);
+    return model ? ('@' + bot.handle + ' · ' + model) : ('@' + bot.handle);
+  });
+  modelHintEl.textContent = labels.length <= 3
+    ? labels.join('  ·  ')
+    : (members.length + ' agents, each with its own model');
+  return true;
+}
+
 function convoSurfaceOf(convo) {
   return convo && convo.surface === 'bots' ? 'bots' : 'chat';
 }
@@ -79,12 +110,39 @@ function conversationsOnSurface(surface) {
   return conversations.filter((convo) => convoSurfaceOf(convo) === want);
 }
 
-function getBot(id) {
+function allLoopAgents() {
+  const found = [];
+  const seen = new Set();
+  (conversations || []).forEach((convo) => {
+    (Array.isArray(convo?.loopAgents) ? convo.loopAgents : []).forEach((bot) => {
+      if (!bot || !bot.id || seen.has(bot.id)) return;
+      seen.add(bot.id);
+      found.push(bot);
+    });
+  });
+  return found;
+}
+
+function getBot(id, convo) {
+  if (!id) return null;
+  const scoped = Array.isArray(convo?.loopAgents) ? convo.loopAgents : null;
+  if (scoped) {
+    const hit = scoped.find((bot) => bot.id === id);
+    if (hit) return hit;
+  }
+  const fromLoop = allLoopAgents().find((bot) => bot.id === id);
+  if (fromLoop) return fromLoop;
   return bots.find((bot) => bot.id === id) || null;
 }
 
-function botByHandle(handle) {
+function botByHandle(handle, convo) {
   const key = String(handle || '').replace(/^@/, '').trim().toLowerCase();
+  if (!key) return null;
+  const scoped = convo ? participantBots(convo) : [];
+  const inRoom = scoped.find((bot) => bot.handle === key);
+  if (inRoom) return inRoom;
+  const fromLoop = allLoopAgents().find((bot) => bot.handle === key);
+  if (fromLoop) return fromLoop;
   return bots.find((bot) => bot.handle === key) || null;
 }
 
@@ -113,6 +171,7 @@ function normalizeBot(bot) {
     description: typeof bot?.description === 'string' ? bot.description : '',
     memory: typeof bot?.memory === 'string' ? bot.memory : '',
     avatarSeed,
+    model: typeof bot?.model === 'string' ? bot.model.trim() : '',
     sessionId: typeof bot?.sessionId === 'string' ? bot.sessionId : null,
     createdAt: typeof bot?.createdAt === 'number' ? bot.createdAt : Date.now(),
     updatedAt: typeof bot?.updatedAt === 'number' ? bot.updatedAt : Date.now(),
@@ -202,20 +261,38 @@ function createConvoAvatarEl(convo) {
 
 function participantBots(convo) {
   if (!isBotsConvo(convo)) return [];
+  if (Array.isArray(convo.loopAgents) && convo.loopAgents.length) {
+    return convo.loopAgents.slice();
+  }
   if (convo.botKind === 'dm' && convo.botId) {
-    const bot = getBot(convo.botId);
+    const bot = getBot(convo.botId, convo);
     return bot ? [bot] : [];
   }
   return (Array.isArray(convo.participantBotIds) ? convo.participantBotIds : [])
-    .map(getBot)
+    .map((id) => getBot(id, convo))
     .filter(Boolean);
+}
+
+function ensureLoopAgents(convo) {
+  if (!convo || !isBotsConvo(convo)) return [];
+  if (Array.isArray(convo.loopAgents) && convo.loopAgents.length) {
+    convo.participantBotIds = convo.loopAgents.map((bot) => bot.id);
+    return convo.loopAgents;
+  }
+  const members = participantBots(convo).map((bot) => normalizeBot({
+    ...bot,
+    model: bot.model || (typeof selectedChatModel === 'string' ? selectedChatModel : ''),
+  }));
+  convo.loopAgents = members;
+  convo.participantBotIds = members.map((bot) => bot.id);
+  return members;
 }
 
 function botDisplayHandle(bot) {
   return bot ? '@' + bot.handle : '@bot';
 }
 
-function parseBotMentions(raw) {
+function parseBotMentions(raw, convo) {
   const result = { everyone: false, user: false, handles: [], botIds: [] };
   const seen = new Set();
   String(raw || '').replace(BOT_MENTION_RE, (_, token) => {
@@ -225,7 +302,7 @@ function parseBotMentions(raw) {
     else if (!seen.has(key)) {
       seen.add(key);
       result.handles.push(key);
-      const bot = botByHandle(key);
+      const bot = botByHandle(key, convo);
       if (bot) result.botIds.push(bot.id);
     }
     return _;
@@ -233,8 +310,8 @@ function parseBotMentions(raw) {
   return result;
 }
 
-function persistBotMemory(botId, memoryText) {
-  const bot = getBot(botId);
+function persistBotMemory(botId, memoryText, convo) {
+  const bot = getBot(botId, convo);
   if (!bot) return false;
   const next = String(memoryText || '');
   if ((bot.memory || '') === next) return false;
@@ -315,7 +392,7 @@ function botApiMessages(convo, speakerBot, fallbackUserText) {
     else if (group) {
       if (message.role === 'user') content = '@user: ' + content;
       else if (!(speakerBot && message.speakerId === speakerBot.id)) {
-        content = '@' + (message.speakerHandle || getBot(message.speakerId)?.handle || 'bot') + ': ' + content;
+        content = '@' + (message.speakerHandle || getBot(message.speakerId, convo)?.handle || 'bot') + ': ' + content;
       }
     }
     if (!content.trim()) return;
@@ -335,8 +412,8 @@ function estimateConvoChars(convo) {
   return (convo.messages || []).reduce((sum, message) => sum + String(message.content || '').length, 0);
 }
 
-async function collectCompletionText(messages) {
-  const remote = selectedRemoteModel(latestState);
+async function collectCompletionText(messages, modelId) {
+  const remote = selectedRemoteModel(latestState, modelId);
   const body = { messages, agent: false, skills: {}, force_tools: [] };
   if (remote) {
     body.remote_base = remote.base;
@@ -415,7 +492,7 @@ async function maybeCompactBotsConvo(convo, speakerBot) {
           : (String(speakerBot?.memory || '').trim() || '(empty)'),
       }) },
       { role: 'user', content: transcript.slice(0, 24000) },
-    ]);
+    ], speakerBot?.model);
     const parsed = parseCompactJson(raw);
     if (!parsed || !parsed.summary) return;
     convo.messages = [{
@@ -437,10 +514,10 @@ async function maybeCompactBotsConvo(convo, speakerBot) {
 function botsToPing(convo, userText, { fromBotId = null, replyToSpeakerId = null } = {}) {
   const members = participantBots(convo);
   if (!members.length) return [];
-  const pings = parseBotMentions(userText);
+  const pings = parseBotMentions(userText, convo);
   if (!isBotGroup(convo)) return members.slice(0, 1);
   if (replyToSpeakerId && !fromBotId && members.some((bot) => bot.id === replyToSpeakerId)) {
-    const target = getBot(replyToSpeakerId);
+    const target = getBot(replyToSpeakerId, convo);
     return target ? [target] : [];
   }
   const heldBy = convo.botsHeldBy || null;
@@ -459,7 +536,7 @@ function botsToPing(convo, userText, { fromBotId = null, replyToSpeakerId = null
     ids = pings.botIds.filter((id) => members.some((bot) => bot.id === id));
   }
   if (fromBotId) ids = ids.filter((id) => id !== fromBotId);
-  return ids.map(getBot).filter(Boolean);
+  return ids.map((id) => getBot(id, convo)).filter(Boolean);
 }
 
 function findLinkedGroup(convo) {
@@ -684,7 +761,7 @@ async function runBotsOutbound(convo, item, userMessage, previousTitle) {
     clearBotsOutboundStopped(convo.id);
     if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
     const epoch = bumpBotsOutboundEpoch(convo.id);
-    const members = participantBots(convo);
+    const members = ensureLoopAgents(convo);
     const primary = members[0] || null;
     if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
       stopped = true;
@@ -833,7 +910,7 @@ function extraMentionItems(query, excluded) {
   const q = String(query || '').toLowerCase();
   const items = [];
   [
-    { id: 'everyone', label: 'everyone', description: 'Notify every bot here', inline: true, section: 'Room' },
+    { id: 'everyone', label: 'everyone', description: 'Notify every agent here', inline: true, section: 'Room' },
     { id: 'user', label: 'user', description: 'The human in this room', inline: true, section: 'Room' },
   ].forEach((item) => {
     if (item.label.startsWith(q) && !excluded.has(item.id)) items.push(item);
@@ -844,15 +921,180 @@ function extraMentionItems(query, excluded) {
     items.push({
       id: bot.handle,
       label: bot.handle,
-      description: bot.description || 'Bot',
+      description: loopAgentModelLabel(bot) || bot.description || 'Agent',
       inline: true,
-      section: 'Bots',
+      section: 'Agents',
     });
   });
   return items;
 }
 
-function createBotSession(bot, { group = false, title = '', participantIds = [] } = {}) {
+function loopModelOptions() {
+  if (typeof modelMenuOptions !== 'undefined' && Array.isArray(modelMenuOptions) && modelMenuOptions.length) {
+    return modelMenuOptions;
+  }
+  const models = latestState?.network?.remote_models || [];
+  if (typeof catalogOptionFromRemote === 'function') return models.map(catalogOptionFromRemote);
+  return models.map((model) => ({
+    value: model.id,
+    label: model.model || model.label || model.id,
+    provider: String(model.provider_name || '').trim(),
+  }));
+}
+
+function loopAgentModelLabel(bot) {
+  const id = typeof bot?.model === 'string' ? bot.model : '';
+  if (!id) return '';
+  const option = loopModelOptions().find((item) => item.value === id);
+  if (option) {
+    return option.provider ? (option.label + ' · ' + option.provider) : option.label;
+  }
+  return typeof modelIdLabel === 'function' ? (modelIdLabel(id) || id) : id;
+}
+
+function defaultLoopModelId(index) {
+  const options = loopModelOptions();
+  const preferred = [];
+  if (typeof recentModelIds !== 'undefined' && Array.isArray(recentModelIds)) preferred.push(...recentModelIds);
+  if (typeof pinnedModelIds !== 'undefined' && Array.isArray(pinnedModelIds)) preferred.push(...pinnedModelIds);
+  if (typeof selectedChatModel === 'string' && selectedChatModel) preferred.push(selectedChatModel);
+  const unique = [...new Set(preferred)].filter((id) => options.some((item) => item.value === id));
+  if (unique.length) return unique[index % unique.length];
+  if (options.length) return options[index % options.length].value;
+  return '';
+}
+
+function loopRolePreset(index) {
+  return LOOP_ROLE_PRESETS[index] || {
+    handle: 'agent' + (index + 1),
+    description: 'Independent take on the same problem.',
+  };
+}
+
+function uniqueLoopHandle(used, raw, fallbackIndex) {
+  const base = BOT_HANDLE_RE.test(normalizeHandle(raw))
+    ? normalizeHandle(raw)
+    : normalizeHandle(loopRolePreset(fallbackIndex).handle);
+  let handle = base || ('agent' + (fallbackIndex + 1));
+  let n = 2;
+  while (used.has(handle)) {
+    handle = (base || 'agent').slice(0, 28) + n;
+    n += 1;
+  }
+  used.add(handle);
+  return handle;
+}
+
+function loopModelTriggerLabel(modelId) {
+  const options = loopModelOptions();
+  const current = String(modelId || '').trim();
+  if (!options.length) return 'No models yet';
+  const resolved = (typeof resolveSavedModelId === 'function'
+    ? resolveSavedModelId(current, options)
+    : current) || defaultLoopModelId(0);
+  const option = options.find((item) => item.value === resolved);
+  if (option) return option.label;
+  if (current) return (typeof modelIdLabel === 'function' ? modelIdLabel(current) : current) || 'Pick a model';
+  return 'Pick a model';
+}
+
+function paintLoopModelPickerButton(btn, modelId) {
+  if (!btn) return;
+  const label = loopModelTriggerLabel(modelId);
+  const text = btn.querySelector('.loop-model-picker-label');
+  if (text) text.textContent = label;
+  else btn.textContent = label;
+  const title = loopAgentModelLabel({ model: modelId }) || label;
+  if (typeof setIdentityTitle === 'function') setIdentityTitle(btn, title);
+  else btn.title = title;
+}
+
+function paintLoopModelPickerButtons() {
+  document.querySelectorAll('.loop-model-picker').forEach((wrap) => {
+    const hidden = wrap.querySelector('.loop-agent-model, .trace-member-model');
+    const btn = wrap.querySelector('.loop-model-picker-btn');
+    if (!hidden || !btn) return;
+    if (!hidden.value) hidden.value = defaultLoopModelId(0);
+    paintLoopModelPickerButton(btn, hidden.value);
+    btn.disabled = !loopModelOptions().length;
+  });
+}
+
+function createLoopModelPicker(initialId, { ariaLabel, className = '', hiddenClass, onPick } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = ('loop-model-picker' + (className ? ' ' + className : '')).trim();
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'loop-model-picker-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.setAttribute('aria-label', ariaLabel || 'Model');
+  const label = document.createElement('span');
+  label.className = 'loop-model-picker-label';
+  btn.appendChild(label);
+  const caret = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  caret.setAttribute('class', 'loop-model-picker-caret');
+  caret.setAttribute('viewBox', '0 0 24 24');
+  caret.setAttribute('fill', 'none');
+  caret.setAttribute('stroke', 'currentColor');
+  caret.setAttribute('stroke-width', '2.25');
+  caret.setAttribute('stroke-linecap', 'round');
+  caret.setAttribute('stroke-linejoin', 'round');
+  caret.setAttribute('aria-hidden', 'true');
+  const caretPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  caretPath.setAttribute('d', 'm6 9 6 6 6-6');
+  caret.appendChild(caretPath);
+  btn.appendChild(caret);
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden';
+  hidden.className = hiddenClass || 'loop-agent-model';
+  hidden.value = String(initialId || '').trim();
+  if (!hidden.value) hidden.value = defaultLoopModelId(0);
+  paintLoopModelPickerButton(btn, hidden.value);
+  btn.disabled = !loopModelOptions().length;
+  const openPicker = () => {
+    if (typeof openModelMenu !== 'function') return;
+    const open = typeof modelMenuIsOpen === 'function' && modelMenuIsOpen();
+    if (open && modelMenuContext && modelMenuContext.trigger === btn) {
+      closeModelMenu({ restoreFocus: true });
+      return;
+    }
+    openModelMenu({
+      anchor: wrap,
+      trigger: btn,
+      selectedId: hidden.value,
+      onPick: (value) => {
+        hidden.value = value;
+        paintLoopModelPickerButton(btn, value);
+        if (typeof onPick === 'function') onPick(value);
+      },
+    });
+  };
+  btn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openPicker();
+  });
+  btn.addEventListener('keydown', (event) => {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && typeof modelMenuIsOpen === 'function' && !modelMenuIsOpen()) {
+      event.preventDefault();
+      openPicker();
+      return;
+    }
+    if (typeof handleModelMenuKeydown === 'function') handleModelMenuKeydown(event);
+  });
+  wrap.appendChild(btn);
+  wrap.appendChild(hidden);
+  return wrap;
+}
+
+function createBotSession(bot, { group = false, title = '', participantIds = [], loopAgents = [] } = {}) {
+  const agents = Array.isArray(loopAgents) && loopAgents.length
+    ? loopAgents.map(normalizeBot)
+    : [];
+  const ids = agents.length
+    ? agents.map((item) => item.id)
+    : participantIds.slice();
   const convo = {
     id: newId('c'),
     title: title || botDisplayHandle(bot),
@@ -867,7 +1109,8 @@ function createBotSession(bot, { group = false, title = '', participantIds = [] 
     surface: 'bots',
     botKind: group ? 'group' : 'dm',
     botId: group ? null : bot.id,
-    participantBotIds: group ? participantIds.slice() : (bot ? [bot.id] : []),
+    participantBotIds: group ? ids : (bot ? [bot.id] : []),
+    loopAgents: group ? agents : [],
     groupMemory: '',
     botsHeldBy: null,
     sideThreadOf: null,
@@ -877,136 +1120,214 @@ function createBotSession(bot, { group = false, title = '', participantIds = [] 
   return convo;
 }
 
-function openBotDialog() {
-  const modal = document.getElementById('botModal');
-  const handle = document.getElementById('botHandle');
-  const desc = document.getElementById('botDescription');
-  const err = document.getElementById('botModalError');
-  if (!modal) return;
-  if (handle) handle.value = '';
-  if (desc) desc.value = '';
-  if (err) { err.textContent = ''; err.classList.add('is-hidden'); }
-  openBackdrop(modal);
-  queueMicrotask(() => handle && handle.focus());
-}
-
-function closeBotDialog() {
-  closeBackdrop(document.getElementById('botModal'));
-}
-
-function saveBotFromDialog() {
-  if (!requireUnlockedData()) return;
-  const handle = normalizeHandle(document.getElementById('botHandle')?.value);
-  const description = String(document.getElementById('botDescription')?.value || '').trim();
-  const err = document.getElementById('botModalError');
-  const showErr = (msg) => {
-    if (!err) return;
-    err.textContent = msg || '';
-    err.classList.toggle('is-hidden', !msg);
-  };
-  if (!BOT_HANDLE_RE.test(handle)) {
-    showErr('Use a handle like financial — start with a letter.');
-    return;
-  }
-  if (bots.some((bot) => bot.handle === handle)) {
-    showErr('That @handle is already taken.');
-    return;
-  }
-  const bot = normalizeBot({
-    id: newId('b'),
-    handle,
-    name: '@' + handle,
-    description,
-    avatarSeed: handle,
-  });
-  const convo = createBotSession(bot);
-  bot.sessionId = convo.id;
-  bots.push(bot);
-  saveStore({ immediate: true });
-  closeBotDialog();
-  selectConversation(convo.id);
-}
-
-function fillGroupBotPicks(selectedIds) {
-  const host = document.getElementById('groupBotPicks');
-  if (!host) return;
-  host.innerHTML = '';
-  if (!bots.length) {
-    const empty = document.createElement('p');
-    empty.className = 'bot-pick-empty';
-    empty.textContent = 'Create a bot first, then add it to a group.';
-    host.appendChild(empty);
-    return;
-  }
-  const selected = new Set(selectedIds || []);
-  bots.forEach((bot) => {
-    const label = document.createElement('label');
-    label.className = 'bot-pick';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = bot.id;
-    input.checked = selected.has(bot.id);
-    label.appendChild(input);
-    label.appendChild(createBotAvatarEl(bot, { className: 'bot-pick-avatar' }));
-    const copy = document.createElement('span');
-    copy.className = 'bot-pick-copy';
-    const handle = document.createElement('span');
-    handle.className = 'bot-pick-handle';
-    handle.textContent = botDisplayHandle(bot);
-    const desc = document.createElement('span');
-    desc.className = 'bot-pick-desc';
-    desc.textContent = bot.description || 'No description';
-    copy.appendChild(handle);
-    copy.appendChild(desc);
-    label.appendChild(copy);
-    host.appendChild(label);
-  });
-}
-
 let editingGroupId = null;
+let loopDraftAgents = [];
+
+function setGroupModalError(msg) {
+  const err = document.getElementById('groupModalError');
+  if (!err) return;
+  err.textContent = msg || '';
+  err.classList.toggle('is-hidden', !msg);
+}
+
+function syncLoopCountChrome() {
+  const label = document.getElementById('loopCountLabel');
+  const down = document.getElementById('btnLoopCountDown');
+  const up = document.getElementById('btnLoopCountUp');
+  if (label) label.textContent = String(loopDraftAgents.length);
+  if (down) down.disabled = loopDraftAgents.length <= LOOP_AGENT_MIN;
+  if (up) up.disabled = loopDraftAgents.length >= LOOP_AGENT_MAX;
+}
+
+function readLoopAgentRows() {
+  const host = document.getElementById('loopAgentRows');
+  if (!host) return loopDraftAgents;
+  const rows = [...host.querySelectorAll('.loop-agent-row')];
+  loopDraftAgents = rows.map((row, index) => {
+    const prev = loopDraftAgents[index] || {};
+    const handle = normalizeHandle(row.querySelector('.loop-agent-handle')?.value)
+      || prev.handle
+      || loopRolePreset(index).handle;
+    return normalizeBot({
+      ...prev,
+      id: prev.id || newId('b'),
+      handle,
+      name: '@' + handle,
+      description: String(row.querySelector('.loop-agent-role')?.value || '').trim(),
+      model: String(row.querySelector('.loop-agent-model')?.value || '').trim(),
+      avatarSeed: handle,
+    });
+  });
+  return loopDraftAgents;
+}
+
+function renderLoopAgentRows() {
+  const host = document.getElementById('loopAgentRows');
+  if (!host) return;
+  if (typeof closeModelMenu === 'function' && typeof modelMenuIsOpen === 'function' && modelMenuIsOpen()) {
+    const anchor = typeof modelMenuAnchorEl === 'function' ? modelMenuAnchorEl() : null;
+    if (anchor && host.contains(anchor)) closeModelMenu();
+  }
+  host.innerHTML = '';
+  loopDraftAgents.forEach((agent, index) => {
+    const row = document.createElement('div');
+    row.className = 'loop-agent-row';
+    row.appendChild(createBotAvatarEl(agent, { className: 'loop-agent-avatar' }));
+    const body = document.createElement('div');
+    body.className = 'loop-agent-body';
+    const top = document.createElement('div');
+    top.className = 'loop-agent-top';
+    const prefix = document.createElement('label');
+    prefix.className = 'field-prefix loop-agent-handle-wrap';
+    const at = document.createElement('span');
+    at.textContent = '@';
+    const handle = document.createElement('input');
+    handle.className = 'field-input loop-agent-handle';
+    handle.type = 'text';
+    handle.maxLength = 32;
+    handle.autocomplete = 'off';
+    handle.spellcheck = false;
+    handle.placeholder = loopRolePreset(index).handle;
+    handle.value = agent.handle || '';
+    handle.setAttribute('aria-label', 'Agent ' + (index + 1) + ' handle');
+    prefix.appendChild(at);
+    prefix.appendChild(handle);
+    const model = createLoopModelPicker(agent.model, {
+      ariaLabel: 'Agent ' + (index + 1) + ' model',
+      hiddenClass: 'loop-agent-model',
+      onPick: (value) => {
+        agent.model = value;
+      },
+    });
+    top.appendChild(prefix);
+    top.appendChild(model);
+    const role = document.createElement('textarea');
+    role.className = 'field-textarea loop-agent-role';
+    role.rows = 2;
+    role.maxLength = 400;
+    role.placeholder = loopRolePreset(index).description;
+    role.value = agent.description || '';
+    role.setAttribute('aria-label', 'Agent ' + (index + 1) + ' description');
+    body.appendChild(top);
+    body.appendChild(role);
+    row.appendChild(body);
+    if (loopDraftAgents.length > LOOP_AGENT_MIN) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-ghost btn-icon loop-agent-remove';
+      remove.setAttribute('aria-label', 'Remove @' + (agent.handle || 'agent'));
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        readLoopAgentRows();
+        if (loopDraftAgents.length <= LOOP_AGENT_MIN) return;
+        loopDraftAgents.splice(index, 1);
+        renderLoopAgentRows();
+        syncLoopCountChrome();
+      });
+      row.appendChild(remove);
+    }
+    host.appendChild(row);
+  });
+  syncLoopCountChrome();
+}
+
+function setLoopDraftCount(next) {
+  readLoopAgentRows();
+  const count = Math.min(LOOP_AGENT_MAX, Math.max(LOOP_AGENT_MIN, Number(next) || LOOP_AGENT_MIN));
+  while (loopDraftAgents.length < count) {
+    const index = loopDraftAgents.length;
+    const preset = loopRolePreset(index);
+    const used = new Set(loopDraftAgents.map((agent) => agent.handle));
+    const handle = uniqueLoopHandle(used, preset.handle, index);
+    loopDraftAgents.push(normalizeBot({
+      id: newId('b'),
+      handle,
+      name: '@' + handle,
+      description: preset.description,
+      model: defaultLoopModelId(index),
+      avatarSeed: handle,
+    }));
+  }
+  if (loopDraftAgents.length > count) loopDraftAgents = loopDraftAgents.slice(0, count);
+  renderLoopAgentRows();
+}
 
 function openGroupDialog(convo) {
   editingGroupId = convo ? convo.id : null;
   const modal = document.getElementById('groupModal');
   const title = document.getElementById('groupModalTitle');
   const name = document.getElementById('groupName');
-  const err = document.getElementById('groupModalError');
+  const save = document.getElementById('btnGroupSave');
   if (!modal) return;
-  if (title) title.textContent = convo ? 'Edit group' : 'New group';
+  if (title) title.textContent = convo ? 'Edit loop' : 'New loop';
+  if (save) save.textContent = convo ? 'Save loop' : 'Create loop';
   if (name) name.value = convo ? (convo.title || '') : '';
-  if (err) { err.textContent = ''; err.classList.add('is-hidden'); }
-  fillGroupBotPicks(convo ? convo.participantBotIds : []);
+  setGroupModalError('');
+  if (convo) {
+    const members = ensureLoopAgents(convo);
+    loopDraftAgents = members.map((bot) => normalizeBot({ ...bot }));
+    if (loopDraftAgents.length < LOOP_AGENT_MIN) setLoopDraftCount(LOOP_AGENT_MIN);
+    else renderLoopAgentRows();
+  } else {
+    loopDraftAgents = [];
+    const host = document.getElementById('loopAgentRows');
+    if (host) host.innerHTML = '';
+    setLoopDraftCount(3);
+  }
   openBackdrop(modal);
   queueMicrotask(() => name && name.focus());
 }
 
 function closeGroupDialog() {
+  if (typeof closeModelMenu === 'function') closeModelMenu();
   closeBackdrop(document.getElementById('groupModal'));
   editingGroupId = null;
+  loopDraftAgents = [];
 }
 
 function saveGroupFromDialog() {
   if (!requireUnlockedData()) return;
-  const picks = [...document.querySelectorAll('#groupBotPicks input[type="checkbox"]:checked')]
-    .map((input) => input.value);
-  const err = document.getElementById('groupModalError');
-  const showErr = (msg) => {
-    if (!err) return;
-    err.textContent = msg || '';
-    err.classList.toggle('is-hidden', !msg);
-  };
-  if (picks.length < 2) {
-    showErr('Add at least two bots so they can talk to each other.');
+  readLoopAgentRows();
+  if (loopDraftAgents.length < LOOP_AGENT_MIN) {
+    setGroupModalError('A loop needs at least two agents.');
     return;
   }
+  const seenHandles = new Set();
+  const agents = [];
+  for (let i = 0; i < loopDraftAgents.length; i += 1) {
+    const draft = loopDraftAgents[i];
+    const handle = normalizeHandle(draft.handle);
+    if (!BOT_HANDLE_RE.test(handle)) {
+      setGroupModalError('Handles start with a letter — try solver or critic.');
+      return;
+    }
+    if (seenHandles.has(handle)) {
+      setGroupModalError('Each agent needs a unique @handle.');
+      return;
+    }
+    seenHandles.add(handle);
+    if (!String(draft.model || '').trim()) {
+      setGroupModalError('Pick a model for @' + handle + '.');
+      return;
+    }
+    agents.push(normalizeBot({
+      ...draft,
+      handle,
+      name: '@' + handle,
+      avatarSeed: handle,
+    }));
+  }
   const title = String(document.getElementById('groupName')?.value || '').trim()
-    || picks.map((id) => botDisplayHandle(getBot(id))).filter(Boolean).join(', ');
+    || agents.map((bot) => botDisplayHandle(bot)).join(', ');
   if (editingGroupId) {
     const convo = conversations.find((item) => item.id === editingGroupId);
     if (convo) {
       convo.title = title;
       convo.titleEdited = true;
-      convo.participantBotIds = picks;
+      convo.botKind = 'group';
+      convo.loopAgents = agents;
+      convo.participantBotIds = agents.map((bot) => bot.id);
+      if (convo.botsHeldBy && !convo.participantBotIds.includes(convo.botsHeldBy)) convo.botsHeldBy = null;
       convo.updatedAt = Date.now();
       saveStore({ immediate: true });
     }
@@ -1015,14 +1336,50 @@ function saveGroupFromDialog() {
     if (typeof syncProjectChrome === 'function') syncProjectChrome();
     return;
   }
-  const convo = createBotSession(getBot(picks[0]), {
+  const convo = createBotSession(agents[0], {
     group: true,
     title,
-    participantIds: picks,
+    loopAgents: agents,
   });
   saveStore({ immediate: true });
   closeGroupDialog();
   selectConversation(convo.id);
+}
+
+function persistAgentFields(convo, botId, fields) {
+  if (!convo || !botId || !fields) return;
+  ensureLoopAgents(convo);
+  const agent = (convo.loopAgents || []).find((bot) => bot.id === botId);
+  if (!agent) return;
+  let changed = false;
+  if (Object.prototype.hasOwnProperty.call(fields, 'model')) {
+    const next = String(fields.model || '').trim();
+    if (agent.model !== next) {
+      agent.model = next;
+      changed = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, 'description')) {
+    const next = String(fields.description || '');
+    if (agent.description !== next) {
+      agent.description = next;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  agent.updatedAt = Date.now();
+  convo.updatedAt = Date.now();
+  saveStore({ immediate: true });
+  if (typeof renderSidebar === 'function') renderSidebar();
+  if (typeof paintLoopModelHint === 'function') paintLoopModelHint();
+}
+
+function persistAgentModel(convo, botId, modelId) {
+  persistAgentFields(convo, botId, { model: modelId });
+}
+
+function persistAgentDescription(convo, botId, description) {
+  persistAgentFields(convo, botId, { description });
 }
 
 async function deleteBotAndSession(botId) {
@@ -1037,6 +1394,9 @@ async function deleteBotAndSession(botId) {
   abortStream(bot.sessionId);
   conversations = conversations.filter((convo) => convo.id !== bot.sessionId);
   conversations.forEach((convo) => {
+    if (Array.isArray(convo.loopAgents)) {
+      convo.loopAgents = convo.loopAgents.filter((item) => item.id !== botId);
+    }
     if (!Array.isArray(convo.participantBotIds)) return;
     convo.participantBotIds = convo.participantBotIds.filter((id) => id !== botId);
   });
@@ -1071,6 +1431,11 @@ function applyAppSurface(next, { skipRoute = false } = {}) {
   if (!convo || convoSurfaceOf(convo) !== surface) startDraft();
   syncProjectChrome();
   renderSidebar();
+  if (typeof syncComposerThinkVisibility === 'function') {
+    syncComposerThinkVisibility(
+      typeof selectedRemoteModel === 'function' ? selectedRemoteModel(latestState) : null
+    );
+  }
   if (!skipRoute) syncUrlFromState({ replace: true });
 }
 
@@ -1078,13 +1443,11 @@ function restoreAppSurface() {
   persistAppSurface(settings.appSurface === 'bots' ? 'bots' : 'chat');
 }
 
-function botsNotInGroup(convo) {
-  const inGroup = new Set(Array.isArray(convo?.participantBotIds) ? convo.participantBotIds : []);
-  return bots.filter((bot) => !inGroup.has(bot.id));
-}
-
 function persistGroupParticipants(convo, ids) {
-  convo.participantBotIds = ids;
+  ensureLoopAgents(convo);
+  const keep = new Set(ids);
+  convo.loopAgents = (convo.loopAgents || []).filter((bot) => keep.has(bot.id));
+  convo.participantBotIds = convo.loopAgents.map((bot) => bot.id);
   if (convo.botsHeldBy && !ids.includes(convo.botsHeldBy)) convo.botsHeldBy = null;
   convo.updatedAt = Date.now();
   saveStore({ immediate: true });
@@ -1100,75 +1463,39 @@ function closeTraceMembersPicker() {
   btnTraceMemberAdd?.setAttribute('aria-expanded', 'false');
 }
 
-function renderTraceMembersPicker(convo) {
-  if (!traceMembersPicker) return;
-  traceMembersPicker.innerHTML = '';
-  const available = botsNotInGroup(convo);
-  if (!available.length) {
-    const empty = document.createElement('p');
-    empty.className = 'trace-members-empty';
-    empty.textContent = 'Every bot is already in this group.';
-    traceMembersPicker.appendChild(empty);
-    return;
-  }
-  available.forEach((bot) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'trace-member-pick';
-    btn.dataset.botId = bot.id;
-    const avatar = createBotAvatarEl(bot, { className: 'trace-member-avatar' });
-    applyPrivacyMosaic(avatar, 'bot-avatar:' + bot.id, { dense: true });
-    btn.appendChild(avatar);
-    const copy = document.createElement('span');
-    copy.className = 'trace-member-copy';
-    const handle = document.createElement('span');
-    handle.className = 'trace-member-handle';
-    handle.textContent = botDisplayHandle(bot);
-    applyPrivacyMosaic(handle, 'bot-handle:' + bot.id);
-    const desc = document.createElement('span');
-    desc.className = 'trace-member-desc';
-    desc.textContent = bot.description || 'No description';
-    copy.appendChild(handle);
-    copy.appendChild(desc);
-    btn.appendChild(copy);
-    traceMembersPicker.appendChild(btn);
-  });
-}
-
-function toggleTraceMembersPicker() {
+function addAgentToActiveLoop() {
   if (!requireUnlockedData()) return;
   const convo = conversations.find((item) => item.id === activeId);
-  if (!traceMembersPicker || !isBotGroup(convo)) return;
-  if (traceMembersFolded) setTraceMembersFolded(false);
-  if (traceMembersPicker.hidden) {
-    traceMembersPicker.hidden = false;
-    traceMembersPicker.classList.remove('is-hidden');
-    btnTraceMemberAdd?.setAttribute('aria-expanded', 'true');
-    renderTraceMembersPicker(convo);
-  } else {
-    closeTraceMembersPicker();
-  }
+  if (!isBotGroup(convo)) return;
+  const members = ensureLoopAgents(convo);
+  if (members.length >= LOOP_AGENT_MAX) return;
+  const index = members.length;
+  const preset = loopRolePreset(index);
+  const used = new Set(members.map((bot) => bot.handle));
+  const handle = uniqueLoopHandle(used, preset.handle, index);
+  const agent = normalizeBot({
+    id: newId('b'),
+    handle,
+    name: '@' + handle,
+    description: preset.description,
+    model: defaultLoopModelId(index),
+    avatarSeed: handle,
+  });
+  convo.loopAgents.push(agent);
+  convo.participantBotIds = convo.loopAgents.map((bot) => bot.id);
+  convo.updatedAt = Date.now();
+  saveStore({ immediate: true });
+  renderSidebar();
+  if (typeof syncProjectChrome === 'function') syncProjectChrome();
 }
 
 function kickBotFromActiveGroup(botId) {
   if (!requireUnlockedData()) return;
   const convo = conversations.find((item) => item.id === activeId);
   if (!isBotGroup(convo)) return;
-  const ids = (Array.isArray(convo.participantBotIds) ? convo.participantBotIds : [])
-    .filter((id) => id !== botId);
-  if (ids.length < 2) return;
-  persistGroupParticipants(convo, ids);
-}
-
-function addBotToActiveGroup(botId) {
-  if (!requireUnlockedData()) return;
-  const convo = conversations.find((item) => item.id === activeId);
-  if (!isBotGroup(convo)) return;
-  if (!getBot(botId)) return;
-  const ids = Array.isArray(convo.participantBotIds) ? convo.participantBotIds.slice() : [];
-  if (ids.includes(botId)) return;
-  ids.push(botId);
-  persistGroupParticipants(convo, ids);
+  const members = ensureLoopAgents(convo);
+  if (members.length <= LOOP_AGENT_MIN) return;
+  persistGroupParticipants(convo, members.map((bot) => bot.id).filter((id) => id !== botId));
 }
 
 const TRACE_ACTIVITY_SHARE_DEFAULT = 0.6;
@@ -1356,20 +1683,21 @@ function renderTraceMembers() {
     applyTraceSplitLayout();
     return;
   }
-  const members = participantBots(convo);
+  const members = ensureLoopAgents(convo);
   const title = document.getElementById('traceMembersTitle');
-  if (title) title.textContent = 'Members · ' + members.length;
-  const available = botsNotInGroup(convo);
+  if (title) title.textContent = 'Agents · ' + members.length;
+  const canAdd = members.length < LOOP_AGENT_MAX;
   if (btnTraceMemberAdd) {
-    btnTraceMemberAdd.disabled = available.length === 0;
-    btnTraceMemberAdd.title = available.length ? 'Add a bot' : 'Every bot is already in this group';
+    btnTraceMemberAdd.disabled = !canAdd;
+    btnTraceMemberAdd.title = canAdd ? 'Add an agent' : 'This loop already has ' + LOOP_AGENT_MAX + ' agents';
+    btnTraceMemberAdd.setAttribute('aria-label', btnTraceMemberAdd.title);
   }
   if (!traceMembersList) {
     applyTraceSplitLayout();
     return;
   }
   traceMembersList.replaceChildren();
-  const canKick = members.length > 2;
+  const canKick = members.length > LOOP_AGENT_MIN;
   members.forEach((bot) => {
     const row = document.createElement('div');
     row.className = 'trace-member';
@@ -1383,63 +1711,62 @@ function renderTraceMembers() {
     handle.textContent = botDisplayHandle(bot);
     applyPrivacyMosaic(handle, 'bot-handle:' + bot.id);
     setIdentityTitle(handle, botDisplayHandle(bot));
-    const desc = document.createElement('span');
-    desc.className = 'trace-member-desc';
-    desc.textContent = bot.description || 'No description';
+    const model = createLoopModelPicker(bot.model, {
+      ariaLabel: 'Model for ' + botDisplayHandle(bot),
+      className: 'is-compact',
+      hiddenClass: 'trace-member-model',
+      onPick: (value) => persistAgentModel(convo, bot.id, value),
+    });
+    const desc = document.createElement('textarea');
+    desc.className = 'field-textarea trace-member-desc';
+    desc.rows = 2;
+    desc.maxLength = 400;
+    desc.placeholder = 'What this agent should do…';
+    desc.value = bot.description || '';
+    desc.setAttribute('aria-label', 'Description for ' + botDisplayHandle(bot));
+    desc.addEventListener('change', () => persistAgentDescription(convo, bot.id, desc.value));
+    desc.addEventListener('blur', () => persistAgentDescription(convo, bot.id, desc.value));
     copy.appendChild(handle);
+    copy.appendChild(model);
     copy.appendChild(desc);
     row.appendChild(copy);
     const kick = document.createElement('button');
     kick.type = 'button';
     kick.className = 'btn btn-ghost btn-icon trace-member-kick';
     kick.dataset.botId = bot.id;
-    kick.setAttribute('aria-label', 'Remove ' + botDisplayHandle(bot) + ' from this group');
-    kick.title = canKick ? 'Remove from group' : 'Groups need at least two bots';
+    kick.setAttribute('aria-label', 'Remove ' + botDisplayHandle(bot) + ' from this loop');
+    kick.title = canKick ? 'Remove from loop' : 'Loops need at least two agents';
     kick.disabled = !canKick;
     kick.textContent = '×';
     row.appendChild(kick);
     traceMembersList.appendChild(row);
   });
-  if (traceMembersPicker && !traceMembersPicker.hidden) {
-    if (!available.length) closeTraceMembersPicker();
-    else renderTraceMembersPicker(convo);
-  }
+  closeTraceMembersPicker();
   applyTraceSplitLayout();
 }
 
 function bindBotChrome() {
-  document.getElementById('btnNewBot')?.addEventListener('click', () => openBotDialog());
   document.getElementById('btnNewGroup')?.addEventListener('click', () => openGroupDialog(null));
-  document.getElementById('btnBotCancel')?.addEventListener('click', closeBotDialog);
-  document.getElementById('btnBotClose')?.addEventListener('click', closeBotDialog);
-  document.getElementById('btnBotSave')?.addEventListener('click', saveBotFromDialog);
   document.getElementById('btnGroupCancel')?.addEventListener('click', closeGroupDialog);
   document.getElementById('btnGroupClose')?.addEventListener('click', closeGroupDialog);
   document.getElementById('btnGroupSave')?.addEventListener('click', saveGroupFromDialog);
-  document.getElementById('botModal')?.addEventListener('click', (event) => {
-    if (event.target.id === 'botModal') closeBotDialog();
+  document.getElementById('btnLoopCountDown')?.addEventListener('click', () => {
+    setLoopDraftCount(loopDraftAgents.length - 1);
+  });
+  document.getElementById('btnLoopCountUp')?.addEventListener('click', () => {
+    setLoopDraftCount(loopDraftAgents.length + 1);
   });
   document.getElementById('groupModal')?.addEventListener('click', (event) => {
     if (event.target.id === 'groupModal') closeGroupDialog();
   });
   btnTraceMemberAdd?.addEventListener('click', (event) => {
     event.stopPropagation();
-    toggleTraceMembersPicker();
+    addAgentToActiveLoop();
   });
   traceMembersList?.addEventListener('click', (event) => {
     const kick = event.target.closest('.trace-member-kick');
     if (!kick || kick.disabled) return;
     kickBotFromActiveGroup(kick.dataset.botId);
-  });
-  traceMembersPicker?.addEventListener('click', (event) => {
-    const pick = event.target.closest('.trace-member-pick');
-    if (!pick) return;
-    addBotToActiveGroup(pick.dataset.botId);
-  });
-  document.addEventListener('click', (event) => {
-    if (!traceMembersPicker || traceMembersPicker.hidden) return;
-    if (event.target.closest('#traceMembers')) return;
-    closeTraceMembersPicker();
   });
   bindTraceSplitChrome();
 }

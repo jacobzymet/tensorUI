@@ -38,13 +38,13 @@ function refreshSettingsDataSummary() {
   const el = document.getElementById('settingsDataSummary');
   if (!el) return;
   const chatCount = conversations.filter((convo) => !(typeof isBotsConvo === 'function' && isBotsConvo(convo))).length;
-  const botCount = typeof bots !== 'undefined' ? bots.length : 0;
+  const loopCount = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo)).length;
   const projectCount = projects.length;
   const chatLabel = chatCount === 1 ? '1 chat' : chatCount + ' chats';
   const projectLabel = projectCount === 1 ? '1 project' : projectCount + ' projects';
   const where = 'on disk';
-  const botLabel = botCount === 1 ? '1 bot' : botCount + ' bots';
-  el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + botLabel + ' · ' + projectLabel + '.';
+  const loopLabel = loopCount === 1 ? '1 loop' : loopCount + ' loops';
+  el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + loopLabel + ' · ' + projectLabel + '.';
   const clearChats = document.getElementById('btnClearChats');
   const clearProjects = document.getElementById('btnClearProjects');
   const clearAll = document.getElementById('btnClearAllData');
@@ -197,12 +197,12 @@ function syncComposerStreamUi() {
     && typeof isBotsConvo === 'function'
     && isBotsConvo(conversations.find((item) => item.id === activeId));
   btnSend.title = busy
-    ? (botsBusy ? 'Queue for after this bot turn' : 'Queue message')
+    ? (botsBusy ? 'Queue for after this agent turn' : 'Queue message')
     : 'Send message';
   btnSend.setAttribute(
     'aria-label',
     busy
-      ? (botsBusy ? 'Queue for after this bot turn' : 'Queue message')
+      ? (botsBusy ? 'Queue for after this agent turn' : 'Queue message')
       : 'Send message'
   );
   updateSendEnabled();
@@ -1853,18 +1853,35 @@ let thinkingSupported = false;
 let activeThinkingEffort = 'auto';
 let availableThinkingEfforts = new Set(['auto']);
 
+function modelExposesThinkingControl(model) {
+  if (!model || !model.thinking_control) return false;
+  const efforts = Array.isArray(model.thinking_efforts) ? model.thinking_efforts : [];
+  return efforts.length > 0 || !!model.thinking_can_disable;
+}
+
+function thinkingEffortForModel(model) {
+  if (!modelExposesThinkingControl(model)) return null;
+  const efforts = Array.isArray(model.thinking_efforts) ? model.thinking_efforts : [];
+  const canDisable = !!model.thinking_can_disable;
+  const wanted = String(settings.thinkingEffort || activeThinkingEffort || 'auto');
+  if (wanted === 'auto') return null;
+  if (wanted === 'off') return canDisable ? 'off' : null;
+  return efforts.includes(wanted) ? wanted : null;
+}
+
 function syncComposerThinkVisibility(model) {
   const efforts = Array.isArray(model?.thinking_efforts) ? model.thinking_efforts : [];
   const canDisable = !!model?.thinking_can_disable;
-  thinkingSupported = !!model?.thinking_control && (efforts.length > 0 || canDisable);
+  thinkingSupported = modelExposesThinkingControl(model);
+  const onLoop = typeof isBotsSurface === 'function' && isBotsSurface();
   const allowed = (value) => value === 'auto'
     || (value === 'off' ? canDisable : efforts.includes(value));
   availableThinkingEfforts = new Set(THINKING_EFFORTS.filter(allowed));
   activeThinkingEffort = allowed(settings.thinkingEffort) ? settings.thinkingEffort : 'auto';
   const wrap = document.getElementById('composerThinkWrap');
   if (!wrap) return;
-  wrap.classList.toggle('is-hidden', !thinkingSupported);
-  if (!thinkingSupported) setThinkMenuOpen(false);
+  wrap.classList.toggle('is-hidden', onLoop || !thinkingSupported);
+  if (onLoop || !thinkingSupported) setThinkMenuOpen(false);
   document.querySelectorAll('#thinkMenu [data-effort]').forEach((item) => {
     item.classList.toggle('is-hidden', !allowed(item.dataset.effort));
   });

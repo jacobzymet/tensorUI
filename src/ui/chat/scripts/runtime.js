@@ -269,7 +269,24 @@ function modelMenuIsOpen() {
 
 let modelMenuCloseTimer = null;
 
+/** When set, the shared menu is picking a model for a loop agent instead of the default. */
+let modelMenuContext = null;
+
+function modelMenuSelectedId() {
+  if (modelMenuContext && modelMenuContext.selectedId) return modelMenuContext.selectedId;
+  return selectedChatModel;
+}
+
+function modelMenuAnchorEl() {
+  return (modelMenuContext && modelMenuContext.anchor) || chatModelSelectWrap;
+}
+
+function modelMenuTriggerEl() {
+  return (modelMenuContext && modelMenuContext.trigger) || chatModelSelect;
+}
+
 function modelSearchEnabled() {
+  if (modelMenuContext) return modelMenuOptions.length > 0;
   return modelMenuOptions.length >= MODEL_SEARCH_MIN_OPTIONS;
 }
 
@@ -376,22 +393,25 @@ function highlightModelText(value, terms) {
 }
 
 function renderModelOptionHtml(option, index, { showProvider, terms }) {
-  const isSelected = option.value === selectedChatModel;
+  const isSelected = option.value === modelMenuSelectedId();
+  const picking = !!modelMenuContext;
   const pinned = isModelPinned(option.value);
   const badge = showProvider && option.provider
     ? '<span class="chat-model-origin-pill" title="'
       + escapeModelAttr(chatShell.classList.contains('privacy-mode') ? '' : option.provider) + '">'
       + highlightModelText(option.provider, terms) + '</span>'
     : '';
-  const defaultBadge = isSelected
+  const defaultBadge = isSelected && !picking
     ? '<span class="chat-model-default-pill" title="Default model">Default</span>'
     : '';
+  const prefix = picking
+    ? (isSelected ? 'Selected · ' : '')
+    : (isSelected ? 'Default · ' : 'Set as default · ');
   return '<div class="chat-model-option' + (isSelected ? ' is-selected' : '')
     + '" role="option" id="chat-model-option-' + index + '"'
     + ' data-value="' + escapeModelAttr(option.value) + '"'
     + ' title="' + escapeModelAttr(
-      (isSelected ? 'Default · ' : 'Set as default · ')
-      + modelOptionTitle(option.label, option.provider)
+      prefix + modelOptionTitle(option.label, option.provider)
     ) + '"'
     + ' aria-selected="' + (isSelected ? 'true' : 'false') + '" tabindex="-1">'
     + '<button type="button" class="chat-model-option-main" data-model-pick="'
@@ -457,7 +477,10 @@ function renderModelMenuList() {
   });
   chatModelList.querySelectorAll('.chat-model-option').forEach((optionEl) => {
     const option = modelMenuOptions.find((item) => item.value === optionEl.dataset.value);
-    const prefix = optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ';
+    const picking = !!modelMenuContext;
+    const prefix = picking
+      ? (optionEl.classList.contains('is-selected') ? 'Selected · ' : '')
+      : (optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ');
     setIdentityTitle(optionEl, option ? prefix + modelOptionTitle(option.label, option.provider) : '');
   });
 
@@ -500,7 +523,7 @@ function applyModelFilter({ keepActive = false } = {}) {
     : -1;
   if (restored >= 0) modelMenuActiveIndex = restored;
   else {
-    modelMenuActiveIndex = options.findIndex((option) => option.value === selectedChatModel);
+    modelMenuActiveIndex = options.findIndex((option) => option.value === modelMenuSelectedId());
   }
   paintModelMenuActive();
   if (modelMenuIsOpen()) positionModelMenu();
@@ -520,8 +543,9 @@ function modelMenuViewport() {
 }
 
 function positionModelMenu() {
-  if (!chatModelMenu || !chatModelSelectWrap) return;
-  const rect = chatModelSelectWrap.getBoundingClientRect();
+  const anchor = modelMenuAnchorEl();
+  if (!chatModelMenu || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
   const view = modelMenuViewport();
   const pad = 8;
   const gap = 6;
@@ -565,17 +589,21 @@ function positionModelMenu() {
 }
 
 function closeModelMenu({ restoreFocus = false } = {}) {
+  const trigger = modelMenuTriggerEl();
+  const customAnchor = modelMenuContext && modelMenuContext.anchor;
+  modelMenuContext = null;
+  if (customAnchor) customAnchor.classList.remove('is-open');
+  chatModelSelectWrap?.classList.remove('is-open');
+  chatModelSelect?.setAttribute('aria-expanded', 'false');
+  if (trigger && trigger !== chatModelSelect) trigger.setAttribute('aria-expanded', 'false');
+  modelMenuActiveIndex = -1;
+  modelMenuFilter = '';
+  if (chatModelSearch) chatModelSearch.value = '';
+  if (restoreFocus) trigger?.focus();
   if (!chatModelMenu || chatModelMenu.classList.contains('is-hidden')) return;
   clearTimeout(modelMenuCloseTimer);
   modelMenuCloseTimer = null;
   chatModelMenu.classList.remove('is-open');
-  chatModelSelectWrap.classList.remove('is-open');
-  chatModelSelect.setAttribute('aria-expanded', 'false');
-  modelMenuActiveIndex = -1;
-  // Drop the query so the next open starts from the full list.
-  modelMenuFilter = '';
-  if (chatModelSearch) chatModelSearch.value = '';
-  if (restoreFocus) chatModelSelect.focus();
   const finish = () => {
     chatModelMenu.classList.add('is-hidden');
     chatModelMenu.style.maxHeight = '';
@@ -609,10 +637,17 @@ function paintModelMenuActive() {
   }
 }
 
-function openModelMenu() {
-  if (!modelMenuOptions.length || chatModelSelectWrap.classList.contains('is-hidden')) return;
+function openModelMenu(opts) {
+  if (!modelMenuOptions.length) return;
+  const context = opts && typeof opts === 'object' ? opts : null;
+  if (!context && chatModelSelectWrap.classList.contains('is-hidden')) return;
   clearTimeout(modelMenuCloseTimer);
   modelMenuCloseTimer = null;
+  if (modelMenuContext && modelMenuContext.anchor && modelMenuContext.anchor !== context?.anchor) {
+    modelMenuContext.anchor.classList.remove('is-open');
+    modelMenuContext.trigger?.setAttribute('aria-expanded', 'false');
+  }
+  modelMenuContext = context;
   if (chatModelMenu.parentElement !== document.body) {
     document.body.appendChild(chatModelMenu);
   }
@@ -631,11 +666,14 @@ function openModelMenu() {
   }
   syncModelMenuTabs();
   chatModelMenu.classList.remove('is-hidden');
-  chatModelSelectWrap.classList.add('is-open');
-  chatModelSelect.setAttribute('aria-expanded', 'true');
+  chatModelSelectWrap.classList.toggle('is-open', !context);
+  chatModelSelect.setAttribute('aria-expanded', context ? 'false' : 'true');
+  const trigger = modelMenuTriggerEl();
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  if (context?.anchor) context.anchor.classList.add('is-open');
   computeModelMatches();
   renderModelMenuList();
-  modelMenuActiveIndex = visibleModelMenuOptions().findIndex((o) => o.value === selectedChatModel);
+  modelMenuActiveIndex = visibleModelMenuOptions().findIndex((o) => o.value === modelMenuSelectedId());
   positionModelMenu();
   paintModelMenuActive();
   // Typing filters immediately when the field is there; otherwise the
@@ -650,6 +688,13 @@ function openModelMenu() {
 
 function chooseModelOption(value) {
   if (!value) {
+    closeModelMenu({ restoreFocus: true });
+    return;
+  }
+  rememberRecentModel(value);
+  if (modelMenuContext && typeof modelMenuContext.onPick === 'function') {
+    modelMenuContext.selectedId = value;
+    modelMenuContext.onPick(value);
     closeModelMenu({ restoreFocus: true });
     return;
   }
@@ -860,13 +905,19 @@ function syncModelSelector(data) {
     && !settingsModal.classList.contains('is-hidden')) {
     fillDefaultModelSetting();
   }
+  const loopModal = document.getElementById('groupModal');
+  if (loopModal && !loopModal.classList.contains('is-hidden') && typeof paintLoopModelPickerButtons === 'function') {
+    paintLoopModelPickerButtons();
+  }
+  if (typeof renderTraceMembers === 'function') renderTraceMembers();
+  if (typeof paintLoopModelHint === 'function') paintLoopModelHint();
 }
 
-function selectedRemoteModel(data) {
+function selectedRemoteModel(data, modelId) {
   const models = data?.network?.remote_models || [];
   if (!models.length) return null;
   const options = modelMenuOptions.length ? modelMenuOptions : models.map(catalogOptionFromRemote);
-  const saved = selectedRemoteModelId || selectedChatModel;
+  const saved = modelId || selectedRemoteModelId || selectedChatModel;
   const resolved = resolveSavedModelId(saved, options);
   const matched = models.find((model) => model.id === resolved)
     || models.find((model) => model.id === saved);
@@ -915,6 +966,8 @@ function updateInferenceState(data) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
     hideComposerHint();
+  } else if (typeof paintLoopModelHint === 'function' && paintLoopModelHint()) {
+    updateComposerHint();
   } else if (project && !activeId) {
     modelHintEl.classList.remove('is-hidden');
     setModelHintWithProvider('Shared instructions & memory apply · ' + modelName, providerLabel);
@@ -1097,7 +1150,8 @@ async function sendMessage({ branch = false } = {}) {
     syncComposerStreamUi();
   } else if (!convo) {
     if (typeof isBotsSurface === 'function' && isBotsSurface()) {
-      showComposerHint('Create a bot or group first.');
+      showComposerHint('Create a loop first.');
+      if (typeof openGroupDialog === 'function') openGroupDialog(null);
       focusComposer();
       return;
     }
@@ -1696,7 +1750,8 @@ async function runAssistantTurn(convo, {
   stream.skipQueue = !!skipQueue;
   syncStreamSpeakerChrome(convo, stream);
 
-  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
+  stream.speakerModelId = speakerBot && speakerBot.model ? speakerBot.model : null;
   let apiMessages;
   if (speakerBot && typeof botApiMessages === 'function') {
     apiMessages = botApiMessages(convo, speakerBot, dispatchedMessage ? text : null);
@@ -1724,16 +1779,17 @@ async function runAssistantTurn(convo, {
     apiMessages.unshift({ role: 'system', content: systemPrompt });
   }
 
-  const remote = selectedRemoteModel(latestState);
+  const remote = selectedRemoteModel(latestState, stream.speakerModelId);
+  const speakerEffort = typeof thinkingEffortForModel === 'function'
+    ? thinkingEffortForModel(remote)
+    : (thinkingSupported && activeThinkingEffort !== 'auto' ? activeThinkingEffort : null);
   const requestBody = {
     messages: apiMessages,
     agent: useAgent,
     skills: turnSkills,
     force_tools: turnForceTools,
     ...(convo.incognito ? {} : { conversation_id: convo.id }),
-    ...(thinkingSupported && activeThinkingEffort !== 'auto'
-      ? { thinking_effort: activeThinkingEffort }
-      : {}),
+    ...(speakerEffort ? { thinking_effort: speakerEffort } : {}),
   };
   if (deepResearch) {
     requestBody.deep_research = true;
@@ -1972,6 +2028,7 @@ function beginLiveStream(convo, {
     turnId: turnId || null,
     turnModel: String(turnModel || ''),
     speakerBotId: speakerBotId || null,
+    convoId: convo.id,
     cancelled: false,
     hardStopped: false,
   };
@@ -1990,7 +2047,10 @@ function beginLiveStream(convo, {
 
 function streamSpeakerBot(stream) {
   if (!stream?.speakerBotId || typeof getBot !== 'function') return null;
-  return getBot(stream.speakerBotId);
+  const convo = stream.convoId
+    ? conversations.find((item) => item.id === stream.convoId)
+    : null;
+  return getBot(stream.speakerBotId, convo);
 }
 
 function streamStatusLabel(stream, base) {
@@ -2033,7 +2093,7 @@ function discardLiveStreamRow(stream) {
 }
 
 async function driveAssistantSse(convo, stream, response) {
-  const remote = selectedRemoteModel(latestState);
+  const remote = selectedRemoteModel(latestState, stream.speakerModelId);
   const fallbackTurnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
   const usageStats = {
     completionTokens: 0,
@@ -2369,7 +2429,7 @@ async function driveAssistantSse(convo, stream, response) {
     const silentNoReply = typeof isSilentNoReply === 'function'
       && (isSilentNoReply(cancelledVisible) || isSilentNoReply(cancelledText));
     const speakerBotId = stream.speakerBotId || null;
-    const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
+    const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
     // Never persist the placeholder error as a real message.
     if (cancelledVisible && cancelledVisible !== 'No response.' && !silentNoReply) {
       const message = {
@@ -2415,7 +2475,7 @@ async function driveAssistantSse(convo, stream, response) {
   const endedAt = Date.now();
   const finalStats = finalizeTurnStats(usageStats, firstTokenAt, endedAt);
   const speakerBotId = stream.speakerBotId || null;
-  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId) : null;
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
   const extracted = collectTurnMemoryExtraction(stream, typer.target);
   const memoryChanges = applyExtractedMemories(convo, extracted, speakerBotId);
   const memoryNotices = memoryNoticeLabels(memoryChanges);
@@ -2896,7 +2956,7 @@ document.getElementById('settingAttachmentTextFallback').addEventListener('chang
 
 const APP_SURFACES = {
   chat: 'Agent',
-  bots: 'Bots',
+  bots: 'Loops',
 };
 let wordmarkMenuCloseTimer = 0;
 let wordmarkLabelTimer = 0;
@@ -3170,7 +3230,10 @@ function syncPrivacyModeUi(enabled) {
   }
   chatModelList?.querySelectorAll('.chat-model-option').forEach((optionEl) => {
     const option = modelMenuOptions.find((item) => item.value === optionEl.dataset.value);
-    const prefix = optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ';
+    const picking = !!modelMenuContext;
+    const prefix = picking
+      ? (optionEl.classList.contains('is-selected') ? 'Selected · ' : '')
+      : (optionEl.classList.contains('is-selected') ? 'Default · ' : 'Set as default · ');
     setIdentityTitle(optionEl, option ? prefix + modelOptionTitle(option.label, option.provider) : '');
     const badge = optionEl.querySelector('.chat-model-origin-pill');
     if (badge) setIdentityTitle(badge, badge.textContent);
@@ -3892,7 +3955,7 @@ function handleModelMenuKeydown(event) {
     }
     const choice = visibleModelMenuOptions()[modelMenuActiveIndex];
     if (choice) chooseModelOption(choice.value);
-  } else if (event.key === ' ' && event.target === chatModelSelect) {
+  } else if (event.key === ' ' && event.target === modelMenuTriggerEl()) {
     // Space only toggles from the button; inside the field it is a query character.
     event.preventDefault();
     if (!open) openModelMenu();
@@ -3962,6 +4025,7 @@ chatModelMenu.addEventListener('pointerdown', (event) => {
 document.addEventListener('click', (event) => {
   if (!modelMenuIsOpen()) return;
   if (chatModelSelectWrap.contains(event.target)) return;
+  if (modelMenuAnchorEl()?.contains(event.target)) return;
   if (chatModelMenu.contains(event.target)) return;
   closeModelMenu();
 });
