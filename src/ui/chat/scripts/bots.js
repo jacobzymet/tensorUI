@@ -2,19 +2,20 @@ const BOT_HANDLE_RE = /^[a-z][a-z0-9_]{1,31}$/;
 const BOT_MENTION_RE = /@([a-z][a-z0-9_]{1,31}|everyone|user)\b/gi;
 const BOT_COMPACT_CHARS = 28000;
 const BOT_COMPACT_KEEP = 10;
-const BOT_GROUP_MAX_HOPS = 8;
 const LOOP_AGENT_MIN = 2;
 const LOOP_AGENT_MAX = 8;
 const LOOP_ROLE_PRESETS = [
-  { handle: 'solver', description: 'Propose a solution. Be concrete and show your work.' },
-  { handle: 'critic', description: 'Find errors, gaps, and weaker assumptions in the solution.' },
-  { handle: 'verifier', description: 'Independently check the result. Confirm or reject with evidence.' },
-  { handle: 'analyst', description: 'Break the problem into parts and name what would change the answer.' },
-  { handle: 'skeptic', description: 'Ask what would have to be true for this to be wrong.' },
-  { handle: 'synthesizer', description: 'Merge the strongest points into one answer the room can stand behind.' },
-  { handle: 'redteam', description: 'Try to break the current answer. Prefer a counterexample over vibes.' },
-  { handle: 'auditor', description: 'Check units, edge cases, citations, and whether the claim is actually supported.' },
+  { handle: 'solver', stage: 'explore', description: 'Propose a solution. Be concrete and show your work.' },
+  { handle: 'critic', stage: 'challenge', description: 'Find errors, gaps, and weaker assumptions in the solution.' },
+  { handle: 'verifier', stage: 'challenge', description: 'Independently check the result. Confirm or reject with evidence.' },
+  { handle: 'analyst', stage: 'explore', description: 'Break the problem into parts and name what would change the answer.' },
+  { handle: 'skeptic', stage: 'challenge', description: 'Ask what would have to be true for this to be wrong.' },
+  { handle: 'synthesizer', stage: 'answer', description: 'Merge the strongest points into one answer the room can stand behind.' },
+  { handle: 'redteam', stage: 'challenge', description: 'Try to break the current answer. Prefer a counterexample over vibes.' },
+  { handle: 'auditor', stage: 'challenge', description: 'Check units, edge cases, citations, and whether the claim is actually supported.' },
 ];
+const LOOP_REVIEW_ROLE_RE = /\b(critic|verifier|skeptic|red\s*team|redteam|auditor|review|check|challenge|risk)\b/i;
+const LOOP_ANSWER_ROLE_RE = /\b(synthesi[sz]er|editor|decider|final answer|integrat)\b/i;
 /** Bumped on Stop so in-flight group hop loops exit instead of spawning more turns. */
 const botsOutboundEpoch = new Map();
 /** Refcount: a group stays busy between hops, not only while a stream is live. */
@@ -172,6 +173,7 @@ function normalizeBot(bot) {
     memory: typeof bot?.memory === 'string' ? bot.memory : '',
     avatarSeed,
     model: typeof bot?.model === 'string' ? bot.model.trim() : '',
+    stage: ['auto', 'explore', 'challenge', 'answer'].includes(bot?.stage) ? bot.stage : 'auto',
     sessionId: typeof bot?.sessionId === 'string' ? bot.sessionId : null,
     createdAt: typeof bot?.createdAt === 'number' ? bot.createdAt : Date.now(),
     updatedAt: typeof bot?.updatedAt === 'number' ? bot.updatedAt : Date.now(),
@@ -382,10 +384,14 @@ function labeledBotContent(message, speakerBot) {
   return '@' + handle + ': ' + text;
 }
 
-function botApiMessages(convo, speakerBot, fallbackUserText) {
+function botApiMessages(convo, speakerBot, fallbackUserText, { messageLimit = null } = {}) {
   const group = isBotGroup(convo);
   const rows = [];
-  (convo.messages || []).forEach((message) => {
+  const allMessages = convo.messages || [];
+  const sourceMessages = Number.isFinite(messageLimit)
+    ? allMessages.slice(0, Math.max(0, Number(messageLimit)))
+    : allMessages;
+  sourceMessages.forEach((message) => {
     if (!message || (message.role !== 'user' && message.role !== 'assistant')) return;
     let content = String(message.content || '');
     if (message.compact) content = '[Compacted earlier conversation]\n' + content;
@@ -399,7 +405,7 @@ function botApiMessages(convo, speakerBot, fallbackUserText) {
     const mine = message.role === 'assistant' && speakerBot && message.speakerId === speakerBot.id;
     rows.push({ role: mine ? 'assistant' : 'user', content });
   });
-  const lastStored = (convo.messages || []).filter((message) => (
+  const lastStored = sourceMessages.filter((message) => (
     message && (message.role === 'user' || message.role === 'assistant')
   )).pop();
   if (fallbackUserText && lastStored && lastStored.role === 'user' && rows.length && rows[rows.length - 1].role === 'user') {
@@ -537,6 +543,280 @@ function botsToPing(convo, userText, { fromBotId = null, replyToSpeakerId = null
   }
   if (fromBotId) ids = ids.filter((id) => id !== fromBotId);
   return ids.map((id) => getBot(id, convo)).filter(Boolean);
+}
+
+function loopAgentStage(bot) {
+  if (['explore', 'challenge', 'answer'].includes(bot?.stage)) return bot.stage;
+  const role = [bot?.handle, bot?.description].filter(Boolean).join(' ');
+  if (LOOP_ANSWER_ROLE_RE.test(role)) return 'answer';
+  if (LOOP_REVIEW_ROLE_RE.test(role)) return 'challenge';
+  return 'explore';
+}
+
+function uniqueLoopAgents(list) {
+  const seen = new Set();
+  return (list || []).filter((bot) => {
+    if (!bot?.id || seen.has(bot.id)) return false;
+    seen.add(bot.id);
+    return true;
+  });
+}
+
+function buildLoopRunPhases(convo, item = {}) {
+  const members = ensureLoopAgents(convo);
+  if (!members.length) return [];
+  const text = item.editText || item.displayText || '';
+  const mentions = parseBotMentions(text, convo);
+  const focused = !!(
+    item.fromBotId
+    || item.replyToSpeakerId
+    || (mentions.botIds.length && !mentions.everyone)
+  );
+  if (focused) {
+    const targets = botsToPing(convo, text, {
+      fromBotId: item.fromBotId || null,
+      replyToSpeakerId: item.replyToSpeakerId || null,
+    });
+    if (!targets.length) return [];
+    return [{
+      id: item.fromBotId ? 'handoff' : 'focus',
+      label: item.fromBotId ? 'Handoff' : 'Focused reply',
+      description: item.fromBotId
+        ? 'The requested agents pick up the handoff.'
+        : 'Only the agents you addressed respond.',
+      agentIds: uniqueLoopAgents(targets).map((bot) => bot.id),
+      completedAgentIds: [],
+    }];
+  }
+
+  let explorers = members.filter((bot) => loopAgentStage(bot) === 'explore');
+  let challengers = members.filter((bot) => loopAgentStage(bot) === 'challenge');
+  const answerers = members.filter((bot) => loopAgentStage(bot) === 'answer');
+  if (!explorers.length) explorers = members.slice(0, 1);
+  if (!challengers.length && members.length > 1) {
+    challengers = members.filter((bot) => bot.id !== explorers[0]?.id).slice(0, 1);
+  }
+  const finalAgent = answerers[0] || explorers[0] || members[0];
+  const phases = [{
+    id: 'explore',
+    label: 'Explore',
+    description: 'Independent takes from the same starting point.',
+    agentIds: uniqueLoopAgents(explorers).map((bot) => bot.id),
+    completedAgentIds: [],
+  }];
+  if (challengers.length) {
+    phases.push({
+      id: 'challenge',
+      label: 'Challenge',
+      description: 'Agents test the proposals and surface weak points.',
+      agentIds: uniqueLoopAgents(challengers).map((bot) => bot.id),
+      completedAgentIds: [],
+    });
+  }
+  phases.push({
+    id: 'answer',
+    label: 'Answer',
+    description: 'One agent turns the strongest work into a clear answer.',
+    agentIds: finalAgent ? [finalAgent.id] : [],
+    completedAgentIds: [],
+  });
+  return phases.filter((phase) => phase.agentIds.length);
+}
+
+function loopPhaseDirective(phase, bot) {
+  const handle = botDisplayHandle(bot);
+  if (phase.id === 'explore') {
+    return [
+      'Loop stage: EXPLORE.',
+      'Give an independent, concrete take on the user’s problem from your assigned role.',
+      'You are intentionally seeing the shared starting point, not other opening takes. Do not recap or wait for other agents.',
+      'State the important assumptions, proposed answer, and evidence or checks that would make it trustworthy.',
+      'The app schedules the next agent; do not use @mentions to manage the sequence.',
+    ].join('\n');
+  }
+  if (phase.id === 'challenge') {
+    return [
+      'Loop stage: CHALLENGE.',
+      'Review the proposals already in the room. Focus on material errors, disagreements, missing evidence, and edge cases.',
+      'Name what survives scrutiny and what must change. Do not restate an earlier answer just to agree.',
+      'The app schedules the next agent; do not use @mentions to manage the sequence.',
+    ].join('\n');
+  }
+  if (phase.id === 'answer') {
+    return [
+      'Loop stage: ANSWER.',
+      'Act as the final editor. Resolve the challenges and give @user one cohesive, self-contained answer.',
+      'Lead with the conclusion. Do not narrate the agent workflow or ask another agent to continue.',
+      'If an important uncertainty remains, state it plainly and say what would resolve it.',
+    ].join('\n');
+  }
+  return [
+    'Loop stage: ' + phase.label.toUpperCase() + '.',
+    '@user specifically routed this turn to ' + handle + '. Respond directly and stay within your role.',
+    'The app controls the sequence; only request another specialist when it is essential.',
+  ].join('\n');
+}
+
+function startLoopRun(convo, phases) {
+  convo.loopRun = {
+    id: newId('loop'),
+    status: 'running',
+    phaseIndex: 0,
+    activeAgentId: null,
+    phases: phases.map((phase) => ({
+      ...phase,
+      agentIds: [...phase.agentIds],
+      completedAgentIds: [],
+    })),
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  saveStore();
+  renderLoopFlow(convo);
+  if (typeof isDesktopTraceLayout === 'function' && isDesktopTraceLayout()) {
+    setTraceSidebarOpen(true);
+  }
+  return convo.loopRun;
+}
+
+function setLoopRunPosition(convo, phaseIndex, agentId = null) {
+  const run = convo?.loopRun;
+  if (!run) return;
+  run.phaseIndex = Math.min(run.phases.length - 1, Math.max(0, phaseIndex));
+  run.activeAgentId = agentId || null;
+  run.updatedAt = Date.now();
+  saveStore();
+  renderLoopFlow(convo);
+}
+
+function completeLoopRunAgent(convo, phaseIndex, agentId) {
+  const run = convo?.loopRun;
+  const phase = run?.phases?.[phaseIndex];
+  if (!phase || !agentId) return;
+  if (!phase.completedAgentIds.includes(agentId)) phase.completedAgentIds.push(agentId);
+  run.activeAgentId = null;
+  run.updatedAt = Date.now();
+  saveStore();
+  renderLoopFlow(convo);
+}
+
+function finishLoopRun(convo, status = 'complete') {
+  const run = convo?.loopRun;
+  if (!run) return;
+  run.status = status === 'complete' ? 'complete' : 'stopped';
+  run.activeAgentId = null;
+  if (run.status === 'complete') run.phaseIndex = Math.max(0, run.phases.length - 1);
+  run.updatedAt = Date.now();
+  saveStore({ immediate: true });
+  renderLoopFlow(convo);
+}
+
+function renderLoopFlow(convo = conversations.find((item) => item.id === activeId)) {
+  const show = !!(convo && isBotsSurface() && isBotGroup(convo));
+  if (loopFlow) loopFlow.classList.toggle('is-hidden', !show);
+  if (topbarLoopPhase) topbarLoopPhase.classList.toggle('is-hidden', !show);
+  if (!show || !loopFlow || !loopFlowRail || !loopFlowCurrent || !loopFlowAgents) return;
+
+  const previewPhases = buildLoopRunPhases(convo, {});
+  const run = convo.loopRun;
+  const phases = run?.phases?.length ? run.phases : previewPhases;
+  if (!phases.length) return;
+  const rawRunning = run?.status === 'running';
+  const liveRunning = rawRunning && (
+    isBotsOutboundActive(convo.id)
+    || (typeof activeStreams !== 'undefined' && activeStreams.has(convo.id))
+  );
+  const interrupted = rawRunning && !liveRunning;
+  const phaseIndex = run
+    ? Math.min(phases.length - 1, Math.max(0, run.phaseIndex || 0))
+    : 0;
+  const phase = phases[phaseIndex];
+  const activeBot = run?.activeAgentId ? getBot(run.activeAgentId, convo) : null;
+  let title = run ? phase.label : 'Ready for a problem';
+  let detail = run ? phase.description : phases.map((item) => item.label).join(' → ');
+  let chromeState = 'ready';
+  if (liveRunning) {
+    chromeState = 'running';
+    if (activeBot) detail = botDisplayHandle(activeBot) + ' is working · ' + phase.description;
+  } else if (run?.status === 'complete') {
+    chromeState = 'complete';
+    title = 'Answer ready';
+    detail = 'The loop completed its review and synthesis.';
+  } else if (run?.status === 'stopped' || interrupted) {
+    chromeState = 'stopped';
+    title = interrupted ? 'Pass interrupted' : 'Loop stopped';
+    detail = 'Send a message to start a fresh pass.';
+  }
+
+  loopFlow.classList.toggle('is-running', chromeState === 'running');
+  loopFlowCount.textContent = run ? ((phaseIndex + 1) + ' of ' + phases.length) : (phases.length + ' stages');
+  loopFlowCurrent.replaceChildren();
+  const baton = document.createElement('span');
+  baton.className = 'loop-flow-baton';
+  baton.setAttribute('aria-hidden', 'true');
+  const copy = document.createElement('span');
+  copy.className = 'loop-flow-current-copy';
+  const currentTitle = document.createElement('strong');
+  currentTitle.className = 'loop-flow-current-title';
+  currentTitle.textContent = title;
+  const currentDetail = document.createElement('span');
+  currentDetail.className = 'loop-flow-current-detail';
+  currentDetail.textContent = detail;
+  copy.append(currentTitle, currentDetail);
+  loopFlowCurrent.append(baton, copy);
+
+  loopFlowRail.style.setProperty('--loop-phase-count', String(phases.length));
+  loopFlowRail.replaceChildren();
+  phases.forEach((item, index) => {
+    const step = document.createElement('li');
+    step.className = 'loop-flow-step';
+    const done = run?.status === 'complete' || index < phaseIndex;
+    if (done) step.classList.add('is-done');
+    else if (index === phaseIndex && run) step.classList.add('is-active');
+    const dot = document.createElement('span');
+    dot.className = 'loop-flow-step-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.className = 'loop-flow-step-label';
+    label.textContent = item.label;
+    step.append(dot, label);
+    loopFlowRail.appendChild(step);
+  });
+
+  loopFlowAgents.replaceChildren();
+  const visiblePhase = phases[phaseIndex];
+  (visiblePhase.agentIds || []).forEach((agentId) => {
+    const bot = getBot(agentId, convo);
+    if (!bot) return;
+    const chip = document.createElement('span');
+    chip.className = 'loop-flow-agent';
+    if (run?.activeAgentId === agentId && liveRunning) chip.classList.add('is-active');
+    if ((visiblePhase.completedAgentIds || []).includes(agentId) || run?.status === 'complete') {
+      chip.classList.add('is-done');
+    }
+    const avatar = createBotAvatarEl(bot, { className: 'loop-flow-agent-avatar' });
+    applyPrivacyMosaic(avatar, 'loop-flow-avatar:' + bot.id, { dense: true });
+    const name = document.createElement('span');
+    name.textContent = botDisplayHandle(bot);
+    applyPrivacyMosaic(name, 'loop-flow-agent:' + bot.id);
+    const state = document.createElement('span');
+    state.className = 'loop-flow-agent-state';
+    state.setAttribute('aria-hidden', 'true');
+    chip.append(avatar, name, state);
+    loopFlowAgents.appendChild(chip);
+  });
+
+  if (topbarLoopPhase) {
+    topbarLoopPhase.classList.toggle('is-complete', chromeState === 'complete');
+    topbarLoopPhase.classList.toggle('is-stopped', chromeState === 'stopped');
+    topbarLoopPhase.textContent = chromeState === 'complete'
+      ? 'Answer ready'
+      : chromeState === 'stopped'
+        ? 'Pass stopped'
+        : run
+          ? (phase.label + ' · ' + (phaseIndex + 1) + '/' + phases.length)
+          : 'Ready · ' + phases.length + ' stages';
+  }
 }
 
 function findLinkedGroup(convo) {
@@ -772,113 +1052,113 @@ async function runBotsOutbound(convo, item, userMessage, previousTitle) {
       }
     }
     if (!stopped) {
-    clearBotsInjects(convo.id);
-    const queue = botsToPing(convo, item.editText || item.displayText || '', {
-      fromBotId: item.fromBotId || null,
-      replyToSpeakerId: item.replyToSpeakerId || null,
-    });
-    if (!queue.length && primary && !item.fromBotId && !item.replyToSpeakerId) queue.push(primary);
-    let hops = 0;
-    messageCountAtStart = convo.messages.length;
-    while (
-      hops < BOT_GROUP_MAX_HOPS
-      && (queue.length || botsPendingInjects.has(convo.id))
-    ) {
-      if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
-        stopped = true;
-        break;
-      }
-      // Apply injects that arrived between hops (or after a soft abort cleared the stream).
-      for (const inject of drainBotsInjects(convo.id)) {
-        const injected = inject.alreadyPosted ? null : appendBotsInjectMessage(convo, inject);
-        botsToPing(convo, inject.editText || inject.displayText || '', {
-          fromBotId: inject.fromBotId || null,
-          replyToSpeakerId: inject.replyToSpeakerId || null,
-        }).forEach((next) => {
-          if (!queue.some((queued) => queued.id === next.id)) queue.unshift(next);
-        });
-        if (injected && activeId === convo.id) {
-          chatThread.appendChild(
-            buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
-          );
-          scrollToBottom({ force: true });
-        }
-      }
-      if (!queue.length) break;
-      const bot = queue.shift();
-      if (!bot) continue;
-      hops += 1;
-      const before = convo.messages.length;
-      await runAssistantTurn(convo, {
-        useAgent: item.turn.useAgent,
-        text: item.apiText,
-        skills: item.turn.skills,
-        deepResearch: item.turn.deepResearch,
-        deepResearchOutput: item.turn.deepResearchOutput,
-        forceTools: item.turn.forceTools,
-        dispatchedMessage: hops === 1 ? userMessage : null,
-        queueItem: hops === 1 ? item : null,
-        previousTitle,
-        speakerBotId: bot.id,
-        skipQueue: true,
-      });
-      if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
-        stopped = true;
-        break;
-      }
-      const last = convo.messages[convo.messages.length - 1];
-      const producedAssistant = !!(
-        last
-        && last.role === 'assistant'
-        && convo.messages.length > before
-      );
-      if (producedAssistant && typeof isSilentNoReply === 'function' && isSilentNoReply(last.content)) {
-        convo.messages.pop();
-        saveStore();
-        if (activeId === convo.id) renderThread(convo, { drainQueue: false });
-      } else if (
-        producedAssistant
-        && String(last.content || '').trim() !== 'No response.'
-        && last.error !== 'No response.'
-      ) {
-        if (convo.botsHeldBy) {
-          for (let i = queue.length - 1; i >= 0; i -= 1) {
-            if (queue[i].id !== convo.botsHeldBy) queue.splice(i, 1);
+      clearBotsInjects(convo.id);
+      messageCountAtStart = convo.messages.length;
+      const workItems = [{ item, userMessage, previousTitle }];
+
+      const collectInjectedWork = () => {
+        const prepared = [];
+        for (const inject of drainBotsInjects(convo.id)) {
+          const injected = inject.alreadyPosted ? null : appendBotsInjectMessage(convo, inject);
+          if (injected && activeId === convo.id) {
+            chatThread.appendChild(
+              buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
+            );
+            scrollToBottom({ force: true });
           }
-        } else {
-          botsToPing(convo, last.content, { fromBotId: bot.id }).forEach((next) => {
-            if (!queue.some((queued) => queued.id === next.id)) queue.push(next);
+          prepared.push({
+            item: inject,
+            userMessage: injected,
+            previousTitle: convo.title,
           });
         }
-      }
-      // Mid-turn user injects (steer/interrupt while a bot was thinking).
-      const injects = drainBotsInjects(convo.id);
-      for (const inject of injects) {
-        const injected = inject.alreadyPosted ? null : appendBotsInjectMessage(convo, inject);
-        const pinged = botsToPing(convo, inject.editText || inject.displayText || '', {
-          fromBotId: inject.fromBotId || null,
-          replyToSpeakerId: inject.replyToSpeakerId || null,
-        });
-        const resume = [];
-        if (bot && !inject.replyToSpeakerId && !pinged.some((item) => item.id === bot.id)) resume.push(bot);
-        [...resume, ...pinged].forEach((next) => {
-          if (!queue.some((queued) => queued.id === next.id)) queue.push(next);
-        });
-        if (injected && activeId === convo.id) {
-          chatThread.appendChild(
-            buildBubble('user', injected.content, convo.messages.length - 1, injected, { animate: true })
-          );
-          scrollToBottom({ force: true });
+        if (prepared.length) workItems.unshift(...prepared);
+        return prepared.length > 0;
+      };
+
+      while (workItems.length && !stopped) {
+        const work = workItems.shift();
+        const phases = buildLoopRunPhases(convo, work.item);
+        if (!phases.length) continue;
+        const run = startLoopRun(convo, phases);
+        const frozenMessageLimit = convo.messages.length;
+        let turnNumber = 0;
+        let superseded = false;
+
+        for (let phaseIndex = 0; phaseIndex < phases.length; phaseIndex += 1) {
+          const phase = phases[phaseIndex];
+          setLoopRunPosition(convo, phaseIndex, null);
+          for (const agentId of phase.agentIds) {
+            if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
+              stopped = true;
+              break;
+            }
+            if (collectInjectedWork()) {
+              superseded = true;
+              break;
+            }
+            const bot = getBot(agentId, convo);
+            if (!bot) continue;
+            turnNumber += 1;
+            setLoopRunPosition(convo, phaseIndex, bot.id);
+            const ran = await runAssistantTurn(convo, {
+              useAgent: work.item.turn.useAgent,
+              text: work.item.apiText,
+              skills: work.item.turn.skills,
+              deepResearch: work.item.turn.deepResearch,
+              deepResearchOutput: work.item.turn.deepResearchOutput,
+              forceTools: work.item.turn.forceTools,
+              dispatchedMessage: turnNumber === 1 ? work.userMessage : null,
+              queueItem: turnNumber === 1 ? work.item : null,
+              previousTitle: work.previousTitle,
+              speakerBotId: bot.id,
+              skipQueue: true,
+              botMessageLimit: phase.id === 'explore' ? frozenMessageLimit : null,
+              loopTurnDirective: loopPhaseDirective(phase, bot),
+              loopPhase: {
+                runId: run.id,
+                id: phase.id,
+                label: phase.label,
+                index: phaseIndex + 1,
+                total: phases.length,
+              },
+            });
+            if (!ran) {
+              stopped = true;
+              break;
+            }
+            completeLoopRunAgent(convo, phaseIndex, bot.id);
+            if (isBotsOutboundStopped(convo.id) || botsOutboundEpochOf(convo.id) !== epoch) {
+              stopped = true;
+              break;
+            }
+            if (collectInjectedWork()) {
+              superseded = true;
+              break;
+            }
+          }
+          if (stopped || superseded) break;
         }
+
+        if (stopped) {
+          finishLoopRun(convo, 'stopped');
+          break;
+        }
+        if (superseded) {
+          finishLoopRun(convo, 'stopped');
+          continue;
+        }
+        finishLoopRun(convo, 'complete');
       }
-    }
     }
     if (stopped) {
       purgeTrailingNoResponseMessages(convo, messageCountAtStart);
       saveStore();
     }
   } finally {
+    if (stopped && convo.loopRun?.status === 'running') finishLoopRun(convo, 'stopped');
     clearBotsOutboundActive(convo.id);
+    renderLoopFlow(convo);
   }
   if (!stopped) maybeSendNextQueued(convo.id);
   if (activeId === convo.id) renderThread(convo);
@@ -967,8 +1247,28 @@ function defaultLoopModelId(index) {
 function loopRolePreset(index) {
   return LOOP_ROLE_PRESETS[index] || {
     handle: 'agent' + (index + 1),
+    stage: 'explore',
     description: 'Independent take on the same problem.',
   };
+}
+
+function createLoopStageSelect(value, ariaLabel, className = '') {
+  const select = document.createElement('select');
+  select.className = ('loop-stage-select' + (className ? ' ' + className : '')).trim();
+  select.setAttribute('aria-label', ariaLabel);
+  [
+    ['auto', 'Auto stage'],
+    ['explore', 'Explore'],
+    ['challenge', 'Challenge'],
+    ['answer', 'Answer'],
+  ].forEach(([id, label]) => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  select.value = ['auto', 'explore', 'challenge', 'answer'].includes(value) ? value : 'auto';
+  return select;
 }
 
 function uniqueLoopHandle(used, raw, fallbackIndex) {
@@ -1113,6 +1413,7 @@ function createBotSession(bot, { group = false, title = '', participantIds = [],
     loopAgents: group ? agents : [],
     groupMemory: '',
     botsHeldBy: null,
+    loopRun: null,
     sideThreadOf: null,
     workspaceRoot: '',
   };
@@ -1155,6 +1456,7 @@ function readLoopAgentRows() {
       name: '@' + handle,
       description: String(row.querySelector('.loop-agent-role')?.value || '').trim(),
       model: String(row.querySelector('.loop-agent-model')?.value || '').trim(),
+      stage: String(row.querySelector('.loop-stage-select')?.value || 'auto'),
       avatarSeed: handle,
     });
   });
@@ -1199,8 +1501,13 @@ function renderLoopAgentRows() {
         agent.model = value;
       },
     });
+    const stage = createLoopStageSelect(
+      agent.stage || loopRolePreset(index).stage || 'auto',
+      'Stage for agent ' + (index + 1)
+    );
     top.appendChild(prefix);
     top.appendChild(model);
+    top.appendChild(stage);
     const role = document.createElement('textarea');
     role.className = 'field-textarea loop-agent-role';
     role.rows = 2;
@@ -1244,6 +1551,7 @@ function setLoopDraftCount(next) {
       handle,
       name: '@' + handle,
       description: preset.description,
+      stage: preset.stage,
       model: defaultLoopModelId(index),
       avatarSeed: handle,
     }));
@@ -1366,12 +1674,22 @@ function persistAgentFields(convo, botId, fields) {
       changed = true;
     }
   }
+  if (Object.prototype.hasOwnProperty.call(fields, 'stage')) {
+    const next = ['auto', 'explore', 'challenge', 'answer'].includes(fields.stage)
+      ? fields.stage
+      : 'auto';
+    if (agent.stage !== next) {
+      agent.stage = next;
+      changed = true;
+    }
+  }
   if (!changed) return;
   agent.updatedAt = Date.now();
   convo.updatedAt = Date.now();
   saveStore({ immediate: true });
   if (typeof renderSidebar === 'function') renderSidebar();
   if (typeof paintLoopModelHint === 'function') paintLoopModelHint();
+  renderLoopFlow(convo);
 }
 
 function persistAgentModel(convo, botId, modelId) {
@@ -1380,6 +1698,10 @@ function persistAgentModel(convo, botId, modelId) {
 
 function persistAgentDescription(convo, botId, description) {
   persistAgentFields(convo, botId, { description });
+}
+
+function persistAgentStage(convo, botId, stage) {
+  persistAgentFields(convo, botId, { stage });
 }
 
 async function deleteBotAndSession(botId) {
@@ -1681,6 +2003,7 @@ function renderTraceMembers() {
     closeTraceMembersPicker();
     if (traceMembersList) traceMembersList.replaceChildren();
     applyTraceSplitLayout();
+    renderLoopFlow(convo);
     return;
   }
   const members = ensureLoopAgents(convo);
@@ -1717,6 +2040,12 @@ function renderTraceMembers() {
       hiddenClass: 'trace-member-model',
       onPick: (value) => persistAgentModel(convo, bot.id, value),
     });
+    const stage = createLoopStageSelect(
+      bot.stage || 'auto',
+      'Stage for ' + botDisplayHandle(bot),
+      'is-compact'
+    );
+    stage.addEventListener('change', () => persistAgentStage(convo, bot.id, stage.value));
     const desc = document.createElement('textarea');
     desc.className = 'field-textarea trace-member-desc';
     desc.rows = 2;
@@ -1728,6 +2057,7 @@ function renderTraceMembers() {
     desc.addEventListener('blur', () => persistAgentDescription(convo, bot.id, desc.value));
     copy.appendChild(handle);
     copy.appendChild(model);
+    copy.appendChild(stage);
     copy.appendChild(desc);
     row.appendChild(copy);
     const kick = document.createElement('button');
@@ -1743,6 +2073,7 @@ function renderTraceMembers() {
   });
   closeTraceMembersPicker();
   applyTraceSplitLayout();
+  renderLoopFlow(convo);
 }
 
 function bindBotChrome() {
@@ -1767,6 +2098,9 @@ function bindBotChrome() {
     const kick = event.target.closest('.trace-member-kick');
     if (!kick || kick.disabled) return;
     kickBotFromActiveGroup(kick.dataset.botId);
+  });
+  topbarLoopPhase?.addEventListener('click', () => {
+    if (typeof setTraceSidebarOpen === 'function') setTraceSidebarOpen(true, { fromUser: true });
   });
   bindTraceSplitChrome();
 }

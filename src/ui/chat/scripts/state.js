@@ -172,6 +172,7 @@ const btnNewChatLabel = document.getElementById('btnNewChatLabel');
 const btnNewIncognitoChat = document.getElementById('btnNewIncognitoChat');
 const topbarIncognito = document.getElementById('topbarIncognito');
 const topbarBotsHold = document.getElementById('topbarBotsHold');
+const topbarLoopPhase = document.getElementById('topbarLoopPhase');
 const btnSend = document.getElementById('btnSend');
 const btnBranch = document.getElementById('btnBranch');
 const btnStop = document.getElementById('btnStop');
@@ -192,6 +193,11 @@ const traceSidebar = document.getElementById('traceSidebar');
 const traceSidebarBody = document.getElementById('traceSidebarBody');
 const traceSidebarTitle = document.getElementById('traceSidebarTitle');
 const traceSidebarSplit = document.getElementById('traceSidebarSplit');
+const loopFlow = document.getElementById('loopFlow');
+const loopFlowCount = document.getElementById('loopFlowCount');
+const loopFlowCurrent = document.getElementById('loopFlowCurrent');
+const loopFlowRail = document.getElementById('loopFlowRail');
+const loopFlowAgents = document.getElementById('loopFlowAgents');
 const traceSplitHandle = document.getElementById('traceSplitHandle');
 const traceMembers = document.getElementById('traceMembers');
 const traceMembersList = document.getElementById('traceMembersList');
@@ -822,6 +828,31 @@ function normalizeOutboundItem(raw) {
   };
 }
 
+function normalizeLoopRun(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const phases = Array.isArray(raw.phases) ? raw.phases.map((phase, index) => ({
+    id: typeof phase?.id === 'string' ? phase.id : ('phase-' + index),
+    label: typeof phase?.label === 'string' ? phase.label : 'Phase ' + (index + 1),
+    description: typeof phase?.description === 'string' ? phase.description : '',
+    agentIds: Array.isArray(phase?.agentIds)
+      ? phase.agentIds.filter((id) => typeof id === 'string')
+      : [],
+    completedAgentIds: Array.isArray(phase?.completedAgentIds)
+      ? phase.completedAgentIds.filter((id) => typeof id === 'string')
+      : [],
+  })) : [];
+  if (!phases.length) return null;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : newId('loop'),
+    status: ['running', 'complete', 'stopped'].includes(raw.status) ? raw.status : 'stopped',
+    phaseIndex: Math.min(phases.length - 1, Math.max(0, Number(raw.phaseIndex) || 0)),
+    activeAgentId: typeof raw.activeAgentId === 'string' ? raw.activeAgentId : null,
+    phases,
+    startedAt: typeof raw.startedAt === 'number' ? raw.startedAt : Date.now(),
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now(),
+  };
+}
+
 function normalizeConversation(convo) {
   return {
     id: convo.id || newId('c'),
@@ -849,6 +880,7 @@ function normalizeConversation(convo) {
       : [],
     groupMemory: typeof convo.groupMemory === 'string' ? convo.groupMemory : '',
     botsHeldBy: typeof convo.botsHeldBy === 'string' ? convo.botsHeldBy : null,
+    loopRun: normalizeLoopRun(convo.loopRun),
     sideThreadOf: typeof convo.sideThreadOf === 'string' ? convo.sideThreadOf : null,
     workspaceRoot: typeof convo.workspaceRoot === 'string'
       ? convo.workspaceRoot.trim().slice(0, 512)

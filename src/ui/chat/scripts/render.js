@@ -3579,6 +3579,16 @@ function syncMessageSpeaker(row, message) {
   name.textContent = label;
   applyPrivacyMosaic(name, 'speaker:' + (speakerBot?.id || label));
   speaker.appendChild(name);
+  if (message?.loopPhaseLabel && row.classList.contains('msg-role-assistant')) {
+    const phase = document.createElement('span');
+    phase.className = 'msg-speaker-phase';
+    const position = Number(message.loopPhaseIndex) && Number(message.loopPhaseTotal)
+      ? (message.loopPhaseIndex + '/' + message.loopPhaseTotal + ' · ')
+      : '';
+    phase.textContent = position + message.loopPhaseLabel;
+    phase.title = 'Loop stage: ' + message.loopPhaseLabel;
+    speaker.appendChild(phase);
+  }
 }
 
 function attachMessageMeta(row, message) {

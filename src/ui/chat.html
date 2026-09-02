@@ -159,6 +159,7 @@
               <div class="topbar-bot-roster is-hidden" id="topbarBotRoster" aria-label="Room members"></div>
             </div>
             <div class="chat-topbar-trailing">
+              <button type="button" class="topbar-loop-phase is-hidden" id="topbarLoopPhase" aria-label="Show loop progress" title="Show loop progress"></button>
               <span class="topbar-hold-pill is-hidden" id="topbarBotsHold" title="Other agents will wait until this room is resumed">Held</span>
               <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
@@ -320,6 +321,15 @@
               </button>
             </div>
           </div>
+          <section class="loop-flow is-hidden" id="loopFlow" aria-label="Loop progress">
+            <div class="loop-flow-kicker">
+              <span>Loop progress</span>
+              <span class="loop-flow-count" id="loopFlowCount"></span>
+            </div>
+            <div class="loop-flow-current" id="loopFlowCurrent" role="status" aria-live="polite"></div>
+            <ol class="loop-flow-rail" id="loopFlowRail"></ol>
+            <div class="loop-flow-agents" id="loopFlowAgents"></div>
+          </section>
           <div class="trace-sidebar-split" id="traceSidebarSplit">
             <div class="trace-sidebar-activity" id="traceSidebarActivity">
               <div class="trace-sidebar-body" id="traceSidebarBody">
@@ -1081,7 +1091,7 @@
       <div class="project-dialog-main">
         <div class="settings-scroll">
           <h2 class="settings-pane-title" id="groupModalTitle">New loop</h2>
-          <p class="settings-pane-lede">Several models, one hard problem. Give each agent its own model — they debate in this room until the answer holds.</p>
+          <p class="settings-pane-lede">Several models, one hard problem. They form independent takes, challenge the weak points, then deliver one clear answer.</p>
           <p class="field-hint is-hidden" id="groupModalError"></p>
           <div class="settings-section">
             <div class="settings-row-stack">

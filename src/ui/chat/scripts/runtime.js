@@ -1645,6 +1645,9 @@ async function runAssistantTurn(convo, {
   speakerBotId = null,
   skipQueue = false,
   replaceLive = false,
+  botMessageLimit = null,
+  loopTurnDirective = '',
+  loopPhase = null,
 }) {
   if (outboundStarting.has(convo.id) && !replaceLive) return false;
   if (activeStreams.has(convo.id)) {
@@ -1743,6 +1746,7 @@ async function runAssistantTurn(convo, {
     turnSkills,
     turnForceTools,
     speakerBotId: speakerBotId || null,
+    loopPhase,
   });
   liveStarted = true;
   clearOutboundStarting(convo.id);
@@ -1754,7 +1758,9 @@ async function runAssistantTurn(convo, {
   stream.speakerModelId = speakerBot && speakerBot.model ? speakerBot.model : null;
   let apiMessages;
   if (speakerBot && typeof botApiMessages === 'function') {
-    apiMessages = botApiMessages(convo, speakerBot, dispatchedMessage ? text : null);
+    apiMessages = botApiMessages(convo, speakerBot, dispatchedMessage ? text : null, {
+      messageLimit: botMessageLimit,
+    });
   } else {
     apiMessages = convo.messages.map((message) => {
       if (message.role !== 'user') {
@@ -1775,8 +1781,9 @@ async function runAssistantTurn(convo, {
     convo,
     speakerBot,
   });
-  if (systemPrompt) {
-    apiMessages.unshift({ role: 'system', content: systemPrompt });
+  const systemParts = [systemPrompt, String(loopTurnDirective || '').trim()].filter(Boolean);
+  if (systemParts.length) {
+    apiMessages.unshift({ role: 'system', content: systemParts.join('\n\n') });
   }
 
   const remote = selectedRemoteModel(latestState, stream.speakerModelId);
@@ -2007,6 +2014,7 @@ function beginLiveStream(convo, {
   turnId = null,
   turnModel = '',
   speakerBotId = null,
+  loopPhase = null,
 } = {}) {
   if (activeStreams.has(convo.id)) return activeStreams.get(convo.id);
   const stream = {
@@ -2028,6 +2036,7 @@ function beginLiveStream(convo, {
     turnId: turnId || null,
     turnModel: String(turnModel || ''),
     speakerBotId: speakerBotId || null,
+    loopPhase: loopPhase && typeof loopPhase === 'object' ? { ...loopPhase } : null,
     convoId: convo.id,
     cancelled: false,
     hardStopped: false,
@@ -2077,6 +2086,9 @@ function syncStreamSpeakerChrome(convo, stream) {
       role: 'assistant',
       speakerId: bot.id,
       speakerHandle: bot.handle,
+      loopPhaseLabel: stream.loopPhase?.label || '',
+      loopPhaseIndex: stream.loopPhase?.index || null,
+      loopPhaseTotal: stream.loopPhase?.total || null,
     });
     setStreamThinkingLabel(stream, stream.dom.thinkingLabel?.dataset?.base || 'Processing…');
   } else if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) {
@@ -2444,6 +2456,13 @@ async function driveAssistantSse(convo, stream, response) {
         message.speakerId = speakerBot.id;
         message.speakerHandle = speakerBot.handle;
       }
+      if (stream.loopPhase) {
+        message.loopRunId = stream.loopPhase.runId || '';
+        message.loopPhaseId = stream.loopPhase.id || '';
+        message.loopPhaseLabel = stream.loopPhase.label || '';
+        message.loopPhaseIndex = stream.loopPhase.index || null;
+        message.loopPhaseTotal = stream.loopPhase.total || null;
+      }
       const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
       const msgIndex = convo.messages.indexOf(committedMessage);
       const viewing = activeId === convo.id;
@@ -2611,6 +2630,13 @@ async function driveAssistantSse(convo, stream, response) {
     if (speakerBot) {
       message.speakerId = speakerBot.id;
       message.speakerHandle = speakerBot.handle;
+    }
+    if (stream.loopPhase) {
+      message.loopRunId = stream.loopPhase.runId || '';
+      message.loopPhaseId = stream.loopPhase.id || '';
+      message.loopPhaseLabel = stream.loopPhase.label || '';
+      message.loopPhaseIndex = stream.loopPhase.index || null;
+      message.loopPhaseTotal = stream.loopPhase.total || null;
     }
     if (persistedParts) message.parts = persistedParts;
     if (stream.images && Object.keys(stream.images).length) {
