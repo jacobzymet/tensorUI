@@ -45,6 +45,27 @@ function context() {
   return state;
 }
 
+test('dense privacy mosaics follow a circular avatar silhouette', () => {
+  const classes = new Set();
+  const properties = new Map();
+  const state = vm.createContext({ Math });
+  vm.runInContext(declaration('applyPrivacyMosaic'), state);
+  state.applyPrivacyMosaic({
+    classList: { add: (name) => classes.add(name) },
+    style: { setProperty: (name, value) => properties.set(name, value) },
+  }, 'profile-avatar:test', { dense: true });
+
+  const shadows = properties.get('--privacy-pixels');
+  const coordinates = [...shadows.matchAll(/([\d.]+)px ([\d.]+)px/g)]
+    .map((match) => [Number(match[1]) / 4, Number(match[2]) / 4]);
+  assert.ok(coordinates.length > 12);
+  assert.ok(coordinates.every(([column, row]) => (
+    Math.hypot(column - 2.5, row - 2.5) <= 2.6
+  )));
+  assert.equal(coordinates.some(([column, row]) => column === 0 && row === 0), false);
+  assert.equal(classes.has('privacy-mask-dense'), true);
+});
+
 test('legacy data migrates into one Personal profile', () => {
   const state = context();
   const loaded = state.parseStorePayload({

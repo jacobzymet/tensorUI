@@ -26,6 +26,11 @@ function applyPrivacyMosaic(el, seed, { dense = false } = {}) {
   const shadows = [];
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
+      if (dense) {
+        const center = (columns - 1) / 2;
+        const distance = Math.hypot(column - center, row - center);
+        if (distance > 2.6) continue;
+      }
       if (column > 0 && random() < 0.2) continue;
       const shade = 1 + Math.floor(random() * 4);
       const x = (column * 4).toFixed(1);

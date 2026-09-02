@@ -2052,6 +2052,9 @@ function syncProjectChrome() {
         + (project ? ' · Project: ' + project.name : '');
     } else if (typeof paintLoopModelHint === 'function' && paintLoopModelHint()) {
       /* loop-specific model line */
+    } else if (typeof paintReadyInferenceModelHint === 'function'
+      && paintReadyInferenceModelHint(latestState)) {
+      /* current Agent model line */
     } else if (current.startsWith('Chatting with ')) {
       const model = current.replace(/^Chatting with /, '').split(/ · | via /)[0];
       setModelHintWithProvider(

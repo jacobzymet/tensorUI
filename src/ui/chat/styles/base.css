@@ -1455,12 +1455,13 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
   content: "";
   position: absolute;
   z-index: 2;
-  top: 0.12rem;
-  left: 0.12rem;
+  top: 50%;
+  left: 50%;
+  margin: -11.5px 0 0 -11.5px;
   width: 3px;
   height: 3px;
   border-radius: 1px;
-  background: var(--privacy-pixel-2);
+  background: transparent;
   box-shadow: var(--privacy-pixels);
   pointer-events: none;
   opacity: 1;

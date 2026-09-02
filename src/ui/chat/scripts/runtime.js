@@ -938,6 +938,37 @@ function selectedRemoteModel(data, modelId) {
   return saved ? null : (models[0] || null);
 }
 
+/** Paint the ready-state model line from source data, never from stale surface copy. */
+function paintReadyInferenceModelHint(data) {
+  if (!serverReady || !data || !modelHintEl) return false;
+  if (typeof paintLoopModelHint === 'function' && paintLoopModelHint()) return true;
+
+  const network = data.network || {};
+  const remoteSelected = selectedRemoteModel(data);
+  const modelName = remoteSelected?.model || network.remote_model || 'remote model';
+  const providerLabel = remoteSelected?.provider_name
+    || network.remote_name
+    || network.remote_label
+    || 'provider';
+  const project = inProjectChat() ? getProject(activeProjectId) : null;
+
+  modelHintEl.classList.remove('is-hidden');
+  if (isIncognitoContext() && !activeId) {
+    modelHintEl.textContent = 'Temporary session — stays in memory only until you close the tab.'
+      + (project ? ' · Project: ' + project.name : '');
+  } else if (project && !activeId) {
+    setModelHintWithProvider('Shared instructions & memory apply · ' + modelName, providerLabel);
+  } else {
+    setModelHintWithProvider(
+      project
+        ? 'Chatting with ' + modelName + ' · Project: ' + project.name
+        : 'Chatting with ' + modelName,
+      providerLabel
+    );
+  }
+  return true;
+}
+
 function updateInferenceState(data) {
   latestState = data;
   applyAppearance(data);
@@ -957,11 +988,6 @@ function updateInferenceState(data) {
   const remoteChecking = !!network.remote_checking
     || (!!network.remote_saved && !remoteOk && !network.remote_kind && !(network.remote_models || []).length);
   const remoteSelected = selectedRemoteModel(data);
-  const modelName = remoteSelected?.model || network.remote_model || 'remote model';
-  const providerLabel = remoteSelected?.provider_name
-    || network.remote_name
-    || network.remote_label
-    || 'provider';
   const connected = !!(remoteSelected?.ready || remoteOk);
   // Switching models can briefly look "checking" even though we already have a
   // catalog to talk to. Don't disable Send/resend across that blip.
@@ -969,7 +995,6 @@ function updateInferenceState(data) {
     serverReady = connected;
   }
 
-  const project = inProjectChat() ? getProject(activeProjectId) : null;
   if (remoteChecking) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
@@ -978,20 +1003,8 @@ function updateInferenceState(data) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
     hideComposerHint();
-  } else if (typeof paintLoopModelHint === 'function' && paintLoopModelHint()) {
-    updateComposerHint();
-  } else if (project && !activeId) {
-    modelHintEl.classList.remove('is-hidden');
-    setModelHintWithProvider('Shared instructions & memory apply · ' + modelName, providerLabel);
-    updateComposerHint();
   } else {
-    modelHintEl.classList.remove('is-hidden');
-    setModelHintWithProvider(
-      project
-        ? 'Chatting with ' + modelName + ' · Project: ' + project.name
-        : 'Chatting with ' + modelName,
-      providerLabel
-    );
+    paintReadyInferenceModelHint(data);
     updateComposerHint();
   }
   syncComposerThinkVisibility(remoteSelected);

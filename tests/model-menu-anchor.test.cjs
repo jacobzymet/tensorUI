@@ -14,6 +14,10 @@ const bots = readFileSync(
   join(root, 'src/ui/chat/scripts/bots.js'),
   'utf8'
 ).replace(/\r\n/g, '\n');
+const render = readFileSync(
+  join(root, 'src/ui/chat/scripts/render.js'),
+  'utf8'
+).replace(/\r\n/g, '\n');
 
 function declaration(source, name) {
   const match = source.match(new RegExp('^function ' + name + '\\([\\s\\S]*?^\\}$', 'm'));
@@ -60,4 +64,41 @@ test('stream state does not invalidate an unchanged Loops member list', () => {
     [{ ...members[0], model: 'provider/model-b' }]
   );
   assert.notEqual(before, changed);
+});
+
+test('switching from Loops repaints the shared description with the Agent model', () => {
+  let surface = 'bots';
+  const modelHintEl = {
+    textContent: '',
+    classList: { remove() {} },
+  };
+  const context = vm.createContext({
+    serverReady: true,
+    modelHintEl,
+    activeId: null,
+    activeProjectId: null,
+    selectedRemoteModel() {
+      return { model: 'agent-model', provider_name: 'Agent Provider' };
+    },
+    paintLoopModelHint() {
+      if (surface !== 'bots') return false;
+      modelHintEl.textContent = '@solver · loop-model';
+      return true;
+    },
+    inProjectChat: () => false,
+    getProject: () => null,
+    isIncognitoContext: () => false,
+    setModelHintWithProvider(prefix, provider) {
+      modelHintEl.textContent = prefix + ' via ' + provider;
+    },
+  });
+  vm.runInContext(declaration(runtime, 'paintReadyInferenceModelHint'), context);
+
+  context.paintReadyInferenceModelHint({ network: {} });
+  assert.equal(modelHintEl.textContent, '@solver · loop-model');
+
+  surface = 'chat';
+  context.paintReadyInferenceModelHint({ network: {} });
+  assert.equal(modelHintEl.textContent, 'Chatting with agent-model via Agent Provider');
+  assert.match(render, /paintReadyInferenceModelHint\(latestState\)/);
 });
