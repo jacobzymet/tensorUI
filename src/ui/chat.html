@@ -62,7 +62,7 @@
         <div class="sidebar-actions-row">
           <div class="btn-new-chat-split" id="newChatSplit" role="group" aria-label="New chat">
             <button type="button" class="btn btn-primary btn-new-chat-main" id="btnNewChat">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
               <span id="btnNewChatLabel">New chat</span>
             </button>
             <button type="button" class="btn btn-primary btn-new-chat-incognito" id="btnNewIncognitoChat" aria-label="New ghost chat" title="New ghost chat — temporary session, not saved">
@@ -77,6 +77,8 @@
           </div>
           <button type="button" class="btn btn-outline btn-search-chats" id="btnSearchChats" aria-label="Search chats and projects" title="Search (Ctrl+K)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>Search</span>
+            <kbd aria-hidden="true">⌘ K</kbd>
           </button>
         </div>
       </div>
@@ -179,6 +181,13 @@
                 <p class="empty-sub" id="modelHint">—</p>
                 <div class="composer-shell" id="composerShell">
                   <div class="composer-card" id="composerCard">
+                    <div class="composer-ghost-notice is-hidden" id="composerGhostNotice" role="status">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
+                      <span class="composer-ghost-copy">
+                        <strong>Ghost chat</strong>
+                        <small>Temporary session · not saved to disk</small>
+                      </span>
+                    </div>
                     <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
                     <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
                     <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>

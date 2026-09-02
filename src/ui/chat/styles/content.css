@@ -567,7 +567,7 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
 }
 .dialog.search-dialog {
   position: relative;
-  width: min(32rem, calc(100vw - 2rem));
+  width: min(42rem, calc(100vw - 2rem));
   max-height: min(32rem, calc(100vh - 2rem));
   display: flex;
   flex-direction: column;

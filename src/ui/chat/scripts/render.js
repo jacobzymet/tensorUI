@@ -1951,6 +1951,7 @@ function syncProjectChrome() {
   const incognito = isIncognitoContext();
   chatShell.classList.toggle('is-in-project', !!project);
   chatShell.classList.toggle('is-incognito', incognito);
+  composerGhostNotice?.classList.toggle('is-hidden', !incognito);
   if (topbarIncognito) {
     topbarIncognito.classList.toggle('is-hidden', !incognito);
   }

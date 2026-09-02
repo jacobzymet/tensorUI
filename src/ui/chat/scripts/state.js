@@ -144,6 +144,7 @@ const composerDock = document.getElementById('composerDock');
 const composerCard = document.getElementById('composerCard');
 const composerShell = document.getElementById('composerShell');
 const composerInput = document.getElementById('composerInput');
+const composerGhostNotice = document.getElementById('composerGhostNotice');
 const composerHint = document.getElementById('composerHint');
 const composerMentions = document.getElementById('composerMentions');
 const composerReply = document.getElementById('composerReply');
