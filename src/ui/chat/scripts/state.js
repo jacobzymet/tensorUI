@@ -1320,6 +1320,13 @@ function profileMenuIsOpen() {
   return btnProfileMenu?.getAttribute('aria-expanded') === 'true';
 }
 
+function profileSwitchHasActiveWork() {
+  if (activeStreams.size) return true;
+  if (typeof outboundStarting !== 'undefined' && outboundStarting.size) return true;
+  return typeof isBotsOutboundActive === 'function'
+    && conversations.some((convo) => isBotsOutboundActive(convo.id));
+}
+
 function syncAccountProfileUi() {
   const profile = activeProfile();
   const accountName = String(settings?.name || '').trim() || 'You';
@@ -1395,6 +1402,12 @@ function switchProfile(profileId) {
   if (!target) return false;
   setProfileMenuOpen(false);
   if (target.id === activeProfileId) return true;
+  if (profileSwitchHasActiveWork()) {
+    if (typeof showComposerHint === 'function') {
+      showComposerHint('Finish or stop active tasks before switching profiles.', { warn: true });
+    }
+    return false;
+  }
 
   if (
     settingsModal
@@ -2075,8 +2088,8 @@ async function initLocalData() {
   storageReady = true;
   if (typeof restoreAppSurface === 'function') restoreAppSurface();
   if (typeof loadTraceSplitPrefs === 'function') loadTraceSplitPrefs();
-  if (conversations._sortOrderMigrated) {
-    delete conversations._sortOrderMigrated;
+  if (profiles.some((profile) => profile.conversations._sortOrderMigrated)) {
+    profiles.forEach((profile) => { delete profile.conversations._sortOrderMigrated; });
     saveStore();
   }
   if (!diskEncryptionLocked() && (

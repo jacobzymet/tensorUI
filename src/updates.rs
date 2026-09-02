@@ -1,5 +1,6 @@
 //! Check GitHub Releases for a newer TensorMI Harness version.
 
+use std::cmp::Ordering;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -45,12 +46,29 @@ fn parse_semver_parts(raw: &str) -> Option<(Vec<u64>, Option<String>)> {
     if normalized.is_empty() {
         return None;
     }
-    let (core, pre) = match normalized.split_once('-') {
+    let (without_build, build) = normalized
+        .split_once('+')
+        .map_or((normalized.as_str(), None), |(version, build)| {
+            (version, Some(build))
+        });
+    if build.is_some_and(|build| !valid_dot_identifiers(build, false)) {
+        return None;
+    }
+    let (core, pre) = match without_build.split_once('-') {
         Some((core, rest)) => (core.to_string(), Some(rest.to_string())),
-        None => (normalized, None),
+        None => (without_build.to_string(), None),
     };
+    if pre
+        .as_deref()
+        .is_some_and(|pre| !valid_dot_identifiers(pre, true))
+    {
+        return None;
+    }
     let mut parts = Vec::new();
     for piece in core.split('.') {
+        if piece.len() > 1 && piece.starts_with('0') {
+            return None;
+        }
         let n = piece.parse::<u64>().ok()?;
         parts.push(n);
     }
@@ -61,6 +79,38 @@ fn parse_semver_parts(raw: &str) -> Option<(Vec<u64>, Option<String>)> {
         parts.push(0);
     }
     Some((parts, pre))
+}
+
+fn valid_dot_identifiers(raw: &str, reject_numeric_leading_zero: bool) -> bool {
+    raw.split('.').all(|part| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !(reject_numeric_leading_zero
+                && part.len() > 1
+                && part.starts_with('0')
+                && part.bytes().all(|byte| byte.is_ascii_digit()))
+    })
+}
+
+fn compare_prerelease(left: &str, right: &str) -> Ordering {
+    let left: Vec<&str> = left.split('.').collect();
+    let right: Vec<&str> = right.split('.').collect();
+    for (a, b) in left.iter().zip(&right) {
+        let a_numeric = a.bytes().all(|byte| byte.is_ascii_digit());
+        let b_numeric = b.bytes().all(|byte| byte.is_ascii_digit());
+        let ordering = match (a_numeric, b_numeric) {
+            (true, true) => a.len().cmp(&b.len()).then_with(|| a.cmp(b)),
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => a.cmp(b),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
 }
 
 /// True when `latest` is a newer release than `current`.
@@ -80,7 +130,7 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     // Same numeric core: a release without prerelease beats one with.
     match (latest_pre, current_pre) {
         (None, Some(_)) => true,
-        (Some(a), Some(b)) => a > b,
+        (Some(a), Some(b)) => compare_prerelease(&a, &b).is_gt(),
         _ => false,
     }
 }
@@ -236,6 +286,21 @@ mod tests {
     fn prerelease_ordering() {
         assert!(is_newer("1.0.0", "1.0.0-beta"));
         assert!(is_newer("1.0.0-rc.2", "1.0.0-rc.1"));
+        assert!(is_newer("1.0.0-rc.10", "1.0.0-rc.2"));
+        assert!(is_newer("1.0.0-beta.1", "1.0.0-beta"));
+        assert!(is_newer("1.0.0-beta", "1.0.0-2"));
         assert!(!is_newer("1.0.0-beta", "1.0.0"));
+        assert!(!is_newer("1.0.0-rc.2", "1.0.0-rc.10"));
+        assert!(!is_newer("1.0.0-alpha..1", "1.0.0-alpha"));
+        assert!(!is_newer("2.0.0-alpha..1", "1.0.0"));
+        assert!(!is_newer("1.0.0-alpha.01", "1.0.0-alpha.1"));
+        assert!(is_newer("1.0.0-999999999999999999999999999999", "1.0.0-10"));
+    }
+
+    #[test]
+    fn build_metadata_does_not_affect_precedence() {
+        assert!(!is_newer("1.0.0+new-build", "1.0.0+old-build"));
+        assert!(is_newer("1.0.1+build.7", "1.0.0+build.9"));
+        assert!(!is_newer("2.0.0+", "1.0.0"));
     }
 }

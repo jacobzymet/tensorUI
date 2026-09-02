@@ -296,7 +296,7 @@ impl History {
                 .map_err(|_| "Tool-history authentication failed")?,
         );
         let bytes = &plaintext[offset..offset + len];
-        let valid = match std::str::from_utf8(&bytes) {
+        let valid = match std::str::from_utf8(bytes) {
             Ok(_) => bytes.len(),
             Err(err) if err.error_len().is_none() && offset + len < total => err.valid_up_to(),
             Err(_) => return Err("History byte_offset is inside a UTF-8 character".into()),

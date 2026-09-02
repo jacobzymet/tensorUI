@@ -146,3 +146,18 @@ test('profile menu remains rendered while its close transition finishes', () => 
   finishClose();
   assert.equal(classes.has('is-hidden'), true);
 });
+
+test('profile switching waits until active work is finished', () => {
+  const state = vm.createContext({
+    activeStreams: new Map([['chat-1', {}]]),
+    outboundStarting: new Set(),
+    conversations: [{ id: 'chat-1' }],
+    isBotsOutboundActive: () => false,
+  });
+  vm.runInContext(declaration('profileSwitchHasActiveWork'), state);
+  assert.equal(state.profileSwitchHasActiveWork(), true);
+  state.activeStreams.clear();
+  assert.equal(state.profileSwitchHasActiveWork(), false);
+  state.isBotsOutboundActive = (id) => id === 'chat-1';
+  assert.equal(state.profileSwitchHasActiveWork(), true);
+});

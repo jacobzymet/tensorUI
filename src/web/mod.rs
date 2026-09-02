@@ -15,7 +15,7 @@ use axum::{
         DefaultBodyLimit, OriginalUri, Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderValue, Request, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -149,16 +149,37 @@ async fn secure_local_request(
 
     let issue_cookie = !is_api && request.method() == axum::http::Method::GET;
     let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    harden_local_response(headers, is_api);
     if issue_cookie {
         let value = format!(
             "{SESSION_COOKIE}={}; HttpOnly; SameSite=Strict; Path=/",
             security.token
         );
         if let Ok(value) = HeaderValue::from_str(&value) {
-            response.headers_mut().append(header::SET_COOKIE, value);
+            headers.append(header::SET_COOKIE, value);
         }
     }
     response
+}
+
+fn harden_local_response(headers: &mut HeaderMap, is_api: bool) {
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    if is_api {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
 }
 
 async fn require_unlocked_api(
@@ -2003,6 +2024,22 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_responses_block_framing_and_api_caching() {
+        let mut headers = HeaderMap::new();
+        harden_local_response(&mut headers, true);
+        assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(
+            headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+            "frame-ancestors 'none'"
+        );
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
+
+        let mut page_headers = HeaderMap::new();
+        harden_local_response(&mut page_headers, false);
+        assert!(page_headers.get(header::CACHE_CONTROL).is_none());
+    }
 
     #[test]
     fn locked_api_allowlist_is_minimal_and_exact() {

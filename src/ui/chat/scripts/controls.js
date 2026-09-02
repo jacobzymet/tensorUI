@@ -1217,6 +1217,10 @@ async function deleteProfile(profileId) {
   if (profiles.length <= 1 || !requireUnlockedData()) return;
   const profile = profiles.find((item) => item.id === profileId);
   if (!profile) return;
+  if (profile.id === activeProfileId && profileSwitchHasActiveWork()) {
+    showComposerHint('Finish or stop active tasks before deleting this profile.', { warn: true });
+    return;
+  }
   const itemCount = profile.conversations.length + profile.projects.length + profile.bots.length;
   const ok = await confirmDanger({
     title: 'Delete “' + profile.name + '”?',

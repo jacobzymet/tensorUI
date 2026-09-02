@@ -258,7 +258,8 @@ pub fn normalize_provider_base(raw: &str, _style: ApiStyle) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    let candidate = if raw.contains("://") {
+    let explicit_scheme = raw.contains("://");
+    let candidate = if explicit_scheme {
         raw.to_string()
     } else {
         format!("http://{raw}")
@@ -272,6 +273,11 @@ pub fn normalize_provider_base(raw: &str, _style: ApiStyle) -> Option<String> {
         || url.fragment().is_some()
     {
         return None;
+    }
+    // Keep convenient HTTP support for loopback and private inference servers,
+    // but force public API hosts onto HTTPS so credentials cannot cross plaintext HTTP.
+    if url.scheme() == "http" && !crate::http::url_is_private_or_local(url.as_str()) {
+        url.set_scheme("https").ok()?;
     }
     let path = url.path().trim_end_matches('/').to_string();
     if !path.ends_with("/v1") {
@@ -1889,6 +1895,18 @@ mod tests {
         assert_eq!(
             normalize_openai_base("https://example.com/api/"),
             Some("https://example.com/api/v1".into())
+        );
+        assert_eq!(
+            normalize_openai_base("api.example.com/v1"),
+            Some("https://api.example.com/v1".into())
+        );
+        assert_eq!(
+            normalize_openai_base("http://api.example.com/v1"),
+            Some("https://api.example.com/v1".into())
+        );
+        assert_eq!(
+            normalize_openai_base("10.0.0.8:11434"),
+            Some("http://10.0.0.8:11434/v1".into())
         );
         assert!(normalize_openai_base("file:///tmp/provider").is_none());
         assert!(normalize_openai_base("https://user:secret@example.com").is_none());

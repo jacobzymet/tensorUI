@@ -3213,8 +3213,7 @@ async fn execute_recoverable_tool(
         &outcome.text,
         skills
             .tool_output_bytes
-            .max(1024)
-            .min(output::TOOL_OUTPUT_BYTES),
+            .clamp(1024, output::TOOL_OUTPUT_BYTES),
     );
     outcome.ui_text = output::truncate_text(&outcome.ui_text, output::TOOL_OUTPUT_BYTES);
     Ok(outcome)

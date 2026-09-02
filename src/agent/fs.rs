@@ -13,11 +13,14 @@ use serde_json::Value;
 const MAX_READ_BYTES: usize = 32_000;
 const DEFAULT_READ_LINES: usize = 200;
 const MAX_WRITE_BYTES: usize = 1_000_000;
+const MAX_EDIT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_GLOB_MATCHES: usize = 200;
+const MAX_GLOB_PATTERN_CHARS: usize = 512;
 const MAX_GREP_MATCHES: usize = 80;
 const MAX_GREP_FILES: usize = 80;
 const MAX_GREP_FILE_BYTES: u64 = 1_000_000;
+const MAX_GREP_QUERY_CHARS: usize = 4_096;
 const SKIP_DIR_NAMES: &[&str] = &[
     ".git",
     "node_modules",
@@ -292,6 +295,11 @@ pub fn glob_files(ws: &Workspace, args: &Value) -> Result<String, String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "glob requires a non-empty \"pattern\" string.".to_string())?;
+    if pattern.chars().count() > MAX_GLOB_PATTERN_CHARS {
+        return Err(format!(
+            "glob pattern is too long (max {MAX_GLOB_PATTERN_CHARS} characters)."
+        ));
+    }
     let mut matches = Vec::new();
     walk_files(&ws.root, &ws.root, &mut |rel, _abs, is_dir| {
         if is_dir {
@@ -323,6 +331,11 @@ pub fn grep_files(ws: &Workspace, args: &Value) -> Result<String, String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "grep requires a non-empty \"query\" string.".to_string())?;
+    if query.chars().count() > MAX_GREP_QUERY_CHARS {
+        return Err(format!(
+            "grep query is too long (max {MAX_GREP_QUERY_CHARS} characters)."
+        ));
+    }
     let glob = args
         .get("glob")
         .or_else(|| args.get("include"))
@@ -470,13 +483,17 @@ pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
     if !meta.is_file() {
         return Err(format!("{path} is not a file."));
     }
+    if meta.len() > MAX_EDIT_BYTES as u64 {
+        return Err(format!(
+            "{path} is too large to edit safely (max {MAX_EDIT_BYTES} bytes)."
+        ));
+    }
     let text = fs::read_to_string(&abs).map_err(|err| format!("Could not read {path}: {err}"))?;
     // read_file presents LF line breaks. Match that representation without
     // rewriting the line endings (or any other bytes) outside the edited span.
     let normalized = text.replace("\r\n", "\n");
     let old = old.replace("\r\n", "\n");
-    let matches: Vec<usize> = normalized.match_indices(&old).map(|(at, _)| at).collect();
-    let count = matches.len();
+    let count = normalized.match_indices(&old).count();
     if count == 0 {
         return Err(
             "old_string was not found; no changes were made. LF and CRLF line endings are already treated as equivalent. Re-read the relevant lines and copy a unique snippet exactly, including indentation; do not include the read_file header or invent a trailing newline.".into(),
@@ -494,19 +511,48 @@ pub fn str_replace(ws: &Workspace, args: &Value) -> Result<String, String> {
         .collect();
     let original_offset = |at| at + removed_cr.partition_point(|&cr| cr < at);
     let new = new.replace("\r\n", "\n");
-    let mut next = String::with_capacity(text.len());
-    let mut cursor = 0;
-    for at in matches {
+    if old.len() > MAX_EDIT_BYTES || new.len() > MAX_EDIT_BYTES {
+        return Err(format!(
+            "Replacement text is too large (max {MAX_EDIT_BYTES} bytes)."
+        ));
+    }
+    let default_crlf = text
+        .find('\n')
+        .is_some_and(|i| i > 0 && text.as_bytes()[i - 1] == b'\r');
+    let new_crlf_extra = new.bytes().filter(|byte| *byte == b'\n').count();
+    let mut output_len = text.len();
+    for (at, _) in normalized.match_indices(&old) {
         let start = original_offset(at);
         let end = original_offset(at + old.len());
         let matched = &text[start..end];
         let crlf = matched
             .find('\n')
             .map(|i| i > 0 && matched.as_bytes()[i - 1] == b'\r')
-            .unwrap_or_else(|| {
-                text.find('\n')
-                    .is_some_and(|i| i > 0 && text.as_bytes()[i - 1] == b'\r')
-            });
+            .unwrap_or(default_crlf);
+        let inserted = new
+            .len()
+            .checked_add(if crlf { new_crlf_extra } else { 0 })
+            .ok_or_else(|| "Replacement would be too large.".to_string())?;
+        output_len = output_len
+            .checked_sub(end - start)
+            .and_then(|len| len.checked_add(inserted))
+            .ok_or_else(|| "Replacement would be too large.".to_string())?;
+        if output_len > MAX_EDIT_BYTES {
+            return Err(format!(
+                "Replacement would produce {output_len} bytes; max edit size is {MAX_EDIT_BYTES} bytes."
+            ));
+        }
+    }
+    let mut next = String::with_capacity(output_len);
+    let mut cursor = 0;
+    for (at, _) in normalized.match_indices(&old) {
+        let start = original_offset(at);
+        let end = original_offset(at + old.len());
+        let matched = &text[start..end];
+        let crlf = matched
+            .find('\n')
+            .map(|i| i > 0 && matched.as_bytes()[i - 1] == b'\r')
+            .unwrap_or(default_crlf);
         next.push_str(&text[cursor..start]);
         if crlf {
             next.push_str(&new.replace('\n', "\r\n"));
@@ -874,6 +920,9 @@ fn display_path(path: &Path) -> String {
 }
 
 pub fn glob_match(pattern: &str, path: &str) -> bool {
+    if pattern.chars().count() > MAX_GLOB_PATTERN_CHARS {
+        return false;
+    }
     let pattern = pattern.replace('\\', "/");
     let path = path.replace('\\', "/");
     glob_rec(pattern.as_bytes(), path.as_bytes())
@@ -1074,6 +1123,41 @@ mod tests {
     }
 
     #[test]
+    fn str_replace_rejects_oversized_inputs_and_expansion() {
+        let (_dir, ws) = temp_ws();
+        let oversized = ws.root.join("oversized.txt");
+        File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_EDIT_BYTES as u64 + 1)
+            .unwrap();
+        let err = str_replace(
+            &ws,
+            &json!({ "path": "oversized.txt", "old_string": "a", "new_string": "b" }),
+        )
+        .unwrap_err();
+        assert!(err.contains("too large to edit safely"));
+
+        let expanding = ws.root.join("expanding.txt");
+        let original = "a".repeat(MAX_EDIT_BYTES / 2 + 1);
+        fs::write(&expanding, &original).unwrap();
+        let err = str_replace(
+            &ws,
+            &json!({
+                "path": "expanding.txt",
+                "old_string": "a",
+                "new_string": "aa",
+                "replace_all": true
+            }),
+        )
+        .unwrap_err();
+        assert!(err.contains("max edit size"));
+        assert_eq!(
+            fs::metadata(expanding).unwrap().len(),
+            original.len() as u64
+        );
+    }
+
+    #[test]
     fn write_requires_explicit_overwrite_and_preserves_existing_content() {
         let (_dir, ws) = temp_ws();
         let path = ws.root.join("styles.css");
@@ -1221,5 +1305,14 @@ mod tests {
         assert!(globbed.contains("src/lib.rs"));
         let grepped = grep_files(&ws, &json!({ "query": "fn x" })).unwrap();
         assert!(grepped.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn search_patterns_have_bounded_complexity() {
+        let (_dir, ws) = temp_ws();
+        let glob = "*".repeat(MAX_GLOB_PATTERN_CHARS + 1);
+        assert!(glob_files(&ws, &json!({ "pattern": glob })).is_err());
+        let query = "x".repeat(MAX_GREP_QUERY_CHARS + 1);
+        assert!(grep_files(&ws, &json!({ "query": query })).is_err());
     }
 }
