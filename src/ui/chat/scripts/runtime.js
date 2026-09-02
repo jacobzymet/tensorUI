@@ -1226,8 +1226,14 @@ async function sendMessage({ branch = false } = {}) {
   };
 
   // Branch always starts a fresh turn on the new chat (never queue on the parent).
-  if (!branch && isConvoBusy(convo.id)) {
+  const busy = !branch && isConvoBusy(convo.id);
+  const hasQueued = !branch && getOutboundQueue(convo.id).length > 0;
+  if (!branch && (busy || hasQueued)) {
     enqueueOutbound(convo, outbound);
+    if (!busy) {
+      if (typeof resumeOutboundQueue === 'function') resumeOutboundQueue(convo.id);
+      maybeSendNextQueued(convo.id);
+    }
     focusComposer();
     return;
   }
@@ -1684,12 +1690,16 @@ async function runAssistantTurn(convo, {
     }
     abortStream(convo.id, { cancelServer: true });
   }
-  markOutboundStarting(convo.id);
+  const startEpoch = markOutboundStarting(convo.id);
   let liveStarted = false;
   try {
-  if (typeof waitForCancel === 'function') await waitForCancel(convo.id);
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
+  if (typeof waitForCancel === 'function') await waitForCancel(convo.id);
+  if (typeof outboundStartIsCurrent === 'function'
+    && !outboundStartIsCurrent(convo.id, startEpoch)) {
+    return false;
+  }
   if (!serverReady) {
     if (typeof showComposerHint === 'function') {
       showComposerHint('Model is not ready yet. Try Send again.');
@@ -1774,7 +1784,7 @@ async function runAssistantTurn(convo, {
     loopPhase,
   });
   liveStarted = true;
-  clearOutboundStarting(convo.id);
+  clearOutboundStarting(convo.id, startEpoch);
   stream.speakerBotId = speakerBotId || null;
   stream.skipQueue = !!skipQueue;
   syncStreamSpeakerChrome(convo, stream);
@@ -1883,7 +1893,7 @@ async function runAssistantTurn(convo, {
   await driveAssistantSse(convo, stream, response);
   return true;
   } finally {
-    if (!liveStarted) clearOutboundStarting(convo.id);
+    if (!liveStarted) clearOutboundStarting(convo.id, startEpoch);
   }
 }
 
@@ -2942,17 +2952,19 @@ document.addEventListener('keydown', (event) => {
 });
 btnStop.addEventListener('click', () => {
   if (!activeId) return;
-  abortStream(activeId);
+  const stoppedId = activeId;
+  if (typeof pauseOutboundQueueAfterStop === 'function') pauseOutboundQueueAfterStop(stoppedId);
+  void abortStream(stoppedId);
   syncComposerStreamUi();
   renderSidebar();
-  const convo = conversations.find((item) => item.id === activeId);
+  const convo = conversations.find((item) => item.id === stoppedId);
   // Drop any live "Processing…" / empty error bubble that finalize hasn't cleared yet.
-  if (convo && activeId === convo.id) {
+  if (convo && activeId === stoppedId) {
     chatThread.querySelectorAll('.msg-role-assistant[data-stream-id]').forEach((row) => {
       row.remove();
     });
   }
-  maybeSendNextQueued(activeId);
+  updateComposerHint();
 });
 btnPlus?.addEventListener('click', (event) => {
   event.stopPropagation();

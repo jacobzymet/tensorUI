@@ -60,12 +60,17 @@ function refreshSettingsDataSummary() {
 }
 
 const outboundStarting = new Set();
+const outboundStartEpochs = new Map();
+const stoppedOutboundQueues = new Set();
 
 function isConvoBusy(convoId) {
+  const botsRunning = typeof isBotsOutboundActive === 'function'
+    && isBotsOutboundActive(convoId)
+    && !(typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convoId));
   return !!convoId && (
     activeStreams.has(convoId)
     || outboundStarting.has(convoId)
-    || (typeof isBotsOutboundActive === 'function' && isBotsOutboundActive(convoId))
+    || botsRunning
   );
 }
 
@@ -118,13 +123,28 @@ function isBotsOutboundStopped(convoId) {
 const cancelInFlight = new Map();
 
 function markOutboundStarting(convoId) {
-  if (!convoId) return;
+  if (!convoId) return 0;
+  const epoch = (outboundStartEpochs.get(convoId) || 0) + 1;
+  outboundStartEpochs.set(convoId, epoch);
   outboundStarting.add(convoId);
+  if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
+  return epoch;
+}
+
+function outboundStartIsCurrent(convoId, epoch) {
+  return !!convoId && !!epoch && outboundStartEpochs.get(convoId) === epoch;
+}
+
+function clearOutboundStarting(convoId, epoch = null) {
+  if (!convoId) return;
+  if (epoch != null && !outboundStartIsCurrent(convoId, epoch)) return;
+  outboundStarting.delete(convoId);
   if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
 }
 
-function clearOutboundStarting(convoId) {
+function invalidateOutboundStart(convoId) {
   if (!convoId) return;
+  outboundStartEpochs.set(convoId, (outboundStartEpochs.get(convoId) || 0) + 1);
   outboundStarting.delete(convoId);
   if (typeof syncComposerStreamUi === 'function') syncComposerStreamUi();
 }
@@ -132,14 +152,25 @@ function clearOutboundStarting(convoId) {
 function scheduleCancel(convoId, turnId) {
   if (!convoId) return Promise.resolve();
   const prev = cancelInFlight.get(convoId) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => fetch('/api/chat/cancel', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      conversation_id: convoId,
-      ...(turnId ? { turn_id: turnId } : {}),
-    }),
-  }).then(() => {}).catch(() => {}));
+  const next = prev.catch(() => {}).then(async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    try {
+      await fetch('/api/chat/cancel', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: convoId,
+          ...(turnId ? { turn_id: turnId } : {}),
+        }),
+        signal: controller.signal,
+      });
+    } catch {
+      // Best effort: local teardown must never wait forever on cancellation.
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
   cancelInFlight.set(convoId, next);
   next.finally(() => {
     if (cancelInFlight.get(convoId) === next) cancelInFlight.delete(convoId);
@@ -153,6 +184,7 @@ function waitForCancel(convoId) {
 }
 
 function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
+  if (!soft) invalidateOutboundStart(convoId);
   if (cancelServer && !soft) markBotsOutboundStopped(convoId);
   if (cancelServer && !soft && typeof bumpBotsOutboundEpoch === 'function') {
     bumpBotsOutboundEpoch(convoId);
@@ -189,7 +221,8 @@ function softAbortStream(convoId) {
 }
 
 function abortAllStreams({ cancelServer = true } = {}) {
-  for (const id of [...activeStreams.keys()]) abortStream(id, { cancelServer });
+  const ids = new Set([...activeStreams.keys(), ...outboundStarting]);
+  for (const id of ids) abortStream(id, { cancelServer });
   if (typeof stopAllBotsOutbound === 'function') stopAllBotsOutbound();
 }
 
@@ -237,8 +270,23 @@ function clearOutboundQueue(convoId) {
     editingQueueId = null;
   }
   outboundQueues.delete(convoId);
+  stoppedOutboundQueues.delete(convoId);
   if (activeId === convoId) renderOutboundQueue(conversations.find((c) => c.id === convoId));
   persistOutboundQueues();
+}
+
+function pauseOutboundQueueAfterStop(convoId) {
+  if (!convoId || !getOutboundQueue(convoId).length) return;
+  stoppedOutboundQueues.add(convoId);
+  if (activeId === convoId) updateComposerHint();
+}
+
+function resumeOutboundQueue(convoId) {
+  if (convoId) stoppedOutboundQueues.delete(convoId);
+}
+
+function isOutboundQueueStopped(convoId) {
+  return !!convoId && stoppedOutboundQueues.has(convoId);
 }
 
 function canSteerLiveStream(stream = activeStream()) {
@@ -425,6 +473,7 @@ function removeQueuedOutbound(convoId, queueId) {
   const queue = getOutboundQueue(convoId);
   const next = queue.filter((item) => item.id !== queueId);
   outboundQueues.set(convoId, next);
+  if (!next.length) stoppedOutboundQueues.delete(convoId);
   if (editingQueueId === queueId) {
     if (editingRow?.dataset.queueId === queueId) {
       editingRow = null;
@@ -799,6 +848,7 @@ function saveQueuedMessageEdit(row, rawText) {
   refreshQueuedBubble(row, item, { paused: false });
   updateComposerHint();
   persistOutboundQueues();
+  resumeOutboundQueue(activeId);
   maybeSendNextQueued(activeId);
   focusComposer();
 }
@@ -856,6 +906,11 @@ function maybeSendNextQueued(convoId) {
   if (!convoId || isConvoBusy(convoId)) return;
   const queue = getOutboundQueue(convoId);
   if (!queue.length) {
+    stoppedOutboundQueues.delete(convoId);
+    updateComposerHint();
+    return;
+  }
+  if (isOutboundQueueStopped(convoId)) {
     updateComposerHint();
     return;
   }

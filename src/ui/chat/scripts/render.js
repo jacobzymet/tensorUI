@@ -2109,6 +2109,10 @@ function updateComposerHint() {
   voiceHintUntil = 0;
   const queueLen = activeId ? getOutboundQueue(activeId).length : 0;
   if (queueLen > 0) {
+    if (typeof isOutboundQueueStopped === 'function' && isOutboundQueueStopped(activeId)) {
+      showComposerHint('Queue paused after Stop · send a new message or save an edit to resume');
+      return;
+    }
     if (isQueuePausedForEdit(activeId)) {
       showComposerHint('Queue paused · save or cancel the edit to continue');
       return;
@@ -3576,12 +3580,18 @@ async function submitEditedMessage(row, rawText) {
     showComposerHint('Model is not ready yet. Try Send again.');
     return;
   }
-  markOutboundStarting(convo.id);
+  let editStartEpoch = markOutboundStarting(convo.id);
   const live = typeof activeStreams !== 'undefined' ? activeStreams.get(convo.id) : null;
   if (live) {
     live.replaced = true;
     live.skipQueue = true;
-    await abortStream(convo.id, { cancelServer: true });
+    const cancelled = abortStream(convo.id, { cancelServer: true });
+    editStartEpoch = markOutboundStarting(convo.id);
+    await cancelled;
+    if (typeof outboundStartIsCurrent === 'function'
+      && !outboundStartIsCurrent(convo.id, editStartEpoch)) {
+      return;
+    }
   }
 
   const mentioned = parseCapabilityMentions(rawText);
