@@ -15,6 +15,8 @@ function showSettingsPane(pane) {
   if (pane === 'data') {
     refreshLocalDataPane();
     refreshSettingsDataSummary();
+  } else if (pane === 'profiles') {
+    renderProfilesSettingsList();
   }
 }
 
@@ -44,13 +46,17 @@ function refreshSettingsDataSummary() {
   const projectLabel = projectCount === 1 ? '1 project' : projectCount + ' projects';
   const where = 'on disk';
   const loopLabel = loopCount === 1 ? '1 loop' : loopCount + ' loops';
-  el.textContent = 'Stored ' + where + ': ' + chatLabel + ' · ' + loopLabel + ' · ' + projectLabel + '.';
+  const profileLabel = activeProfile()?.name || 'Personal';
+  el.textContent = profileLabel + ' profile · stored ' + where + ': '
+    + chatLabel + ' · ' + loopLabel + ' · ' + projectLabel + '.';
   const clearChats = document.getElementById('btnClearChats');
+  const clearLoops = document.getElementById('btnClearLoops');
   const clearProjects = document.getElementById('btnClearProjects');
   const clearAll = document.getElementById('btnClearAllData');
   if (clearChats) clearChats.disabled = chatCount === 0;
+  if (clearLoops) clearLoops.disabled = loopCount === 0;
   if (clearProjects) clearProjects.disabled = projectCount === 0;
-  if (clearAll) clearAll.disabled = chatCount === 0 && projectCount === 0;
+  if (clearAll) clearAll.disabled = chatCount === 0 && loopCount === 0 && projectCount === 0;
 }
 
 const outboundStarting = new Set();
@@ -903,6 +909,36 @@ function clearAllChats() {
   refreshSettingsDataSummary();
 }
 
+function clearAllLoops() {
+  if (!requireUnlockedData()) return;
+  const loops = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
+  if (loops.length === 0) return;
+  const n = loops.length;
+  if (!confirm('Delete all ' + n + ' loop' + (n === 1 ? '' : 's') + '? This cannot be undone.')) return;
+  const dropIds = new Set(loops.map((convo) => convo.id));
+  for (const id of dropIds) {
+    abortStream(id);
+    outboundQueues.delete(id);
+    stickByConvo.delete(id);
+  }
+  if (editingQueueId && dropIds.has(activeId)) {
+    editingQueueId = null;
+    if (editingRow) {
+      editingRow = null;
+      mentionInput = composerInput;
+      closeMentionMenu();
+    }
+  }
+  conversations = conversations.filter((convo) => !dropIds.has(convo.id));
+  const activeWasDeleted = !!activeId && dropIds.has(activeId);
+  if (activeWasDeleted) activeId = null;
+  saveStore();
+  if (activeWasDeleted || (typeof isBotsSurface === 'function' && isBotsSurface())) startDraft();
+  else renderSidebar();
+  if (mainView === 'projects') renderProjectsPage();
+  refreshSettingsDataSummary();
+}
+
 function clearAllProjects() {
   if (!requireUnlockedData()) return;
   if (projects.length === 0) return;
@@ -925,9 +961,8 @@ function clearAllProjects() {
 function clearAllChatsAndProjects() {
   if (!requireUnlockedData()) return;
   if (conversations.length === 0 && projects.length === 0) return;
-  if (!confirm('Delete all chats and projects from local data? This cannot be undone.')) return;
-  const drop = conversations.filter((convo) => !(typeof isBotsConvo === 'function' && isBotsConvo(convo)));
-  const dropIds = new Set(drop.map((convo) => convo.id));
+  if (!confirm('Delete all chats, loops, and projects in this profile? This cannot be undone.')) return;
+  const dropIds = new Set(conversations.map((convo) => convo.id));
   for (const id of dropIds) {
     abortStream(id);
     outboundQueues.delete(id);
@@ -941,7 +976,7 @@ function clearAllChatsAndProjects() {
       closeMentionMenu();
     }
   }
-  conversations = conversations.filter((convo) => typeof isBotsConvo === 'function' && isBotsConvo(convo));
+  conversations = [];
   projects = [];
   activeId = null;
   activeProjectId = null;
@@ -1056,7 +1091,173 @@ function fillDefaultModelSetting() {
   }
 }
 
+let editingProfileId = null;
+
+function renderProfilesSettingsList() {
+  const list = document.getElementById('profilesSettingsList');
+  if (!list) return;
+  list.replaceChildren();
+  profiles.forEach((profile) => {
+    const row = document.createElement('div');
+    row.className = 'profile-settings-card';
+    if (profile.id === activeProfileId) row.classList.add('is-active');
+
+    const mark = document.createElement('span');
+    mark.className = 'profile-settings-mark';
+    mark.textContent = profileInitials(profile.name);
+    applyPrivacyMosaic(mark, 'profile-settings-avatar:' + profile.id, { dense: true });
+    const copy = document.createElement('span');
+    copy.className = 'profile-settings-copy';
+    const title = document.createElement('strong');
+    title.textContent = profile.name;
+    applyPrivacyMosaic(title, 'profile-settings-name:' + profile.id);
+    const meta = document.createElement('span');
+    const chatCount = profile.conversations.filter((convo) => convo.surface !== 'bots').length;
+    const loopCount = profile.conversations.filter((convo) => convo.surface === 'bots').length;
+    const projectCount = profile.projects.length;
+    meta.textContent = chatCount + ' chat' + (chatCount === 1 ? '' : 's')
+      + ' · ' + loopCount + ' loop' + (loopCount === 1 ? '' : 's')
+      + ' · ' + projectCount + ' project' + (projectCount === 1 ? '' : 's');
+    copy.append(title, meta);
+
+    const actions = document.createElement('span');
+    actions.className = 'profile-settings-actions';
+    if (profile.id === activeProfileId) {
+      const active = document.createElement('span');
+      active.className = 'profile-active-pill';
+      active.textContent = 'Active';
+      actions.appendChild(active);
+    } else {
+      const use = document.createElement('button');
+      use.type = 'button';
+      use.className = 'btn btn-outline';
+      use.textContent = 'Switch';
+      use.addEventListener('click', () => switchProfile(profile.id));
+      actions.appendChild(use);
+    }
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'btn btn-ghost btn-profile-edit';
+    edit.textContent = 'Rename';
+    edit.addEventListener('click', () => openProfileModal(profile));
+    actions.appendChild(edit);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-ghost btn-profile-delete';
+    remove.textContent = 'Delete';
+    remove.disabled = profiles.length === 1;
+    remove.title = profiles.length === 1 ? 'Keep at least one profile' : 'Delete profile';
+    remove.addEventListener('click', () => deleteProfile(profile.id));
+    actions.appendChild(remove);
+
+    row.append(mark, copy, actions);
+    list.appendChild(row);
+  });
+}
+
+function openProfileModal(profile = null) {
+  if (!requireUnlockedData()) return;
+  editingProfileId = profile?.id || null;
+  const modal = document.getElementById('profileModal');
+  const title = document.getElementById('profileModalTitle');
+  const lede = document.getElementById('profileModalLede');
+  const input = document.getElementById('profileNameInput');
+  const mark = document.getElementById('profileModalMark');
+  const save = document.getElementById('btnProfileModalSave');
+  if (!modal || !input) return;
+  title.textContent = profile ? 'Rename profile' : 'New profile';
+  lede.textContent = profile
+    ? 'The profile name only changes how this space appears in the app.'
+    : 'Create a separate space for its own chats, projects, Loops, notifications, instructions, and memory.';
+  input.value = profile?.name || '';
+  input.setCustomValidity('');
+  mark.textContent = profileInitials(profile?.name || 'Profile');
+  save.textContent = profile ? 'Save name' : 'Create profile';
+  openBackdrop(modal);
+  requestAnimationFrame(() => input.focus());
+}
+
+function closeProfileModal() {
+  editingProfileId = null;
+  const input = document.getElementById('profileNameInput');
+  if (input) input.setCustomValidity('');
+  closeBackdrop(document.getElementById('profileModal'));
+}
+
+function commitProfileModal() {
+  const input = document.getElementById('profileNameInput');
+  if (!input) return;
+  const name = input.value.trim();
+  const duplicate = profiles.some((profile) =>
+    profile.id !== editingProfileId && profile.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+  );
+  input.setCustomValidity(!name
+    ? 'Enter a profile name.'
+    : duplicate ? 'Use a different profile name.' : '');
+  if (!input.reportValidity()) return;
+
+  if (editingProfileId) {
+    const profile = profiles.find((item) => item.id === editingProfileId);
+    if (!profile) return;
+    profile.name = name.slice(0, 48);
+    profile.updatedAt = Date.now();
+    saveStore({ immediate: true });
+    closeProfileModal();
+    syncAccountProfileUi();
+    return;
+  }
+
+  const profile = normalizeProfile({ name });
+  profiles.push(profile);
+  closeProfileModal();
+  switchProfile(profile.id);
+}
+
+async function deleteProfile(profileId) {
+  if (profiles.length <= 1 || !requireUnlockedData()) return;
+  const profile = profiles.find((item) => item.id === profileId);
+  if (!profile) return;
+  const itemCount = profile.conversations.length + profile.projects.length + profile.bots.length;
+  const ok = await confirmDanger({
+    title: 'Delete “' + profile.name + '”?',
+    body: itemCount
+      ? 'This permanently deletes its chats, Loops, projects, notifications, instructions, and memory.'
+      : 'This permanently deletes the profile.',
+    confirmLabel: 'Delete profile',
+  });
+  if (!ok) return;
+
+  profile.conversations.forEach((convo) => {
+    if (typeof abortStream === 'function') abortStream(convo.id);
+    outboundQueues.delete(convo.id);
+    stickByConvo.delete(convo.id);
+  });
+  const wasActive = profile.id === activeProfileId;
+  profiles = profiles.filter((item) => item.id !== profile.id);
+  if (wasActive) {
+    const next = profiles[0];
+    activeProfileId = next.id;
+    bindActiveProfile(next);
+    settings = settingsForProfile(settings, next);
+    restoreOutboundQueues(conversations, { clear: false });
+    activeId = null;
+    activeProjectId = null;
+    if (typeof startDraft === 'function') startDraft();
+    applySettingsInMemory(settings);
+    if (settingsModal && !settingsModal.classList.contains('is-hidden')) {
+      fillSettingsFormFromState();
+      syncSettingsSaveButton();
+    }
+  }
+  saveStore({ immediate: true });
+  syncAccountProfileUi();
+  renderSidebar();
+  refreshSettingsDataSummary();
+}
+
 function fillSettingsFormFromState() {
+  const profileTitle = document.getElementById('personalizationProfileTitle');
+  if (profileTitle) profileTitle.textContent = (activeProfile()?.name || 'Personal') + ' profile';
   document.getElementById('settingName').value = settings.name;
   document.getElementById('settingAbout').value = settings.about;
   document.getElementById('settingInstructions').value = settings.instructions;
@@ -1199,6 +1400,7 @@ function syncSettingsSaveButton({ saved = false, saving = false, failed = false 
 
 function openSettings(pane = 'personalization') {
   fillSettingsFormFromState();
+  renderProfilesSettingsList();
   setCapabilityAdvancedOpen(
     document.getElementById('btnWebSearchAdvanced'),
     document.getElementById('webSearchOptions'),

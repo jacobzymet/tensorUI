@@ -147,6 +147,32 @@ fn normalize_store(value: Value) -> Result<Value> {
             "bots": [],
         }),
         Value::Object(mut map) => {
+            if let Some(Value::Array(profiles)) = map.get_mut("profiles") {
+                for profile in profiles.iter_mut() {
+                    let Value::Object(profile) = profile else {
+                        anyhow::bail!("each profile must be a JSON object");
+                    };
+                    if !profile.contains_key("projects") {
+                        profile.insert("projects".into(), Value::Array(vec![]));
+                    }
+                    if !profile.contains_key("conversations") {
+                        profile.insert("conversations".into(), Value::Array(vec![]));
+                    }
+                    if !profile.contains_key("bots") {
+                        profile.insert("bots".into(), Value::Array(vec![]));
+                    }
+                    if !profile.get("projects").is_some_and(Value::is_array)
+                        || !profile.get("conversations").is_some_and(Value::is_array)
+                        || !profile.get("bots").is_some_and(Value::is_array)
+                    {
+                        anyhow::bail!(
+                            "each profile must include projects, conversations, and bots arrays"
+                        );
+                    }
+                }
+                map.insert("version".into(), Value::from(3));
+                return Ok(Value::Object(map));
+            }
             if !map.contains_key("projects") {
                 map.insert("projects".into(), Value::Array(vec![]));
             }
@@ -351,6 +377,29 @@ mod tests {
         let loaded = load_preferences(root, None).unwrap();
         assert_eq!(loaded["name"], "Ada");
         assert_eq!(loaded["agentMode"], true);
+    }
+
+    #[test]
+    fn profile_store_roundtrip_keeps_data_scoped() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let value = serde_json::json!({
+            "version": 3,
+            "activeProfileId": "work",
+            "profiles": [{
+                "id": "work",
+                "name": "Work",
+                "projects": [{ "id": "p1", "name": "Launch" }],
+                "conversations": [{ "id": "c1", "title": "Plan" }],
+                "bots": []
+            }]
+        });
+        save_chats(root, value, None).unwrap();
+        let loaded = load_chats(root, None).unwrap();
+        assert_eq!(loaded["version"], 3);
+        assert_eq!(loaded["activeProfileId"], "work");
+        assert_eq!(loaded["profiles"][0]["conversations"][0]["id"], "c1");
+        assert!(loaded.get("conversations").is_none());
     }
 
     #[test]

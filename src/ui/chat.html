@@ -99,6 +99,21 @@
         <nav class="convo-list" id="convoList" aria-label="Conversations"></nav>
       </div>
       <div class="sidebar-footer">
+        <div class="sidebar-profile-menu is-hidden" id="sidebarProfileMenu" role="menu" aria-label="Switch profile">
+          <div class="sidebar-profile-menu-head">
+            <span>Profiles</span>
+          </div>
+          <div class="sidebar-profile-list" id="sidebarProfileList"></div>
+          <div class="sidebar-profile-menu-rule"></div>
+          <button type="button" class="sidebar-profile-menu-action" id="btnProfileCreate" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>New profile</span>
+          </button>
+          <button type="button" class="sidebar-profile-menu-action" id="btnProfileManage" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+            <span>Manage profiles</span>
+          </button>
+        </div>
         <div class="sidebar-utility-panel">
           <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-encryption-indicator is-hidden" id="encryptionIndicator" aria-label="Open encryption settings" aria-live="polite" title="Open encryption settings">
             <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><rect width="8" height="6" x="8" y="10" rx="1"/><path d="M10 10V8a2 2 0 0 1 4 0v2"/></svg>
@@ -108,13 +123,25 @@
             </span>
             <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
-          <button type="button" class="btn btn-ghost sidebar-utility-row" id="btnSettings">
-            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
-            <span class="sidebar-utility-copy">
-              <span class="sidebar-utility-label">Settings</span>
-            </span>
-            <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
+          <div class="sidebar-account-bar">
+            <button type="button" class="sidebar-account-trigger" id="btnProfileMenu" aria-haspopup="menu" aria-expanded="false" aria-controls="sidebarProfileMenu">
+              <span class="sidebar-account-avatar" id="sidebarAccountAvatar" aria-hidden="true">Y</span>
+              <span class="sidebar-account-copy">
+                <span class="sidebar-account-name-row">
+                  <strong id="sidebarAccountName">You</strong>
+                  <svg class="sidebar-account-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg>
+                </span>
+                <span id="sidebarActiveProfileName">Personal</span>
+              </span>
+            </button>
+            <button type="button" class="sidebar-account-icon" id="btnNotificationsNav" aria-label="Notifications" title="Notifications">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
+              <span class="sidebar-notification-badge" id="sidebarNotificationBadge" aria-label="0 unread" hidden>0</span>
+            </button>
+            <button type="button" class="sidebar-account-icon" id="btnSettings" aria-label="Open settings" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.5c.14.38.37.72.68 1 .3.25.68.39 1.07.4h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.75 1.1Z"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -146,6 +173,20 @@
           <div class="projects-grid" id="projectsGrid"></div>
         </div>
       </div>
+
+      <section class="notifications-view is-hidden" id="notificationsView" aria-labelledby="notificationsTitle">
+        <div class="notifications-inner">
+          <header class="notifications-top">
+            <div>
+              <p class="notifications-kicker">Task inbox</p>
+              <h1 class="notifications-title" id="notificationsTitle">Notifications</h1>
+              <p class="notifications-lede" id="notificationsLede">Completed work and tasks that need you.</p>
+            </div>
+            <button type="button" class="btn btn-outline" id="btnNotificationsMarkRead">Mark all read</button>
+          </header>
+          <div class="notifications-feed" id="notificationsFeed" aria-live="polite"></div>
+        </div>
+      </section>
 
       <div class="chat-workspace" id="chatWorkspace">
         <button type="button" class="btn btn-ghost btn-icon trace-expand-fab" id="btnExpandTrace" aria-label="Show activity sidebar" title="Show activity">
@@ -408,6 +449,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span>Personalization</span>
         </button>
+        <button type="button" class="settings-nav-btn" data-settings-pane="profiles">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Profiles</span>
+        </button>
         <button type="button" class="settings-nav-btn" data-settings-pane="appearance">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           <span>Appearance</span>
@@ -452,15 +497,18 @@
             <h2 class="settings-pane-title" id="settingsTitle">Personalization</h2>
             <p class="settings-pane-lede">Saved with your local data. Sent as a system prompt with each message.</p>
             <div class="settings-section">
-              <h3 class="settings-section-title">Profile</h3>
+              <h3 class="settings-section-title" id="personalizationProfileTitle">Personal profile</h3>
               <div class="settings-row">
                 <label class="field-label" for="settingName">Your name</label>
-                <input class="field-input" id="settingName" type="text" autocomplete="name" placeholder="Optional">
+                <div>
+                  <input class="field-input" id="settingName" type="text" autocomplete="name" placeholder="Optional">
+                  <p class="field-hint">Shared across profiles and used for the account avatar.</p>
+                </div>
               </div>
               <div class="settings-row-stack">
                 <label class="field-label" for="settingAbout">About you</label>
                 <textarea class="field-textarea" id="settingAbout" placeholder="Interests, role, preferred tone…"></textarea>
-                <p class="field-hint">Helps the model tailor replies. Keep it short.</p>
+                <p class="field-hint">Stored only in the active profile. Helps the model tailor replies.</p>
               </div>
             </div>
             <div class="settings-section">
@@ -476,8 +524,27 @@
               <div class="settings-row-stack">
                 <label class="field-label" for="settingMemory">Shared memory</label>
                 <textarea class="field-textarea" id="settingMemory" style="min-height:9rem" placeholder="Durable facts the model should remember across all chats and projects…"></textarea>
-                <p class="field-hint">Shared across every chat and project (unless a project is set to project-only). The model may replace this via a &lt;global_memory_update&gt; block.</p>
+                <p class="field-hint">Shared across chats and projects in this profile (unless a project is set to project-only). The model may replace this via a &lt;global_memory_update&gt; block.</p>
               </div>
+            </div>
+          </section>
+
+          <section class="settings-pane" data-settings-pane="profiles">
+            <h2 class="settings-pane-title">Profiles</h2>
+            <p class="settings-pane-lede">Keep personal, work, and other contexts separate while staying inside one local account.</p>
+            <div class="profile-security-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg>
+              <span>Profiles do not add another login. If encryption is enabled, the same passphrase unlocks every profile.</span>
+            </div>
+            <div class="settings-section">
+              <div class="profiles-settings-head">
+                <div>
+                  <h3 class="settings-section-title">Your profiles</h3>
+                  <p class="field-hint">Chats, projects, Loops, notifications, instructions, and memory stay inside the selected profile.</p>
+                </div>
+                <button type="button" class="btn btn-primary" id="btnSettingsProfileCreate">New profile</button>
+              </div>
+              <div class="profiles-settings-list" id="profilesSettingsList"></div>
             </div>
           </section>
 
@@ -995,8 +1062,13 @@
               <div class="settings-data-actions">
                 <div class="settings-data-card">
                   <strong>Clear all chats</strong>
-                  <p>Deletes every conversation. Projects stay; they just become empty.</p>
+                  <p>Deletes every chat. Loops and projects stay.</p>
                   <button type="button" class="btn btn-danger-ghost" id="btnClearChats">Clear chats</button>
+                </div>
+                <div class="settings-data-card">
+                  <strong>Clear all loops</strong>
+                  <p>Deletes every loop. Chats and projects stay.</p>
+                  <button type="button" class="btn btn-danger-ghost" id="btnClearLoops">Clear loops</button>
                 </div>
                 <div class="settings-data-card">
                   <strong>Clear all projects</strong>
@@ -1004,8 +1076,8 @@
                   <button type="button" class="btn btn-danger-ghost" id="btnClearProjects">Clear projects</button>
                 </div>
                 <div class="settings-data-card">
-                  <strong>Clear chats and projects</strong>
-                  <p>Wipes all conversations and projects from local data.</p>
+                  <strong>Clear chats, loops, and projects</strong>
+                  <p>Wipes chats, Loops, and projects from the active profile. Other profiles stay intact.</p>
                   <button type="button" class="btn btn-danger-ghost" id="btnClearAllData">Clear everything</button>
                 </div>
               </div>
@@ -1049,6 +1121,27 @@
           <span class="unlock-button-label">Unlock</span>
           <span class="button-loading-spinner is-hidden" aria-hidden="true"></span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="profileModal" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+    <div class="dialog profile-dialog">
+      <button type="button" class="dialog-close" id="btnProfileModalClose" aria-label="Close">×</button>
+      <div class="profile-dialog-body">
+        <div class="profile-dialog-mark" id="profileModalMark" aria-hidden="true">P</div>
+        <div>
+          <h2 class="settings-pane-title" id="profileModalTitle">New profile</h2>
+          <p class="settings-pane-lede" id="profileModalLede">Create a separate space for its own chats, projects, Loops, notifications, instructions, and memory.</p>
+        </div>
+        <label class="field">
+          <span class="field-label">Profile name</span>
+          <input class="field-input" id="profileNameInput" type="text" maxlength="48" autocomplete="off" placeholder="e.g. Work" required>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" id="btnProfileModalCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnProfileModalSave">Create profile</button>
       </div>
     </div>
   </div>

@@ -754,6 +754,14 @@ function renderLoopFlow(convo = conversations.find((item) => item.id === activeI
   const baton = document.createElement('span');
   baton.className = 'loop-flow-baton';
   baton.setAttribute('aria-hidden', 'true');
+  // A deterministic 3×3 compute matrix: the non-linear phase order keeps the
+  // activity from reading like another generic spinner or presence pulse.
+  [0, 5, 2, 7, 3, 8, 1, 6, 4].forEach((phase) => {
+    const cell = document.createElement('span');
+    cell.className = 'loop-flow-compute-cell';
+    cell.style.setProperty('--compute-phase', String(phase));
+    baton.appendChild(cell);
+  });
   const copy = document.createElement('span');
   copy.className = 'loop-flow-current-copy';
   const currentTitle = document.createElement('strong');
@@ -1993,6 +2001,21 @@ function bindTraceSplitChrome() {
   });
 }
 
+function traceMembersRenderSignature(convo, members) {
+  return JSON.stringify({
+    convoId: convo?.id || '',
+    members: (members || []).map((bot) => ({
+      id: bot.id || '',
+      handle: bot.handle || '',
+      name: bot.name || '',
+      model: bot.model || '',
+      modelLabel: loopModelTriggerLabel(bot.model),
+      stage: bot.stage || 'auto',
+      description: bot.description || '',
+    })),
+  });
+}
+
 function renderTraceMembers() {
   if (!traceSidebar || !traceMembers) return;
   const convo = conversations.find((item) => item.id === activeId);
@@ -2001,7 +2024,10 @@ function renderTraceMembers() {
   traceMembers.hidden = !show;
   if (!show) {
     closeTraceMembersPicker();
-    if (traceMembersList) traceMembersList.replaceChildren();
+    if (traceMembersList) {
+      traceMembersList.replaceChildren();
+      delete traceMembersList.dataset.renderSignature;
+    }
     applyTraceSplitLayout();
     renderLoopFlow(convo);
     return;
@@ -2019,7 +2045,17 @@ function renderTraceMembers() {
     applyTraceSplitLayout();
     return;
   }
+  const renderSignature = traceMembersRenderSignature(convo, members);
+  if (
+    traceMembersList.dataset.renderSignature === renderSignature
+    && traceMembersList.childElementCount === members.length
+  ) {
+    applyTraceSplitLayout();
+    renderLoopFlow(convo);
+    return;
+  }
   traceMembersList.replaceChildren();
+  traceMembersList.dataset.renderSignature = renderSignature;
   const canKick = members.length > LOOP_AGENT_MIN;
   members.forEach((bot) => {
     const row = document.createElement('div');

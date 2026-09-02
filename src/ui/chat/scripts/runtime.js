@@ -542,9 +542,20 @@ function modelMenuViewport() {
   return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
 }
 
+function modelMenuAnchorIsUsable(anchor) {
+  if (!anchor || !anchor.isConnected || typeof anchor.getBoundingClientRect !== 'function') {
+    return false;
+  }
+  return typeof anchor.getClientRects !== 'function' || anchor.getClientRects().length > 0;
+}
+
 function positionModelMenu() {
   const anchor = modelMenuAnchorEl();
-  if (!chatModelMenu || !anchor) return;
+  if (!chatModelMenu) return false;
+  if (!modelMenuAnchorIsUsable(anchor)) {
+    closeModelMenu();
+    return false;
+  }
   const rect = anchor.getBoundingClientRect();
   const view = modelMenuViewport();
   const pad = 8;
@@ -586,6 +597,7 @@ function positionModelMenu() {
   chatModelMenu.style.width = Math.round(menuWidth) + 'px';
   chatModelMenu.style.right = 'auto';
   chatModelMenu.style.transformOrigin = openAbove ? 'bottom center' : 'top center';
+  return true;
 }
 
 function closeModelMenu({ restoreFocus = false } = {}) {
@@ -681,7 +693,7 @@ function openModelMenu(opts) {
   if (searchable) chatModelSearch.focus();
   void chatModelMenu.offsetWidth;
   requestAnimationFrame(() => {
-    positionModelMenu();
+    if (!positionModelMenu()) return;
     chatModelMenu.classList.add('is-open');
   });
 }
@@ -2161,6 +2173,7 @@ async function driveAssistantSse(convo, stream, response) {
       if (stream.dom) {
         setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       }
+      if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'tool_executing') {
       const part = upsertLiveToolPart(stream, payload);
       if (part) {
@@ -2170,6 +2183,7 @@ async function driveAssistantSse(convo, stream, response) {
       if (stream.dom) {
         setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       }
+      if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'terminal') {
       if (typeof onAgentTerminalEvent === 'function') onAgentTerminalEvent(payload);
     } else if (payload.phase === 'tool_result') {
@@ -2252,12 +2266,14 @@ async function driveAssistantSse(convo, stream, response) {
       if (stream.dom) {
         setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       }
+      if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'clarify') {
       commitStreamBuffer(stream, typer);
       if (stream.dom) stream.dom.row.dataset.raw = '';
       const clarifyPart = {
         type: 'clarify',
         id: String(payload.id || ''),
+        startedAt: Date.now(),
         questions: Array.isArray(payload.questions) ? payload.questions : [],
         draft: {},
         answers: null,
@@ -2270,6 +2286,7 @@ async function driveAssistantSse(convo, stream, response) {
         setStreamThinkingLabel(stream, 'Waiting for your answers…');
         mountClarifyForm(stream, clarifyPart);
       }
+      if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'clarify_done') {
       const part = findClarifyPart(stream, String(payload.id || ''));
       if (part) {
@@ -2280,6 +2297,7 @@ async function driveAssistantSse(convo, stream, response) {
         mountClarifyForm(stream, part);
       }
       if (stream.dom) setStreamThinkingLabel(stream, 'Researching…');
+      if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'steer_ready' && payload.id) {
       stream.steerId = String(payload.id);
       void flushPendingSteers(stream);
@@ -2662,6 +2680,12 @@ async function driveAssistantSse(convo, stream, response) {
       settleAssistantRow(dom.row, committedMessage, { animateCollapse: true });
     }
     convo.updatedAt = Date.now();
+    if (typeof recordConversationNotification === 'function') {
+      recordConversationNotification(convo, {
+        kind: stream.errorMessage ? 'error' : 'complete',
+        at: endedAt,
+      });
+    }
     if (convo.projectId) {
       const project = getProject(convo.projectId);
       if (project) project.updatedAt = Date.now();
@@ -3158,6 +3182,22 @@ btnNewIncognitoChat?.addEventListener('click', () => {
   startDraft({ incognito: true });
 });
 btnProjectsNav.addEventListener('click', showProjectsView);
+btnNotificationsNav.addEventListener('click', showNotificationsView);
+btnNotificationsMarkRead.addEventListener('click', () => {
+  let changed = false;
+  for (const convo of conversations) {
+    changed = markConversationNotificationRead(convo, { persist: false }) || changed;
+  }
+  if (changed) saveConversations({ immediate: true });
+  refreshNotificationsUi();
+  renderSidebar();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || mainView !== 'chat' || !activeId) return;
+  const convo = conversations.find((item) => item.id === activeId);
+  if (!markConversationNotificationRead(convo)) return;
+  renderSidebar();
+});
 document.getElementById('btnNewProject').addEventListener('click', createProject);
 projectsSearch.addEventListener('input', renderProjectsPage);
 projectsSort.addEventListener('change', renderProjectsPage);
@@ -3473,6 +3513,39 @@ searchModal?.addEventListener('click', (event) => {
   if (event.target === searchModal) closeSearchModal();
 });
 document.getElementById('btnSettings').addEventListener('click', () => openSettings());
+btnProfileMenu?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (profileMenuIsOpen()) setProfileMenuOpen(false, { restoreFocus: true });
+  else {
+    syncAccountProfileUi();
+    setProfileMenuOpen(true);
+  }
+});
+document.getElementById('btnProfileCreate')?.addEventListener('click', () => {
+  setProfileMenuOpen(false);
+  openProfileModal();
+});
+document.getElementById('btnProfileManage')?.addEventListener('click', () => {
+  setProfileMenuOpen(false);
+  openSettings('profiles');
+});
+document.getElementById('btnSettingsProfileCreate')?.addEventListener('click', () => openProfileModal());
+document.getElementById('btnProfileModalCancel')?.addEventListener('click', closeProfileModal);
+document.getElementById('btnProfileModalClose')?.addEventListener('click', closeProfileModal);
+document.getElementById('btnProfileModalSave')?.addEventListener('click', commitProfileModal);
+document.getElementById('profileNameInput')?.addEventListener('input', (event) => {
+  event.target.setCustomValidity('');
+  const mark = document.getElementById('profileModalMark');
+  if (mark) mark.textContent = profileInitials(event.target.value || 'Profile');
+});
+document.getElementById('profileNameInput')?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  commitProfileModal();
+});
+document.getElementById('profileModal')?.addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) closeProfileModal();
+});
 encryptionIndicator?.addEventListener('click', () => {
   openSettings();
   showSettingsPane('data');
@@ -3693,6 +3766,7 @@ document.querySelectorAll('.settings-nav-btn').forEach((btn) => {
   btn.addEventListener('click', () => showSettingsPane(btn.dataset.settingsPane));
 });
 document.getElementById('btnClearChats')?.addEventListener('click', clearAllChats);
+document.getElementById('btnClearLoops')?.addEventListener('click', clearAllLoops);
 document.getElementById('btnClearProjects')?.addEventListener('click', clearAllProjects);
 document.getElementById('btnClearAllData')?.addEventListener('click', clearAllChatsAndProjects);
 document.getElementById('btnOpenDataDir')?.addEventListener('click', async () => {
@@ -3850,6 +3924,9 @@ projectModal.addEventListener('click', (event) => {
   if (event.target === projectModal) closeProjectSettings();
 });
 document.addEventListener('click', (event) => {
+  if (profileMenuIsOpen() && !sidebarProfileMenu.contains(event.target) && !btnProfileMenu.contains(event.target)) {
+    setProfileMenuOpen(false);
+  }
   if (openConvoMenu && !openConvoMenu.contains(event.target) && !event.target.closest('.convo-more')) {
     closeConvoMenu();
   }
@@ -3900,6 +3977,15 @@ document.addEventListener('keydown', (event) => {
     }
   }
   if (event.key === 'Escape') {
+    if (profileMenuIsOpen()) {
+      setProfileMenuOpen(false, { restoreFocus: true });
+      return;
+    }
+    const profileModal = document.getElementById('profileModal');
+    if (profileModal && !profileModal.classList.contains('is-hidden')) {
+      closeProfileModal();
+      return;
+    }
     if (voiceListening) {
       stopVoiceInput();
       return;

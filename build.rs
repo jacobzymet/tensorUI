@@ -7,6 +7,8 @@ const CHAT_STYLE_FILES: &[&str] = &[
     "src/ui/chat/styles/composer.css",
     "src/ui/chat/styles/activity.css",
     "src/ui/chat/styles/projects.css",
+    "src/ui/chat/styles/notifications.css",
+    "src/ui/chat/styles/profiles.css",
     "src/ui/chat/styles/bots.css",
     "src/ui/chat/styles/terminal.css",
 ];

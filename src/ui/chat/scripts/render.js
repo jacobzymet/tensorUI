@@ -1307,6 +1307,7 @@ async function submitToolApproval(id, allow) {
   if (part) {
     part.approval = allow ? 'allowed' : 'denied';
   }
+  refreshNotificationsUi();
   document.querySelectorAll('[data-tool-allow="' + CSS.escape(key) + '"], [data-tool-deny="' + CSS.escape(key) + '"]').forEach((btn) => {
     btn.disabled = true;
   });
@@ -1328,6 +1329,7 @@ async function submitToolApproval(id, allow) {
       return;
     }
     if (part) part.approval = 'pending';
+    refreshNotificationsUi();
     document.querySelectorAll('[data-tool-allow="' + CSS.escape(key) + '"], [data-tool-deny="' + CSS.escape(key) + '"]').forEach((btn) => {
       btn.disabled = false;
     });
@@ -1835,6 +1837,7 @@ function inProjectChat() {
 
 function currentRoutePath() {
   if (mainView === 'projects') return '/projects';
+  if (mainView === 'notifications') return '/notifications';
   if (appSurface === 'bots') {
     if (activeId) return '/loops/c/' + encodeURIComponent(activeId);
     return '/loops';
@@ -1871,6 +1874,7 @@ function parseLocationRoute() {
     return { kind: 'draft', incognito: false, surface: 'bots' };
   }
   if (parts[0] === 'projects') return { kind: 'projects', surface: 'chat' };
+  if (parts[0] === 'notifications') return { kind: 'notifications' };
   if (parts[0] === 'ghost') return { kind: 'draft', incognito: true, surface: 'chat' };
   if (parts[0] === 'c' && parts[1]) return { kind: 'convo', id: parts[1] };
   if (parts[0] === 'p' && parts[1]) {
@@ -1897,6 +1901,8 @@ function applyLocationRoute() {
     }
     if (route.kind === 'projects') {
       showProjectsView();
+    } else if (route.kind === 'notifications') {
+      showNotificationsView();
     } else if (route.kind === 'convo') {
       const convo = conversations.find((item) => item.id === route.id);
       if (convo) {
@@ -2291,9 +2297,10 @@ function syncSidebarBusyUi() {
 
 function createConvoItem(convo, { nested = false } = {}) {
   const item = document.createElement('div');
-  item.className = 'convo-item' + (convo.id === activeId && mainView !== 'projects' ? ' is-active' : '');
+  item.className = 'convo-item' + (convo.id === activeId && mainView === 'chat' ? ' is-active' : '');
   if (convo.incognito) item.classList.add('is-incognito');
   if (convo.pinned) item.classList.add('is-pinned');
+  if (notificationIsUnread(convo)) item.classList.add('has-unread');
   item.dataset.convoId = convo.id;
   if (nested) item.classList.add('is-nested');
   if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
@@ -2322,6 +2329,12 @@ function createConvoItem(convo, { nested = false } = {}) {
         '<path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>' +
       '</svg>';
     item.appendChild(mark);
+  }
+  if (notificationIsUnread(convo)) {
+    const unread = document.createElement('span');
+    unread.className = 'convo-unread-dot';
+    unread.setAttribute('aria-label', 'Unread response');
+    item.appendChild(unread);
   }
   const title = document.createElement('span');
   title.className = 'convo-title';
@@ -2596,6 +2609,212 @@ function formatProjectDate(ts) {
   }
 }
 
+function notificationIsUnread(convo) {
+  const at = Number(convo?.notificationAt) || 0;
+  const readAt = Number(convo?.notificationReadAt) || 0;
+  return at > readAt;
+}
+
+function markConversationNotificationRead(convo, { persist = true } = {}) {
+  if (!convo || !notificationIsUnread(convo)) return false;
+  convo.notificationReadAt = convo.notificationAt;
+  if (persist && !convo.incognito) saveConversations({ immediate: true });
+  return true;
+}
+
+function recordConversationNotification(convo, { kind = 'complete', at = Date.now() } = {}) {
+  if (!convo || convo.incognito) return;
+  convo.notificationAt = at;
+  convo.notificationKind = kind === 'error' ? 'error' : 'complete';
+  if (activeId === convo.id && mainView === 'chat' && document.visibilityState === 'visible') {
+    convo.notificationReadAt = at;
+  }
+}
+
+function pendingAttentionNotifications() {
+  const items = [];
+  for (const [convoId, stream] of activeStreams.entries()) {
+    const convo = conversations.find((item) => item.id === convoId);
+    if (!convo) continue;
+    for (const part of stream.timeline || []) {
+      if (part?.type === 'tool' && part.approval === 'pending') {
+        items.push({
+          type: 'approval',
+          convo,
+          at: Number(part.startedAt) || Date.now(),
+          title: convo.title || 'New chat',
+          label: 'Approval needed',
+          detail: part.detail || ('Review the pending ' + String(part.name || 'tool').replaceAll('_', ' ') + ' call.'),
+        });
+      } else if (part?.type === 'clarify' && part.live) {
+        const count = Array.isArray(part.questions) ? part.questions.length : 0;
+        items.push({
+          type: 'input',
+          convo,
+          at: Number(part.startedAt) || Date.now(),
+          title: convo.title || 'New chat',
+          label: 'Input needed',
+          detail: count
+            ? ('Answer ' + count + ' question' + (count === 1 ? '' : 's') + ' to continue the task.')
+            : 'Answer a question to continue the task.',
+        });
+      }
+    }
+  }
+  return items.sort((a, b) => b.at - a.at);
+}
+
+function completionNotifications() {
+  return conversations
+    .filter((convo) => Number(convo.notificationAt) > 0)
+    .map((convo) => {
+      const latestAssistant = [...(convo.messages || [])].reverse().find((message) => message?.role === 'assistant');
+      const error = convo.notificationKind === 'error';
+      return {
+        type: error ? 'error' : 'complete',
+        convo,
+        at: convo.notificationAt,
+        title: convo.title || 'New chat',
+        label: error ? 'Task needs attention' : 'Task completed',
+        detail: messagePlainExcerpt(latestAssistant, 180)
+          || (error ? 'The task stopped before it produced a response.' : 'A new response is ready.'),
+        unread: notificationIsUnread(convo),
+      };
+    })
+    .sort((a, b) => b.at - a.at);
+}
+
+function formatNotificationTime(timestamp) {
+  const elapsed = Math.max(0, Date.now() - (Number(timestamp) || Date.now()));
+  if (elapsed < 60_000) return 'Just now';
+  if (elapsed < 3_600_000) return Math.floor(elapsed / 60_000) + 'm ago';
+  if (elapsed < 86_400_000) return Math.floor(elapsed / 3_600_000) + 'h ago';
+  if (elapsed < 604_800_000) return Math.floor(elapsed / 86_400_000) + 'd ago';
+  try {
+    return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+function notificationIcon(type) {
+  if (type === 'approval') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/></svg>';
+  }
+  if (type === 'error') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+  }
+  if (type === 'input') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
+}
+
+function renderNotificationMarkdown(text) {
+  const source = String(text || '');
+  if (!window.marked?.parseInline || !window.DOMPurify) return escapeHtml(source);
+  const raw = window.marked.parseInline(source, { async: false });
+  return window.DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: ['strong', 'em', 'code', 'del', 'br'],
+    ALLOWED_ATTR: [],
+  });
+}
+
+function buildNotificationCard(item) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'notification-card';
+  if (item.type === 'approval' || item.type === 'input') card.classList.add('is-attention', 'is-unread');
+  if (item.type === 'error') card.classList.add('is-error');
+  if (item.unread) card.classList.add('is-unread');
+  card.innerHTML =
+    '<span class="notification-mark">' + notificationIcon(item.type) + '</span>' +
+    '<span class="notification-copy">' +
+      '<span class="notification-overline"><strong></strong><span></span></span>' +
+      '<span class="notification-card-title"></span>' +
+      '<span class="notification-card-detail"></span>' +
+    '</span>' +
+    '<svg class="notification-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+  card.querySelector('.notification-overline strong').textContent = item.label;
+  card.querySelector('.notification-overline span').textContent = formatNotificationTime(item.at);
+  const title = card.querySelector('.notification-card-title');
+  title.textContent = item.title;
+  applyPrivacyMosaic(title, 'notification:' + item.convo.id);
+  const detail = card.querySelector('.notification-card-detail');
+  detail.innerHTML = renderNotificationMarkdown(item.detail);
+  applyPrivacyMosaic(detail, 'notification-detail:' + item.convo.id + ':' + item.type);
+  card.setAttribute('aria-label', item.label + ': ' + item.title);
+  card.addEventListener('click', () => selectConversation(item.convo.id));
+  return card;
+}
+
+function appendNotificationGroup(label, items) {
+  if (!notificationsFeed || !items.length) return;
+  const section = document.createElement('section');
+  section.className = 'notification-group';
+  const heading = document.createElement('h2');
+  heading.className = 'notification-group-heading';
+  heading.appendChild(document.createTextNode(label + ' '));
+  const count = document.createElement('span');
+  count.textContent = String(items.length);
+  heading.appendChild(count);
+  section.appendChild(heading);
+  items.forEach((item) => section.appendChild(buildNotificationCard(item)));
+  notificationsFeed.appendChild(section);
+}
+
+function refreshNotificationsUi() {
+  const approvals = pendingAttentionNotifications();
+  const completed = completionNotifications();
+  const unreadCompleted = completed.filter((item) => item.unread).length;
+  const unread = approvals.length + unreadCompleted;
+  if (sidebarNotificationBadge) {
+    sidebarNotificationBadge.hidden = unread === 0;
+    sidebarNotificationBadge.textContent = unread > 99 ? '99+' : String(unread);
+    sidebarNotificationBadge.setAttribute('aria-label', unread + ' unread notification' + (unread === 1 ? '' : 's'));
+  }
+  if (btnNotificationsNav) {
+    btnNotificationsNav.classList.toggle('has-unread', unread > 0);
+    btnNotificationsNav.setAttribute('aria-label', unread
+      ? ('Notifications, ' + unread + ' unread')
+      : 'Notifications');
+  }
+  if (btnNotificationsMarkRead) btnNotificationsMarkRead.disabled = unreadCompleted === 0;
+  if (notificationsLede) {
+    notificationsLede.textContent = approvals.length
+      ? (approvals.length + ' task' + (approvals.length === 1 ? '' : 's') + ' waiting for you.')
+      : (unreadCompleted
+        ? (unreadCompleted + ' unread response' + (unreadCompleted === 1 ? '' : 's') + '.')
+        : 'Completed work and tasks that need you.');
+  }
+  if (!notificationsFeed || mainView !== 'notifications') return;
+  notificationsFeed.innerHTML = '';
+  appendNotificationGroup('Needs attention', approvals);
+  appendNotificationGroup('Recent', completed);
+  if (!approvals.length && !completed.length) {
+    const empty = document.createElement('div');
+    empty.className = 'notifications-empty';
+    empty.innerHTML = '<p><strong>All caught up</strong>Completed tasks and approval requests will appear here.</p>';
+    notificationsFeed.appendChild(empty);
+  }
+}
+
+function showNotificationsView() {
+  mainView = 'notifications';
+  cancelMessageEdit();
+  closeConvoMenu();
+  chatShell.classList.add('is-notifications');
+  chatShell.classList.remove('is-projects', 'is-in-project');
+  projectsView.classList.add('is-hidden');
+  notificationsView.classList.remove('is-hidden');
+  btnProjectsNav.classList.remove('is-active');
+  btnNotificationsNav.classList.add('is-active');
+  refreshNotificationsUi();
+  renderSidebar();
+  syncUrlFromState();
+  closeMobileSidebar();
+}
+
 function projectCardBlurb(project) {
   const instructions = project.instructions.trim();
   if (instructions) return instructions;
@@ -2609,9 +2828,12 @@ function showProjectsView() {
   cancelMessageEdit();
   closeConvoMenu();
   chatShell.classList.add('is-projects');
+  chatShell.classList.remove('is-notifications');
   chatShell.classList.remove('is-in-project');
   projectsView.classList.remove('is-hidden');
+  notificationsView.classList.add('is-hidden');
   btnProjectsNav.classList.add('is-active');
+  btnNotificationsNav.classList.remove('is-active');
   renderProjectsPage();
   renderSidebar();
   syncUrlFromState();
@@ -2620,9 +2842,11 @@ function showProjectsView() {
 
 function showChatView() {
   mainView = 'chat';
-  chatShell.classList.remove('is-projects');
+  chatShell.classList.remove('is-projects', 'is-notifications');
   projectsView.classList.add('is-hidden');
+  notificationsView.classList.add('is-hidden');
   btnProjectsNav.classList.remove('is-active');
+  btnNotificationsNav.classList.remove('is-active');
   syncProjectChrome();
   renderSidebar();
 }
@@ -3822,6 +4046,8 @@ function renderSidebar() {
   sidebarProjectContext.innerHTML = '';
   sidebarProjectContext.classList.add('is-hidden');
   btnProjectsNav.classList.toggle('is-active', mainView === 'projects');
+  btnNotificationsNav.classList.toggle('is-active', mainView === 'notifications');
+  refreshNotificationsUi();
 
   const pinned = pinnedConversations();
   sidebarPinnedSection.classList.toggle('is-hidden', pinned.length === 0);
@@ -3896,6 +4122,7 @@ function renderSidebar() {
 function selectConversation(id) {
   const convo = conversations.find((item) => item.id === id);
   if (!convo) return;
+  markConversationNotificationRead(convo);
   if (typeof convoSurfaceOf === 'function') {
     const surface = convoSurfaceOf(convo);
     if (appSurface !== surface) {

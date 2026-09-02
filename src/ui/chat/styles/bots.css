@@ -48,6 +48,7 @@
 .topbar-loop-phase.is-hidden { display: none; }
 
 .loop-flow {
+  --loop-flow-content-max: 28rem;
   flex: 0 0 auto;
   padding: 0.75rem 0.8rem 0.85rem;
   border-bottom: 1px solid color-mix(in oklch, var(--color-rule) 82%, transparent);
@@ -77,37 +78,33 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.55rem;
   align-items: center;
+  width: 100%;
+  max-width: var(--loop-flow-content-max);
   min-height: 2.7rem;
+  margin-inline: auto;
   padding: 0.52rem 0.62rem;
   border: 1px solid color-mix(in oklch, var(--color-accent) 30%, var(--color-rule));
   border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--color-accent) 8%, var(--color-paper-2));
 }
 .loop-flow-baton {
-  position: relative;
-  display: inline-flex;
-  width: 1.45rem;
-  height: 1.45rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in oklch, var(--color-accent) 20%, var(--color-paper));
+  display: grid;
+  grid-template-columns: repeat(3, 0.23rem);
+  grid-template-rows: repeat(3, 0.23rem);
+  align-self: center;
+  gap: 0.105rem;
   color: var(--color-accent);
 }
-.loop-flow-baton::before {
-  content: "";
-  width: 0.48rem;
-  height: 0.48rem;
-  border-radius: 50%;
+.loop-flow-compute-cell {
+  width: 0.23rem;
+  height: 0.23rem;
+  border-radius: 1px;
   background: currentColor;
+  opacity: 0.2;
 }
-.loop-flow.is-running .loop-flow-baton::after {
-  content: "";
-  position: absolute;
-  inset: -0.16rem;
-  border: 1px solid color-mix(in oklch, var(--color-accent) 55%, transparent);
-  border-radius: inherit;
-  animation: loop-baton-pulse 1.9s var(--ease-out) infinite;
+.loop-flow.is-running .loop-flow-compute-cell {
+  animation: loop-compute-cell 1.18s steps(1, end) infinite;
+  animation-delay: calc(var(--compute-phase) * -0.131s);
 }
 .loop-flow-current-copy {
   min-width: 0;
@@ -137,7 +134,9 @@
   display: grid;
   grid-template-columns: repeat(var(--loop-phase-count, 3), minmax(0, 1fr));
   gap: 0;
-  margin: 0.68rem 0 0;
+  width: 100%;
+  max-width: var(--loop-flow-content-max);
+  margin: 0.68rem auto 0;
   padding: 0;
   list-style: none;
 }
@@ -238,12 +237,17 @@
   font-size: 0.66rem;
   font-weight: 550;
 }
-@keyframes loop-baton-pulse {
-  0% { opacity: 0.78; transform: scale(0.84); }
-  72%, 100% { opacity: 0; transform: scale(1.38); }
+@keyframes loop-compute-cell {
+  0%, 15% { opacity: 0.18; }
+  16%, 38% { opacity: 1; }
+  39%, 62% { opacity: 0.52; }
+  63%, 100% { opacity: 0.18; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .loop-flow.is-running .loop-flow-baton::after { animation: none; }
+  .loop-flow.is-running .loop-flow-compute-cell { animation: none; opacity: 0.24; }
+  .loop-flow.is-running .loop-flow-compute-cell:nth-child(1),
+  .loop-flow.is-running .loop-flow-compute-cell:nth-child(5),
+  .loop-flow.is-running .loop-flow-compute-cell:nth-child(9) { opacity: 1; }
 }
 #newBotSplit {
   display: flex;

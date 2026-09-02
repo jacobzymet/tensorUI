@@ -1,0 +1,508 @@
+.sidebar-footer {
+  position: relative;
+}
+
+.sidebar-account-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.25rem 2.25rem;
+  align-items: center;
+  gap: 0.18rem;
+  min-height: 3.25rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-paper-2) 64%, transparent);
+}
+
+.sidebar-account-trigger,
+.sidebar-account-icon,
+.sidebar-profile-option,
+.sidebar-profile-menu-action {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sidebar-account-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.56rem;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.42rem;
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.sidebar-account-trigger:hover,
+.sidebar-account-trigger[aria-expanded="true"],
+.sidebar-account-icon:hover,
+.sidebar-account-icon.is-active {
+  color: var(--color-ink);
+  background: var(--surface-hover);
+}
+
+.sidebar-account-trigger:focus-visible,
+.sidebar-account-icon:focus-visible,
+.sidebar-profile-option:focus-visible,
+.sidebar-profile-menu-action:focus-visible,
+.profile-settings-actions .btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.sidebar-account-trigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sidebar-account-avatar,
+.sidebar-profile-option-mark,
+.profile-settings-mark,
+.profile-dialog-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 38%, var(--color-rule));
+  border-radius: 50%;
+  color: var(--color-ink);
+  background:
+    radial-gradient(circle at 32% 24%, color-mix(in oklch, var(--color-accent) 28%, transparent), transparent 55%),
+    var(--color-paper-3);
+  font-family: var(--font-display);
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sidebar-account-avatar {
+  width: 2rem;
+  height: 2rem;
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--color-graphite) 76%, transparent);
+}
+
+.sidebar-account-copy {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  max-width: calc(100% - 2.6rem);
+  gap: 0.08rem;
+  line-height: 1.2;
+}
+
+.sidebar-account-copy strong,
+.sidebar-account-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-copy strong {
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.sidebar-account-copy span {
+  color: var(--color-muted);
+  font-size: 0.65rem;
+}
+
+.sidebar-account-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.22rem;
+  max-width: 100%;
+}
+
+.sidebar-account-name-row strong { min-width: 0; }
+
+.sidebar-account-caret {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-muted);
+  transition: transform var(--dur-short) var(--ease-settle);
+}
+
+.sidebar-account-trigger[aria-expanded="true"] .sidebar-account-caret {
+  transform: rotate(180deg);
+}
+
+.sidebar-account-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+}
+
+.sidebar-account-icon svg {
+  width: 1.08rem;
+  height: 1.08rem;
+}
+
+.sidebar-notification-badge {
+  position: absolute;
+  top: 0.14rem;
+  right: 0.1rem;
+  display: inline-grid;
+  place-items: center;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 0.18rem;
+  border: 2px solid var(--color-graphite);
+  border-radius: var(--radius-pill);
+  color: white;
+  background: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sidebar-notification-badge[hidden] { display: none; }
+
+.sidebar-profile-menu {
+  position: absolute;
+  z-index: 50;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  padding: 0.45rem;
+  border: 1px solid color-mix(in oklch, var(--color-rule) 72%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--color-paper-3);
+  box-shadow: var(--shadow-4);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.35rem) scale(0.985);
+  transform-origin: bottom center;
+  transition: opacity var(--dur-short) var(--ease-settle), transform var(--dur-short) var(--ease-settle);
+}
+
+.sidebar-profile-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.sidebar-profile-menu-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem 0.5rem;
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.sidebar-profile-list {
+  display: grid;
+  gap: 0.12rem;
+  max-height: min(18rem, 45vh);
+  overflow-y: auto;
+}
+
+.sidebar-profile-option {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) 1rem;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.sidebar-profile-option:hover,
+.sidebar-profile-option.is-active {
+  background: var(--surface-hover);
+}
+
+.sidebar-profile-option-mark {
+  width: 1.8rem;
+  height: 1.8rem;
+  font-size: 0.58rem;
+}
+
+.sidebar-profile-option-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.sidebar-profile-option-copy strong,
+.sidebar-profile-option-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile-option-copy strong {
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.sidebar-profile-option-copy span {
+  color: var(--color-muted);
+  font-size: 0.61rem;
+}
+
+.sidebar-profile-option-check {
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.sidebar-profile-menu-rule {
+  height: 1px;
+  margin: 0.38rem 0.42rem;
+  background: var(--color-rule);
+}
+
+.sidebar-profile-menu-action {
+  display: flex;
+  align-items: center;
+  gap: 0.58rem;
+  width: 100%;
+  padding: 0.48rem 0.58rem;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-size: var(--text-xs);
+}
+
+.sidebar-profile-menu-action:hover {
+  color: var(--color-ink);
+  background: var(--surface-hover);
+}
+
+.sidebar-profile-menu-action svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--color-muted);
+}
+
+.profile-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin-bottom: 1.35rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 24%, var(--color-rule));
+  border-radius: var(--radius-lg);
+  color: var(--color-ink-2);
+  background: color-mix(in oklch, var(--color-accent) 7%, transparent);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.profile-security-note svg {
+  flex: 0 0 auto;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.08rem;
+  color: var(--color-accent);
+}
+
+.profiles-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profiles-settings-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.profile-settings-card {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-2);
+}
+
+.profile-settings-card.is-active {
+  border-color: color-mix(in oklch, var(--color-accent) 38%, var(--color-rule));
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--color-accent) 72%, transparent);
+}
+
+.profile-settings-mark {
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+.profile-settings-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.16rem;
+}
+
+.profile-settings-copy strong {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-settings-copy span {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.profile-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.profile-settings-actions .btn {
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  font-size: var(--text-xs);
+}
+
+.profile-active-pill {
+  margin-right: 0.15rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  background: var(--accent-wash);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.btn-profile-delete { color: var(--color-danger); }
+.btn-profile-delete:disabled { color: var(--color-muted); opacity: 0.45; }
+
+.dialog.profile-dialog {
+  position: relative;
+  width: min(27rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-dialog);
+  background: var(--color-paper-2);
+  box-shadow: var(--shadow-4);
+}
+
+.profile-dialog-body {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  padding: 1.55rem 1.55rem 1.25rem;
+}
+
+.profile-dialog-mark {
+  grid-row: 1 / span 2;
+  width: 3rem;
+  height: 3rem;
+  font-size: 0.9rem;
+}
+
+.profile-dialog-body .field {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+}
+
+.profile-dialog-body .settings-pane-lede { margin-bottom: 0; }
+
+.privacy-mode .sidebar-account-copy strong.privacy-mask,
+.privacy-mode #sidebarActiveProfileName.privacy-mask,
+.privacy-mode .sidebar-profile-option-copy strong.privacy-mask,
+.privacy-mode .profile-settings-copy strong.privacy-mask {
+  color: transparent;
+  background: transparent;
+}
+
+.privacy-mode .sidebar-account-copy .privacy-mask::after,
+.privacy-mode .sidebar-profile-option-copy strong.privacy-mask::after,
+.privacy-mode .profile-settings-copy strong.privacy-mask::after {
+  content: "";
+  opacity: 1;
+}
+
+.privacy-mode .sidebar-account-avatar.privacy-mask-dense,
+.privacy-mode .sidebar-profile-option-mark.privacy-mask-dense,
+.privacy-mode .profile-settings-mark.privacy-mask-dense {
+  position: relative;
+  color: transparent;
+  filter: none;
+}
+
+.privacy-mode .sidebar-account-avatar.privacy-mask-dense::before,
+.privacy-mode .sidebar-profile-option-mark.privacy-mask-dense::before,
+.privacy-mode .profile-settings-mark.privacy-mask-dense::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--privacy-pixel-2);
+  box-shadow: var(--privacy-pixels);
+  pointer-events: none;
+}
+
+.privacy-mode .sidebar-account-trigger:hover .privacy-mask,
+.privacy-mode .sidebar-account-trigger:focus-visible .privacy-mask,
+.privacy-mode .sidebar-profile-option:hover .privacy-mask,
+.privacy-mode .sidebar-profile-option:focus-visible .privacy-mask,
+.privacy-mode .profile-settings-card:hover .privacy-mask,
+.privacy-mode .profile-settings-card:focus-within .privacy-mask {
+  color: inherit;
+}
+
+.privacy-mode .sidebar-account-trigger:hover .privacy-mask::after,
+.privacy-mode .sidebar-account-trigger:focus-visible .privacy-mask::after,
+.privacy-mode .sidebar-profile-option:hover .privacy-mask::after,
+.privacy-mode .sidebar-profile-option:focus-visible .privacy-mask::after,
+.privacy-mode .profile-settings-card:hover .privacy-mask::after,
+.privacy-mode .profile-settings-card:focus-within .privacy-mask::after,
+.privacy-mode .sidebar-account-trigger:hover .privacy-mask-dense::before,
+.privacy-mode .sidebar-account-trigger:focus-visible .privacy-mask-dense::before,
+.privacy-mode .sidebar-profile-option:hover .privacy-mask-dense::before,
+.privacy-mode .sidebar-profile-option:focus-visible .privacy-mask-dense::before,
+.privacy-mode .profile-settings-card:hover .privacy-mask-dense::before,
+.privacy-mode .profile-settings-card:focus-within .privacy-mask-dense::before {
+  opacity: 0;
+}
+
+@media (max-width: 640px) {
+  .profiles-settings-head { align-items: stretch; flex-direction: column; }
+  .profiles-settings-head .btn { align-self: flex-start; }
+  .profile-settings-card { grid-template-columns: 2.4rem minmax(0, 1fr); }
+  .profile-settings-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-profile-menu,
+  .sidebar-account-caret { transition: none; }
+}

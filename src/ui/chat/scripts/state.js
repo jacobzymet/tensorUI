@@ -79,6 +79,8 @@ const SIBLING_CHAT_MAX = 8;
 const SIBLING_CHAT_BUDGET = 10000;
 const SIBLING_MSG_CHARS = 420;
 const SIBLING_MSGS_PER_CHAT = 4;
+const DEFAULT_PROFILE_ID = 'personal';
+const PROFILE_CONTEXT_KEYS = ['about', 'instructions', 'memory'];
 const DEFAULT_SETTINGS = {
   name: '',
   about: '',
@@ -162,6 +164,18 @@ const projectsGrid = document.getElementById('projectsGrid');
 const projectsSearch = document.getElementById('projectsSearch');
 const projectsSort = document.getElementById('projectsSort');
 const btnProjectsNav = document.getElementById('btnProjectsNav');
+const notificationsView = document.getElementById('notificationsView');
+const notificationsFeed = document.getElementById('notificationsFeed');
+const notificationsLede = document.getElementById('notificationsLede');
+const btnNotificationsNav = document.getElementById('btnNotificationsNav');
+const btnNotificationsMarkRead = document.getElementById('btnNotificationsMarkRead');
+const sidebarNotificationBadge = document.getElementById('sidebarNotificationBadge');
+const sidebarProfileMenu = document.getElementById('sidebarProfileMenu');
+const sidebarProfileList = document.getElementById('sidebarProfileList');
+const btnProfileMenu = document.getElementById('btnProfileMenu');
+const sidebarAccountAvatar = document.getElementById('sidebarAccountAvatar');
+const sidebarAccountName = document.getElementById('sidebarAccountName');
+const sidebarActiveProfileName = document.getElementById('sidebarActiveProfileName');
 const sidebarProjectContext = document.getElementById('sidebarProjectContext');
 const sidebarConvoLabel = document.getElementById('sidebarConvoLabel');
 const sidebarPinnedSection = document.getElementById('sidebarPinnedSection');
@@ -889,6 +903,13 @@ function normalizeConversation(convo) {
     outboundQueue: Array.isArray(convo.outboundQueue)
       ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
       : [],
+    notificationAt: typeof convo.notificationAt === 'number' && Number.isFinite(convo.notificationAt)
+      ? convo.notificationAt
+      : null,
+    notificationReadAt: typeof convo.notificationReadAt === 'number' && Number.isFinite(convo.notificationReadAt)
+      ? convo.notificationReadAt
+      : null,
+    notificationKind: convo.notificationKind === 'error' ? 'error' : 'complete',
   };
 }
 
@@ -930,30 +951,165 @@ function ensureConversationSortOrders(list) {
   return list;
 }
 
+function normalizeProfile(raw, { contextPresent = null } = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const personalization = source.personalization && typeof source.personalization === 'object'
+    ? source.personalization
+    : {};
+  const hasContext = contextPresent == null
+    ? !!(source.personalization && typeof source.personalization === 'object')
+    : !!contextPresent;
+  return {
+    id: typeof source.id === 'string' && source.id.trim()
+      ? source.id.trim().slice(0, 96)
+      : newId('profile-'),
+    name: typeof source.name === 'string' && source.name.trim()
+      ? source.name.trim().slice(0, 48)
+      : 'Personal',
+    createdAt: typeof source.createdAt === 'number' ? source.createdAt : Date.now(),
+    updatedAt: typeof source.updatedAt === 'number' ? source.updatedAt : Date.now(),
+    personalization: {
+      about: typeof personalization.about === 'string' ? personalization.about : '',
+      instructions: typeof personalization.instructions === 'string' ? personalization.instructions : '',
+      memory: typeof personalization.memory === 'string' ? personalization.memory : '',
+    },
+    projects: Array.isArray(source.projects) ? source.projects.map(normalizeProject) : [],
+    conversations: ensureConversationSortOrders(
+      Array.isArray(source.conversations) ? source.conversations.map(normalizeConversation) : []
+    ),
+    bots: Array.isArray(source.bots) ? source.bots.map(normalizeBot) : [],
+    _contextPresent: hasContext,
+  };
+}
+
+function activeProfile() {
+  return profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+}
+
+function profileContextFromSettings(source = settings) {
+  return {
+    about: typeof source?.about === 'string' ? source.about : '',
+    instructions: typeof source?.instructions === 'string' ? source.instructions : '',
+    memory: typeof source?.memory === 'string' ? source.memory : '',
+  };
+}
+
+function settingsForProfile(shared, profile) {
+  return normalizeSettings({
+    ...shared,
+    ...(profile?.personalization || {}),
+  });
+}
+
+function preferencesPayload(source = settings) {
+  const payload = { ...source };
+  PROFILE_CONTEXT_KEYS.forEach((key) => delete payload[key]);
+  return payload;
+}
+
+function bindActiveProfile(profile) {
+  const target = profile || activeProfile();
+  if (!target) return;
+  activeProfileId = target.id;
+  projects = target.projects;
+  conversations = target.conversations;
+  bots = target.bots;
+}
+
+function syncActiveProfileFromMemory({ touch = false } = {}) {
+  const profile = activeProfile();
+  if (!profile) return;
+  profile.projects = projects;
+  profile.conversations = conversations;
+  profile.bots = bots;
+  profile.personalization = profileContextFromSettings();
+  profile._contextPresent = true;
+  if (touch) profile.updatedAt = Date.now();
+}
+
+function profileStoreRecord(profile) {
+  const active = profile.id === activeProfileId;
+  const sourceConversations = active ? conversations : profile.conversations;
+  return {
+    id: profile.id,
+    name: profile.name,
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+    personalization: active ? profileContextFromSettings() : profile.personalization,
+    projects: active ? projects : profile.projects,
+    conversations: sourceConversations
+      .filter((convo) => !convo.incognito)
+      .map(conversationStoreRecord),
+    bots: active ? bots : profile.bots,
+  };
+}
+
 function parseStorePayload(parsed) {
+  const legacyProfile = (projects, conversations, bots) => normalizeProfile({
+    id: DEFAULT_PROFILE_ID,
+    name: 'Personal',
+    projects,
+    conversations,
+    bots,
+  }, { contextPresent: false });
   if (Array.isArray(parsed)) {
+    const profile = legacyProfile([], parsed, []);
     return {
-      projects: [],
-      conversations: ensureConversationSortOrders(parsed.map(normalizeConversation)),
-      bots: [],
+      profiles: [profile],
+      activeProfileId: profile.id,
+      projects: profile.projects,
+      conversations: profile.conversations,
+      bots: profile.bots,
+      migratedFromLegacy: true,
     };
   }
   if (parsed && typeof parsed === 'object') {
+    if (Array.isArray(parsed.profiles) && parsed.profiles.length) {
+      const seen = new Set();
+      const parsedProfiles = parsed.profiles.map((raw) => {
+        const profile = normalizeProfile(raw);
+        while (seen.has(profile.id)) profile.id = newId('profile-');
+        seen.add(profile.id);
+        return profile;
+      });
+      const requested = typeof parsed.activeProfileId === 'string' ? parsed.activeProfileId : '';
+      const active = parsedProfiles.find((profile) => profile.id === requested) || parsedProfiles[0];
+      return {
+        profiles: parsedProfiles,
+        activeProfileId: active.id,
+        projects: active.projects,
+        conversations: active.conversations,
+        bots: active.bots,
+        migratedFromLegacy: false,
+      };
+    }
+    const profile = legacyProfile(
+      Array.isArray(parsed.projects) ? parsed.projects : [],
+      Array.isArray(parsed.conversations) ? parsed.conversations : [],
+      Array.isArray(parsed.bots) ? parsed.bots : []
+    );
     return {
-      projects: Array.isArray(parsed.projects)
-        ? parsed.projects.map(normalizeProject)
-        : [],
-      conversations: ensureConversationSortOrders(
-        Array.isArray(parsed.conversations)
-          ? parsed.conversations.map(normalizeConversation)
-          : []
-      ),
-      bots: Array.isArray(parsed.bots) ? parsed.bots.map(normalizeBot) : [],
+      profiles: [profile],
+      activeProfileId: profile.id,
+      projects: profile.projects,
+      conversations: profile.conversations,
+      bots: profile.bots,
+      migratedFromLegacy: true,
     };
   }
-  return { projects: [], conversations: [], bots: [] };
+  const profile = legacyProfile([], [], []);
+  return {
+    profiles: [profile],
+    activeProfileId: profile.id,
+    projects: profile.projects,
+    conversations: profile.conversations,
+    bots: profile.bots,
+    migratedFromLegacy: true,
+  };
 }
 
+let profiles = [];
+let activeProfileId = DEFAULT_PROFILE_ID;
 let projects = [];
 let conversations = [];
 let bots = [];
@@ -1012,10 +1168,11 @@ async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => tru
   return false;
 }
 
-function outboundQueueForStore(convoId) {
-  const queue = Array.isArray(outboundQueues.get(convoId))
+function outboundQueueForStore(convo) {
+  const convoId = convo?.id;
+  const queue = outboundQueues.has(convoId) && Array.isArray(outboundQueues.get(convoId))
     ? outboundQueues.get(convoId).slice()
-    : [];
+    : (Array.isArray(convo?.outboundQueue) ? convo.outboundQueue.slice() : []);
   const stream = typeof activeStreams !== 'undefined' ? activeStreams.get(convoId) : null;
   const pending = (stream?.pendingSteers || [])
     .filter((entry) => entry?.item && !entry.applied)
@@ -1028,13 +1185,13 @@ function outboundQueueForStore(convoId) {
 function conversationStoreRecord(convo) {
   const record = { ...convo };
   delete record.outboundQueue;
-  const queue = outboundQueueForStore(convo.id);
+  const queue = outboundQueueForStore(convo);
   if (queue.length) record.outboundQueue = queue;
   return record;
 }
 
-function restoreOutboundQueues(list) {
-  outboundQueues.clear();
+function restoreOutboundQueues(list, { clear = true } = {}) {
+  if (clear) outboundQueues.clear();
   for (const convo of list || []) {
     const items = Array.isArray(convo.outboundQueue)
       ? convo.outboundQueue.map(normalizeOutboundItem).filter(Boolean)
@@ -1063,13 +1220,11 @@ function persistOutboundQueues() {
 }
 
 function storePayload() {
+  syncActiveProfileFromMemory();
   return {
-    version: 2,
-    projects,
-    conversations: conversations
-      .filter((convo) => !convo.incognito)
-      .map(conversationStoreRecord),
-    bots,
+    version: 3,
+    activeProfileId,
+    profiles: profiles.map(profileStoreRecord),
   };
 }
 
@@ -1119,6 +1274,164 @@ function saveConversations({ immediate = true } = {}) {
   saveStore({ immediate });
 }
 
+function profileInitials(value) {
+  const words = String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 'Y';
+  const first = Array.from(words[0])[0] || '';
+  const last = words.length > 1 ? (Array.from(words[words.length - 1])[0] || '') : '';
+  return (first + last).toLocaleUpperCase().slice(0, 2) || 'Y';
+}
+
+let profileMenuTransitionTimer = null;
+
+function setProfileMenuOpen(open, { restoreFocus = false } = {}) {
+  if (!sidebarProfileMenu || !btnProfileMenu) return;
+  const next = !!open && !diskEncryptionLocked();
+  clearTimeout(profileMenuTransitionTimer);
+  profileMenuTransitionTimer = null;
+  btnProfileMenu.setAttribute('aria-expanded', next ? 'true' : 'false');
+  if (next) {
+    sidebarProfileMenu.classList.remove('is-hidden');
+    void sidebarProfileMenu.offsetWidth;
+    requestAnimationFrame(() => {
+      if (btnProfileMenu.getAttribute('aria-expanded') === 'true') {
+        sidebarProfileMenu.classList.add('is-open');
+      }
+    });
+    return;
+  }
+
+  sidebarProfileMenu.classList.remove('is-open');
+  if (restoreFocus) btnProfileMenu.focus();
+  const finish = () => {
+    profileMenuTransitionTimer = null;
+    if (btnProfileMenu.getAttribute('aria-expanded') === 'false') {
+      sidebarProfileMenu.classList.add('is-hidden');
+    }
+  };
+  if (prefersReducedMotion()) finish();
+  else profileMenuTransitionTimer = window.setTimeout(finish, 220);
+}
+
+function profileMenuIsOpen() {
+  return btnProfileMenu?.getAttribute('aria-expanded') === 'true';
+}
+
+function syncAccountProfileUi() {
+  const profile = activeProfile();
+  const accountName = String(settings?.name || '').trim() || 'You';
+  const profileName = profile?.name || 'Personal';
+  if (sidebarAccountName) {
+    sidebarAccountName.textContent = accountName;
+    applyPrivacyMosaic(sidebarAccountName, 'account-name:' + accountName);
+  }
+  if (sidebarAccountAvatar) {
+    sidebarAccountAvatar.textContent = profileInitials(accountName);
+    applyPrivacyMosaic(sidebarAccountAvatar, 'account-avatar:' + accountName, { dense: true });
+  }
+  if (sidebarActiveProfileName) {
+    sidebarActiveProfileName.textContent = profileName;
+    applyPrivacyMosaic(sidebarActiveProfileName, 'active-profile:' + (profile?.id || DEFAULT_PROFILE_ID));
+  }
+  const personalizationTitle = document.getElementById('personalizationProfileTitle');
+  if (personalizationTitle) personalizationTitle.textContent = profileName + ' profile';
+  if (btnProfileMenu) {
+    btnProfileMenu.disabled = diskEncryptionLocked();
+    btnProfileMenu.setAttribute(
+      'aria-label',
+      'Account: ' + accountName + '. Active profile: ' + profileName + '. Switch profile'
+    );
+  }
+  renderSidebarProfileList();
+  if (typeof renderProfilesSettingsList === 'function') renderProfilesSettingsList();
+}
+
+function renderSidebarProfileList() {
+  if (!sidebarProfileList) return;
+  sidebarProfileList.replaceChildren();
+  profiles.forEach((profile) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sidebar-profile-option';
+    button.dataset.profileId = profile.id;
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', profile.id === activeProfileId ? 'true' : 'false');
+    if (profile.id === activeProfileId) button.classList.add('is-active');
+
+    const mark = document.createElement('span');
+    mark.className = 'sidebar-profile-option-mark';
+    mark.textContent = profileInitials(profile.name);
+    applyPrivacyMosaic(mark, 'profile-menu-avatar:' + profile.id, { dense: true });
+    const copy = document.createElement('span');
+    copy.className = 'sidebar-profile-option-copy';
+    const name = document.createElement('strong');
+    name.textContent = profile.name;
+    applyPrivacyMosaic(name, 'profile-menu-name:' + profile.id);
+    const detail = document.createElement('span');
+    const chats = profile.conversations.filter((convo) => convo.surface !== 'bots').length;
+    const loops = profile.conversations.filter((convo) => convo.surface === 'bots').length;
+    detail.textContent = chats + ' chat' + (chats === 1 ? '' : 's')
+      + (loops ? ' · ' + loops + ' loop' + (loops === 1 ? '' : 's') : '');
+    copy.append(name, detail);
+    button.append(mark, copy);
+    if (profile.id === activeProfileId) {
+      const check = document.createElement('span');
+      check.className = 'sidebar-profile-option-check';
+      check.textContent = '✓';
+      check.setAttribute('aria-hidden', 'true');
+      button.appendChild(check);
+    }
+    button.addEventListener('click', () => switchProfile(profile.id));
+    sidebarProfileList.appendChild(button);
+  });
+}
+
+function switchProfile(profileId) {
+  if (!requireUnlockedData()) return false;
+  const target = profiles.find((profile) => profile.id === profileId);
+  if (!target) return false;
+  setProfileMenuOpen(false);
+  if (target.id === activeProfileId) return true;
+
+  if (
+    settingsModal
+    && !settingsModal.classList.contains('is-hidden')
+    && typeof settingsFormIsDirty === 'function'
+    && settingsFormIsDirty()
+    && typeof readSettingsForm === 'function'
+  ) {
+    saveSettings(readSettingsForm(), { immediate: true });
+  }
+
+  syncActiveProfileFromMemory();
+  activeProfileId = target.id;
+  bindActiveProfile(target);
+  settings = settingsForProfile(settings, target);
+  restoreOutboundQueues(conversations, { clear: false });
+  activeId = null;
+  activeProjectId = null;
+  draftIncognito = false;
+  resetDraftWorkspace();
+  if (typeof cancelMessageEdit === 'function') cancelMessageEdit();
+  if (typeof closeConvoMenu === 'function') closeConvoMenu();
+  if (typeof hydrateModelPickerState === 'function') hydrateModelPickerState();
+  if (typeof showChatView === 'function') showChatView();
+  if (typeof startDraft === 'function') startDraft({ syncUrl: false });
+  applySettingsInMemory(settings);
+  saveStore({ immediate: true });
+  if (settingsModal && !settingsModal.classList.contains('is-hidden') && typeof fillSettingsFormFromState === 'function') {
+    fillSettingsFormFromState();
+    if (typeof syncSettingsSaveButton === 'function') syncSettingsSaveButton();
+  }
+  syncAccountProfileUi();
+  if (typeof refreshSettingsDataSummary === 'function') refreshSettingsDataSummary();
+  if (typeof syncUrlFromState === 'function') syncUrlFromState({ replace: true });
+  return true;
+}
+
 /** Best-effort flush when a tab is backgrounded; normal user actions save earlier. */
 function flushPendingWrites() {
   if (!storageReady || diskEncryptionLocked()) return;
@@ -1130,7 +1443,7 @@ function flushPendingWrites() {
   if (saveSettingsTimer) {
     clearTimeout(saveSettingsTimer);
     saveSettingsTimer = null;
-    enqueueSettingsWrite({ ...settings });
+    enqueueSettingsWrite(preferencesPayload());
   }
 }
 
@@ -1277,6 +1590,7 @@ function revealGeneratedTitle(convo, title) {
   if (activeId === convo.id && convoTitleEl && !convo.incognito) {
     typeTitleInto(convoTitleEl, title);
   }
+  if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
 }
 
 function generateConversationTitle(convo, userText) {
@@ -1310,7 +1624,7 @@ let activeId = null;
 let draftIncognito = false;
 /** Project context for drafts / New chat. null = general Recents. */
 let activeProjectId = null;
-/** 'chat' | 'projects' */
+/** 'chat' | 'projects' | 'notifications' */
 let mainView = 'chat';
 /** 'chat' | 'bots' — wordmark surface. Bots is shown as Loops. */
 let appSurface = 'chat';
@@ -1505,6 +1819,8 @@ function enqueueSettingsWrite(snapshot) {
 
 function applySettingsInMemory(next) {
   settings = next;
+  syncActiveProfileFromMemory({ touch: true });
+  syncAccountProfileUi();
   applyChatBackground(settings);
   updateGreeting();
   updateComposerHint();
@@ -1517,15 +1833,16 @@ function applySettingsInMemory(next) {
 function saveSettings(next, { immediate = true } = {}) {
   applySettingsInMemory(next);
   if (!storageReady || diskEncryptionLocked()) return Promise.resolve(false);
+  saveStore({ immediate });
   clearTimeout(saveSettingsTimer);
   saveSettingsTimer = null;
   if (immediate) {
-    return enqueueSettingsWrite({ ...settings });
+    return enqueueSettingsWrite(preferencesPayload());
   }
   saveSettingsTimer = setTimeout(() => {
     saveSettingsTimer = null;
     if (diskEncryptionLocked()) return;
-    enqueueSettingsWrite({ ...settings });
+    enqueueSettingsWrite(preferencesPayload());
   }, 120);
   return Promise.resolve(true);
 }
@@ -1542,7 +1859,7 @@ function refreshLocalDataPane() {
   );
 
   if (lede) {
-    lede.textContent = 'Chats, projects, and settings are stored on disk in your OS data folder.';
+    lede.textContent = 'Profiles, chats, projects, and settings are stored on disk in your OS data folder.';
   }
   if (personalizationLede) {
     personalizationLede.textContent = 'Saved on disk with your local data. Sent as a system prompt with each message.';
@@ -1553,8 +1870,8 @@ function refreshLocalDataPane() {
   if (filesEl) {
     if (dataInfo) {
       filesEl.textContent = dataInfo.encryption_enabled
-        ? 'Chats, preferences, provider configuration and credentials, and skill contents are encrypted. Only non-sensitive boot configuration remains in config.toml.'
-        : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Providers & appearance stay in config.toml.';
+        ? 'Every profile, preference, provider credential, and skill is covered by the same encryption passphrase. Only non-sensitive boot configuration remains in config.toml.'
+        : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Profile data is kept together in chats.json.';
     } else {
       filesEl.textContent = '—';
     }
@@ -1655,12 +1972,27 @@ async function postEncryption(path, body) {
 }
 
 function normalizeLoadedStore(store, rawPreferences) {
+  const preferences = normalizeSettings(
+    rawPreferences && typeof rawPreferences === 'object' ? rawPreferences : {}
+  );
+  const selectedProfile = store.profiles.find((profile) => profile.id === store.activeProfileId)
+    || store.profiles[0];
+  if (selectedProfile && (!selectedProfile._contextPresent || store.migratedFromLegacy)) {
+    selectedProfile.personalization = profileContextFromSettings(preferences);
+    selectedProfile._contextPresent = true;
+  }
   return {
     store,
-    preferences: normalizeSettings(
-      rawPreferences && typeof rawPreferences === 'object' ? rawPreferences : {}
-    ),
+    preferences: settingsForProfile(preferences, selectedProfile),
   };
+}
+
+function adoptLoadedData(loaded) {
+  profiles = loaded.store.profiles;
+  profiles._migratedFromLegacy = !!loaded.store.migratedFromLegacy;
+  activeProfileId = loaded.store.activeProfileId;
+  bindActiveProfile(activeProfile());
+  settings = loaded.preferences;
 }
 
 async function initLocalData() {
@@ -1684,11 +2016,15 @@ async function initLocalData() {
   }
 
   if (!dataInfo) {
+    profiles = [];
+    activeProfileId = DEFAULT_PROFILE_ID;
     projects = [];
     conversations = [];
     bots = [];
     settings = { ...DEFAULT_SETTINGS };
   } else if (dataInfo.encryption_enabled && !dataInfo.encryption_unlocked) {
+    profiles = [];
+    activeProfileId = DEFAULT_PROFILE_ID;
     projects = [];
     conversations = [];
     bots = [];
@@ -1700,6 +2036,8 @@ async function initLocalData() {
       if (storeRes.status === 403) {
         const problem = await storeRes.json().catch(() => ({}));
         if (problem.code === 'encrypted_locked') {
+          profiles = [];
+          activeProfileId = DEFAULT_PROFILE_ID;
           projects = [];
           conversations = [];
           bots = [];
@@ -1709,21 +2047,27 @@ async function initLocalData() {
           throw new Error(problem.error || 'Could not load chats');
         }
       } else {
-        const store = storeRes.ok ? parseStorePayload(await storeRes.json()) : { projects: [], conversations: [], bots: [] };
+        const store = parseStorePayload(storeRes.ok ? await storeRes.json() : {});
         const prefRes = await fetch('/api/data/preferences');
         const rawPrefs = prefRes.ok ? await prefRes.json() : {};
         const loaded = normalizeLoadedStore(store, rawPrefs);
-        projects = loaded.store.projects;
-        conversations = loaded.store.conversations;
-        bots = loaded.store.bots || [];
-        settings = loaded.preferences;
+        adoptLoadedData(loaded);
       }
     } catch {
+      profiles = [];
+      activeProfileId = DEFAULT_PROFILE_ID;
       projects = [];
       conversations = [];
       bots = [];
       settings = { ...DEFAULT_SETTINGS };
     }
+  }
+
+  if (!profiles.length && !diskEncryptionLocked()) {
+    const profile = normalizeProfile({ id: DEFAULT_PROFILE_ID, name: 'Personal' });
+    profiles = [profile];
+    activeProfileId = profile.id;
+    bindActiveProfile(profile);
   }
 
   hydrateModelPickerState();
@@ -1735,7 +2079,16 @@ async function initLocalData() {
     delete conversations._sortOrderMigrated;
     saveStore();
   }
+  if (!diskEncryptionLocked() && (
+    profiles._migratedFromLegacy
+    || profiles.some((profile) => profile._contextPresent === false)
+  )) {
+    delete profiles._migratedFromLegacy;
+    saveStore();
+    enqueueSettingsWrite(preferencesPayload());
+  }
   refreshLocalDataPane();
+  syncAccountProfileUi();
   syncAgentButton();
   syncResearchControls();
   if (diskEncryptionLocked()) promptUnlockSession();
@@ -1780,6 +2133,7 @@ function hideUnlockSession() {
 function refreshUiFromMemoryStore() {
   applyChatBackground(settings);
   updateGreeting();
+  syncAccountProfileUi();
   updateComposerHint();
   syncAgentButton();
   syncResearchControls();
@@ -1808,6 +2162,8 @@ function clearMemoryAfterLock() {
   collapsedModelProviders = [];
   modelMenuOptions = [];
   modelMenuMatches = [];
+  profiles = [];
+  activeProfileId = DEFAULT_PROFILE_ID;
   projects = [];
   conversations = [];
   bots = [];
@@ -1827,10 +2183,7 @@ async function loadDiskDataAfterUnlock() {
   const prefRes = await fetch('/api/data/preferences');
   const rawPrefs = prefRes.ok ? await prefRes.json() : {};
   const loaded = normalizeLoadedStore(store, rawPrefs);
-  projects = loaded.store.projects;
-  conversations = loaded.store.conversations;
-  bots = loaded.store.bots || [];
-  settings = loaded.preferences;
+  adoptLoadedData(loaded);
   hydrateModelPickerState();
   restoreOutboundQueues(conversations);
   if (typeof restoreAppSurface === 'function') restoreAppSurface();
