@@ -484,13 +484,116 @@
       </aside>
       <div class="settings-main">
         <div class="settings-scroll" id="settingsScroll">
-          <section class="settings-pane settings-providers-pane" data-settings-pane="providers" aria-label="Providers">
-            <iframe
-              class="settings-providers-frame"
-              id="settingsProvidersFrame"
-              data-src="/settings?embedded=1"
-              title="Provider and local model settings"
-            ></iframe>
+          <section class="settings-pane" data-settings-pane="providers" aria-labelledby="providersTitle">
+            <h2 class="settings-pane-title" id="providersTitle">Providers</h2>
+            <p class="settings-pane-lede">Endpoints Chat can call. The model picker lists every model from every provider; the default handles a request that does not name one.</p>
+
+            <div class="settings-section">
+              <h3 class="settings-section-title">Your providers</h3>
+              <p class="field-hint">Rename or change a URL with Edit. Make default only matters when a request does not name a model.</p>
+              <ul id="providerList" class="provider-list" aria-live="polite"></ul>
+              <p id="providerEmpty" class="field-hint">No providers yet. Add a base URL below.</p>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="settings-section-title" id="providerFormTitle">Add a provider</h3>
+              <div class="settings-row">
+                <label class="field-label" for="providerName">Name</label>
+                <div>
+                  <input class="field-input" id="providerName" type="text" maxlength="64" placeholder="OpenAI / Claude / home lab" autocomplete="off" spellcheck="false">
+                  <p class="field-hint">Shown in the model picker and this list.</p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <label class="field-label" for="providerApiStyle">API style</label>
+                <div>
+                  <select class="field-select" id="providerApiStyle" aria-describedby="providerFormHint">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="anthropic">Anthropic Messages</option>
+                  </select>
+                  <p class="field-hint">Leave on auto-detect unless the host needs a specific style.</p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <label class="field-label" for="providerBase">Base URL</label>
+                <div>
+                  <input class="field-input" id="providerBase" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false">
+                  <p class="field-hint">Should end in <code>/v1</code>.</p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <label class="field-label" for="providerToken">API token</label>
+                <div>
+                  <input class="field-input" id="providerToken" type="password" placeholder="sk-… or leave blank" autocomplete="off" spellcheck="false">
+                  <p class="field-hint">Optional. Leave blank when editing to keep the saved token.</p>
+                </div>
+              </div>
+              <label class="field-check" for="providerAllowInsecureTls">
+                <input id="providerAllowInsecureTls" type="checkbox">
+                <span>Allow invalid HTTPS certificates <span style="color:var(--color-muted)">(unsafe)</span></span>
+              </label>
+              <p id="providerFormHint" class="field-hint">Add runs a connection test automatically.</p>
+              <div class="skills-toolbar">
+                <button type="button" class="btn btn-primary" id="btnSaveProvider">Add</button>
+                <button type="button" class="btn btn-ghost is-hidden" id="btnCancelProviderEdit">Cancel</button>
+              </div>
+              <p id="providerConnectionTest" class="field-hint connection-test is-hidden" role="status" aria-live="polite">
+                <strong id="providerConnectionTitle">Connection test</strong>
+                <span id="providerConnectionDetail"></span>
+              </p>
+              <span id="providerConnectionMark" class="is-hidden" aria-hidden="true"></span>
+              <p id="providerError" class="field-hint provider-error is-hidden" role="alert"></p>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="settings-section-title">Local LLMs</h3>
+              <p class="field-hint">Start a GGUF model on this machine with <code>org/repo:quant</code> from Hugging Face.</p>
+              <div id="localLlmMissing" class="is-hidden" role="status">
+                <p id="localLlmInstallDetail" class="field-hint">Checking for llama-server…</p>
+                <a class="btn btn-primary" id="localLlmInstallLink" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">Install llama.cpp</a>
+              </div>
+              <div id="localLlmBody" class="is-hidden">
+                <p id="localLlmReady" class="field-hint" title="">llama-server ready</p>
+                <div id="localLlmRunning" class="settings-data-card is-hidden" aria-live="polite">
+                  <strong id="localLlmRunningTitle">Running</strong>
+                  <p id="localLlmRunningDetail">—</p>
+                  <button type="button" class="btn btn-danger-ghost" id="btnStopLocalLlm">Stop</button>
+                </div>
+                <div id="localLlmControls">
+                  <div class="settings-row">
+                    <label class="field-label" for="localLlmHf">Model</label>
+                    <div>
+                      <div class="provider-inline-actions">
+                        <input class="field-input" id="localLlmHf" type="text" maxlength="256" placeholder="ggml-org/gpt-oss-120b-GGUF:Q4_K_M" autocomplete="off" spellcheck="false">
+                        <button type="button" class="btn btn-primary" id="btnStartLocalLlm">Start</button>
+                      </div>
+                      <p class="field-hint">Hugging Face id, including the quant.</p>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="localLlmPort">Port</label>
+                    <input class="field-input" id="localLlmPort" type="number" min="1" max="65535" value="8080">
+                  </div>
+                  <div class="settings-row">
+                    <label class="field-label" for="localLlmThreads">Threads</label>
+                    <input class="field-input" id="localLlmThreads" type="number" min="1" max="256" value="14">
+                  </div>
+                  <label class="field-check" for="localLlmMmap" title="Memory-map the GGUF on CPU so llama-server uses less RAM">
+                    <input type="checkbox" id="localLlmMmap" checked>
+                    <span>Memory-map the model <span style="color:var(--color-muted)">(less RAM on CPU)</span></span>
+                  </label>
+                  <p id="localLlmError" class="field-hint provider-error is-hidden" role="alert"></p>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section is-hidden" id="localLlmCacheWrap">
+              <h3 class="settings-section-title">On this device</h3>
+              <p id="localLlmCacheHint" class="field-hint">Cached GGUFs</p>
+              <ul id="localLlmCacheList" class="provider-list" aria-live="polite"></ul>
+              <p id="localLlmCacheEmpty" class="field-hint">No cached models yet — start one above to download.</p>
+            </div>
           </section>
 
           <section class="settings-pane is-active" data-settings-pane="personalization" aria-labelledby="settingsTitle">

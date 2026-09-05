@@ -1,6 +1,5 @@
 //! Compile-time embed: the release binary ships alone — no HTML/JS/PNG sidecars.
 
-pub const SETTINGS_HTML: &str = include_str!("../ui/settings.html");
 pub const CHAT_HTML: &str = include_str!("../ui/chat.html");
 pub const CHAT_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/chat.css"));
 pub const CHAT_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/chat.js"));
@@ -20,18 +19,16 @@ mod tests {
 
     #[test]
     fn chat_ui_does_not_block_paint_on_google_fonts() {
-        for html in [CHAT_HTML, SETTINGS_HTML] {
-            assert!(!html.contains("fonts.googleapis.com"));
-            assert!(!html.contains("fonts.gstatic.com"));
-            assert!(html.contains("/optional-fonts.js"));
-        }
+        assert!(!CHAT_HTML.contains("fonts.googleapis.com"));
+        assert!(!CHAT_HTML.contains("fonts.gstatic.com"));
+        assert!(CHAT_HTML.contains("/optional-fonts.js"));
         assert!(OPTIONAL_FONTS_JS.contains("fonts.googleapis.com"));
         assert!(OPTIONAL_FONTS_JS.contains("media = 'print'"));
     }
 
     #[test]
     fn chat_ui_does_not_use_local_storage() {
-        for blob in [CHAT_JS, SETTINGS_HTML, CHAT_HTML] {
+        for blob in [CHAT_JS, CHAT_HTML] {
             assert!(
                 !blob.contains("localStorage"),
                 "chat UI must not read or write localStorage"
@@ -80,10 +77,13 @@ mod tests {
     #[test]
     fn provider_manager_is_integrated_into_settings() {
         assert!(CHAT_HTML.contains("data-settings-pane=\"providers\""));
-        assert!(CHAT_HTML.contains("data-src=\"/settings?embedded=1\""));
+        assert!(CHAT_HTML.contains("id=\"providerList\""));
+        assert!(CHAT_HTML.contains("id=\"localLlmBody\""));
+        assert!(CHAT_JS.contains("function bindProviderSettings("));
+        assert!(!CHAT_HTML.contains("settings-providers-frame"));
+        assert!(!CHAT_HTML.contains("data-src=\"/settings?embedded=1\""));
         assert!(!CHAT_HTML.contains("id=\"btnProviders\""));
         assert!(!CHAT_HTML.contains("class=\"mode-switch\""));
-        assert!(SETTINGS_HTML.contains("html.is-embedded .sidebar"));
     }
 
     #[test]

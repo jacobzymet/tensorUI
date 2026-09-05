@@ -18,6 +18,7 @@ const CHAT_SCRIPT_FILES: &[&str] = &[
     "src/ui/chat/scripts/input.js",
     "src/ui/chat/scripts/controls.js",
     "src/ui/chat/scripts/render.js",
+    "src/ui/chat/scripts/providers.js",
     "src/ui/chat/scripts/bots.js",
     "src/ui/chat/scripts/runtime.js",
     "src/ui/chat/scripts/terminal.js",

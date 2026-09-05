@@ -540,6 +540,11 @@ button { font-family: inherit; }
 }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .status-stopped { color: var(--color-muted); }
+.status-warn {
+  color: var(--color-warn);
+  border-color: color-mix(in oklch, var(--color-warn) 34%, var(--color-rule));
+  background: color-mix(in oklch, var(--color-warn) 10%, transparent);
+}
 
 .chat-shell {
   --chat-topbar-h: 2.75rem;

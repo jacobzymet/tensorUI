@@ -1010,6 +1010,9 @@ function updateInferenceState(data) {
   syncComposerThinkVisibility(remoteSelected);
   syncAttachButton();
   updateSendEnabled();
+  if (typeof syncProviderSettingsFromState === 'function') {
+    syncProviderSettingsFromState(data);
+  }
 }
 
 let encryptionStateSync = null;

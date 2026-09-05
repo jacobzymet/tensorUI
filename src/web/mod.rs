@@ -41,7 +41,7 @@ use crate::{
 pub(crate) use embed::APP_ICON_PNG;
 use embed::{
     CHAT_CSS, CHAT_HTML, CHAT_JS, HIGHLIGHT_JS, MARKED_JS, OPTIONAL_FONTS_JS, ORB_JS, PURIFY_JS,
-    SETTINGS_HTML, XTERM_CSS, XTERM_FIT_JS, XTERM_JS,
+    XTERM_CSS, XTERM_FIT_JS, XTERM_JS,
 };
 
 const CHAT_REQUEST_LIMIT: usize = 16 * 1024 * 1024;
@@ -463,21 +463,8 @@ async fn chat_page(State(app): State<SharedApp>, OriginalUri(uri): OriginalUri) 
     }
 }
 
-async fn settings_page(State(app): State<SharedApp>, OriginalUri(uri): OriginalUri) -> Response {
-    let locked = app
-        .lock()
-        .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
-        .unwrap_or(true);
-    if locked {
-        Redirect::temporary("/").into_response()
-    } else if !uri
-        .query()
-        .is_some_and(|query| query.split('&').any(|part| part == "embedded=1"))
-    {
-        Redirect::temporary("/?settings=providers").into_response()
-    } else {
-        Html(SETTINGS_HTML).into_response()
-    }
+async fn settings_page() -> Redirect {
+    Redirect::temporary("/?settings=providers")
 }
 
 async fn chat_stylesheet() -> impl IntoResponse {

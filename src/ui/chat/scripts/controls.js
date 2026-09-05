@@ -7,32 +7,15 @@ function showSettingsPane(pane) {
   });
   const scroll = document.getElementById('settingsScroll');
   document.querySelector('.settings-main')?.classList.toggle('is-provider-pane', pane === 'providers');
-  if (scroll) {
-    scroll.classList.toggle('is-provider-pane', pane === 'providers');
-    scroll.scrollTop = 0;
+  if (scroll) scroll.scrollTop = 0;
+  if (typeof setProviderSettingsActive === 'function') {
+    setProviderSettingsActive(pane === 'providers');
   }
-  setProviderSettingsFrameActive(pane === 'providers');
   if (pane === 'data') {
     refreshLocalDataPane();
     refreshSettingsDataSummary();
   } else if (pane === 'profiles') {
     renderProfilesSettingsList();
-  }
-}
-
-function setProviderSettingsFrameActive(active) {
-  const frame = document.getElementById('settingsProvidersFrame');
-  if (!frame) return;
-  if (active) {
-    if (frame.dataset.loaded !== '1') {
-      frame.dataset.loaded = '1';
-      frame.src = frame.dataset.src;
-    }
-    return;
-  }
-  if (frame.dataset.loaded === '1') {
-    frame.src = 'about:blank';
-    delete frame.dataset.loaded;
   }
 }
 
@@ -1570,7 +1553,7 @@ function syncAttachmentFallbackControls() {
 }
 
 function closeSettings() {
-  setProviderSettingsFrameActive(false);
+  if (typeof setProviderSettingsActive === 'function') setProviderSettingsActive(false);
   closeBackdrop(settingsModal);
   hideSkillEditor();
 }
