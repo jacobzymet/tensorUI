@@ -1,1 +1,1 @@
-Enough research for now — write the final answer in normal reply text (not thinking). Do not call tools.
+Write the final answer now in normal reply text, using the selected comprehensive or concise format. Do not call tools. If research ended before adequate evidence was available, explicitly state what could and could not be verified. Cite only sources actually obtained.

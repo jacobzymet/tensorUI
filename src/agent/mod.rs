@@ -8,6 +8,7 @@ pub mod fs;
 pub mod media;
 mod output;
 mod patch;
+mod research;
 pub mod search;
 pub mod skills;
 pub mod terminal;
@@ -44,9 +45,6 @@ const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const TOOL_LOOP_NOTICE_AFTER: usize = 25;
 const DEEP_RESEARCH_TOOL_LOOP_NOTICE_AFTER: usize = 40;
 const DEEP_RESEARCH_MIN_RESULTS: usize = 10;
-/// Soft cap: after this many web_search calls, stop offering tools and demand a final answer.
-const DEEP_RESEARCH_BRIEF_SEARCH_CAP: usize = 4;
-const DEEP_RESEARCH_LONG_SEARCH_CAP: usize = 10;
 /// How many times we nudge after a blank visible reply before giving up.
 const MAX_EMPTY_RETRIES: usize = 2;
 /// Extra nudges once research already has sources and only the write-up is missing.
@@ -830,8 +828,8 @@ async fn run_agent_loop(
     let mut loop_notice_sent = false;
     let mut pending_force: HashSet<String> = request.force_tools.iter().cloned().collect();
     let mut await_clarify = request.deep_research;
-    let mut deep_searches = 0usize;
-    let search_cap = deep_research_search_cap(request.deep_research_output);
+    let mut research = research::ResearchProgress::default();
+    let mut research_final_notice_sent = false;
 
     loop {
         let steers = drain_steers(&mut steer_rx);
@@ -861,19 +859,23 @@ async fn run_agent_loop(
             .await?;
         }
         let force_final = request.deep_research
-            && deep_searches > 0
-            && (deep_searches >= search_cap || empty_retries > 0);
+            && !await_clarify
+            && (research.exhausted() || (research.ready() && empty_retries > 0));
+        if force_final && !research_final_notice_sent {
+            research_final_notice_sent = true;
+            request.messages.push(json!({
+                "role": "user",
+                "content": format!("{}\n{}", research.note(), crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_FORCE_FINAL)),
+            }));
+        }
         let mut pending_list = pending_force_list(&pending_force, &request.force_tools);
         if await_clarify {
             pending_list = vec!["ask_user".into()];
         } else if force_final {
+            pending_force.clear();
             pending_list.clear();
-        } else if request.deep_research
-            && deep_searches == 0
-            && !pending_list.iter().any(|n| n == "web_search")
-        {
-            // After clarify (or if clarify somehow skipped), require at least one search.
-            pending_list = vec!["web_search".into()];
+        } else if request.deep_research && !research.ready() {
+            pending_list = vec![research.next_tool().into()];
         }
         let allow_tools = !force_final;
         let status_message = if await_clarify && tool_rounds == 0 && empty_retries == 0 {
@@ -881,10 +883,12 @@ async fn run_agent_loop(
         } else if force_final {
             "Writing answer…".to_string()
         } else if request.deep_research {
-            if tool_rounds == 0 && empty_retries == 0 && force_retries == 0 {
-                "Researching…".to_string()
+            if research.ready() {
+                "Checking evidence and resolving gaps…".to_string()
+            } else if research.next_tool() == "fetch_url" {
+                "Reading and verifying sources…".to_string()
             } else {
-                "Still researching…".to_string()
+                "Researching multiple angles…".to_string()
             }
         } else if !pending_list.is_empty() {
             format!("Required: {}", pending_list.join(", "))
@@ -943,7 +947,14 @@ async fn run_agent_loop(
             let calls = turn.tools.clone();
             send_content_clear(tx, &turn).await?;
 
-            if force_final && !calls.iter().any(|call| call.name == "ask_user") {
+            if force_final {
+                if force_retries >= MAX_ANSWER_RETRIES {
+                    return Err(StreamFail::Other(
+                        "Research model kept calling tools instead of writing its final answer."
+                            .into(),
+                    ));
+                }
+                force_retries += 1;
                 tool_rounds += calls.len();
                 let err = crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_FORCE_FINAL);
                 let mut results = Vec::new();
@@ -1094,17 +1105,16 @@ async fn run_agent_loop(
             let executed =
                 approve_and_execute_tools(calls, &request.skills, user_skills, tx, approval_rx)
                     .await?;
+            if request.deep_research {
+                research.record_round(&executed);
+            }
             let mut results = Vec::new();
             for (call, outcome) in executed {
-                if call.name == "web_search" && outcome.ok {
-                    deep_searches += 1;
-                }
                 let mut model_result = outcome.text;
                 if request.deep_research {
                     model_result.push_str(&deep_research_continue_note(
                         request.deep_research_output,
-                        deep_searches,
-                        search_cap,
+                        &research,
                     ));
                 }
                 results.push((call, model_result));
@@ -1113,13 +1123,14 @@ async fn run_agent_loop(
             continue;
         }
 
-        let needs_deep_search = request.deep_research && deep_searches == 0;
+        let needs_deep_search = request.deep_research && !force_final && !research.ready();
         if await_clarify || !pending_force.is_empty() || needs_deep_search {
             if force_retries >= MAX_EMPTY_RETRIES {
                 return Err(StreamFail::Other(if await_clarify {
                     "Deep research did not ask clarifying questions before answering.".into()
                 } else if needs_deep_search {
-                    "Deep research finished without searching the web.".into()
+                    "Research model did not complete the required searches and source reading."
+                        .into()
                 } else {
                     format!(
                         "Agent did not use required skill(s): {}.",
@@ -1131,7 +1142,7 @@ async fn run_agent_loop(
             let pending = if await_clarify {
                 vec!["ask_user".into()]
             } else if needs_deep_search {
-                vec!["web_search".into()]
+                vec![research.next_tool().into()]
             } else {
                 pending_force_list(&pending_force, &request.force_tools)
             };
@@ -1158,8 +1169,7 @@ async fn run_agent_loop(
                     crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_ASK_USER_FIRST)
                         .to_string()
                 } else if needs_deep_search {
-                    crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_MUST_SEARCH)
-                        .to_string()
+                    research.note()
                 } else {
                     crate::prompts::fill(
                         crate::prompts::agent::NUDGE_REQUIRED_TOOLS,
@@ -1173,7 +1183,8 @@ async fn run_agent_loop(
         // Reasoning-only / think-only / blank replies used to end the turn empty in the UI.
         // Nudge the model to either call a tool or write a user-visible answer.
         if turn.visible_text().is_empty() {
-            let answer_budget = if request.deep_research && deep_searches > 0 {
+            let answer_budget = if request.deep_research && (research.searches() > 0 || force_final)
+            {
                 MAX_ANSWER_RETRIES
             } else {
                 MAX_EMPTY_RETRIES
@@ -1199,7 +1210,7 @@ async fn run_agent_loop(
             }));
             request.messages.push(json!({
                 "role": "user",
-                "content": if request.deep_research && deep_searches > 0 {
+                "content": if request.deep_research && (research.searches() > 0 || force_final) {
                     crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_STOP_AND_ANSWER)
                         .to_string()
                 } else if request.deep_research {
@@ -1493,21 +1504,13 @@ fn deep_research_system_block(output: DeepResearchOutput) -> String {
     fill(agent::DEEP_RESEARCH, &[("output_line", output_line)])
 }
 
-fn deep_research_search_cap(output: DeepResearchOutput) -> usize {
-    match output {
-        DeepResearchOutput::Brief => DEEP_RESEARCH_BRIEF_SEARCH_CAP,
-        DeepResearchOutput::Long => DEEP_RESEARCH_LONG_SEARCH_CAP,
-    }
-}
-
 fn deep_research_continue_note(
     output: DeepResearchOutput,
-    deep_searches: usize,
-    search_cap: usize,
+    research: &research::ResearchProgress,
 ) -> String {
     use crate::prompts::{agent, trim_prompt};
 
-    let body = if deep_searches >= search_cap {
+    let body = if research.exhausted() {
         trim_prompt(agent::CONTINUE_ENOUGH)
     } else {
         match output {
@@ -1515,7 +1518,7 @@ fn deep_research_continue_note(
             DeepResearchOutput::Brief => trim_prompt(agent::CONTINUE_BRIEF),
         }
     };
-    format!("\n\n{body}")
+    format!("\n\n{}\n{body}", research.note())
 }
 
 pub fn inject_skill_catalog_into_messages(messages: &mut Vec<Value>, user_skills: &[UserSkill]) {
@@ -4238,6 +4241,21 @@ mod tests {
         assert_eq!(request.skills.web_search_depth, WebSearchDepth::Deep);
         assert!(request.skills.web_search_max_results >= DEEP_RESEARCH_MIN_RESULTS);
         assert_eq!(request.deep_research_output, DeepResearchOutput::Brief);
+    }
+
+    #[test]
+    fn concise_and_comprehensive_share_research_depth_but_keep_distinct_outputs() {
+        let progress = research::ResearchProgress::default();
+        let brief = deep_research_continue_note(DeepResearchOutput::Brief, &progress);
+        let long = deep_research_continue_note(DeepResearchOutput::Long, &progress);
+        assert!(brief.contains(&progress.note()));
+        assert!(long.contains(&progress.note()));
+        assert!(brief.contains("concise final answer"));
+        assert!(long.contains("comprehensive final report"));
+        assert_ne!(
+            deep_research_system_block(DeepResearchOutput::Brief),
+            deep_research_system_block(DeepResearchOutput::Long)
+        );
     }
 
     #[test]

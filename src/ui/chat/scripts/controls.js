@@ -803,6 +803,8 @@ function saveQueuedMessageEdit(row, rawText) {
   item.apiText = userMessageApiContent({
     content: displayText,
     attachments: item.attachments || [],
+    replyQuote: item.replyQuote,
+    replyToSpeakerHandle: item.replyToSpeakerHandle,
   });
   item.turn = {
     useAgent: turn.useAgent,

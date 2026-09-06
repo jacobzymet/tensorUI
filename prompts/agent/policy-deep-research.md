@@ -1,1 +1,1 @@
-Do not answer from memory alone. After clarifying with the user, investigate with web_search (and fetch_url when useful) before writing the final answer.
+Do not answer from memory or search snippets alone. After clarifying with the user, investigate across multiple web_search and fetch_url rounds, adapt searches to the findings, and verify important claims before synthesizing. Comprehensive and concise final answers require the same research depth.

@@ -1,1 +1,1 @@
-Deep research: prefer a few strong searches, then write the concise final answer in the normal user-visible reply (not inside thinking/reasoning). Only search again if a critical gap remains.
+Deep research: concise describes the final write-up only. Continue the full investigation: follow new leads, read original sources, test contrary evidence, and close material gaps. Once coverage is solid, compress the verified findings into a concise final answer in normal user-visible text, retaining citations and important uncertainty.

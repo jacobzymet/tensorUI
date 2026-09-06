@@ -199,6 +199,8 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
 }
 .msg-edit-bar .btn { min-height: var(--control-h-sm); padding: 0.3rem 0.9rem; font-size: var(--text-sm); }
 
+.msg-edit-status { font-size: var(--text-sm); color: var(--color-muted); line-height: 1.5; }
+
 .thinking {
   display: inline-flex;
   align-items: center;

@@ -142,19 +142,26 @@ function updateSendEnabled() {
   const hasFiles = pendingAttachments.length > 0;
   const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
   const editingLive = !!(editingRow && !editingRow.classList.contains('msg-queued'));
+  const submittingEdit = editingLive && editingRow.dataset.editSubmitting === 'true';
   const botsDraft = typeof isBotsSurface === 'function' && isBotsSurface() && !activeId;
   const modelReady = selectedModelIsReady();
   const canCompose = !diskEncryptionLocked()
     && serverReady
     && modelReady
     && !botsDraft
+    && !submittingEdit
+    && !(typeof pendingComposerSend !== 'undefined' && pendingComposerSend)
     && (hasText || hasFiles || hasQuote || editingLive);
   btnSend.disabled = !canCompose;
   const waitingLabel = selectedChatModel
     ? 'Waiting for ' + modelIdLabel(selectedChatModel)
     : 'Waiting for a model';
-  btnSend.title = modelReady ? 'Send message' : waitingLabel;
-  btnSend.setAttribute('aria-label', modelReady ? 'Send message' : waitingLabel);
+  const sendLabel = submittingEdit ? 'Restarting response…'
+    : editingLive ? 'Send edit and restart response'
+    : isConvoBusy(activeId) ? 'Queue message' : 'Send message';
+  btnSend.classList.toggle('is-queueing', !editingLive && isConvoBusy(activeId));
+  btnSend.title = modelReady ? sendLabel : waitingLabel;
+  btnSend.setAttribute('aria-label', modelReady ? sendLabel : waitingLabel);
   if (btnBranch) {
     const botsConvo = typeof isBotsConvo === 'function'
       && isBotsConvo(conversations.find((item) => item.id === activeId));
@@ -1119,7 +1126,26 @@ async function pollState() {
   }
 }
 
+let pendingComposerSend = null;
+
+function composerSendIsCurrent(attempt) {
+  return activeId === attempt.convoId
+    && activeProjectId === attempt.projectId
+    && appSurface === attempt.surface
+    && draftIncognito === attempt.incognito
+    && draftWorkspaceRoot === attempt.workspace
+    && selectedChatModel === attempt.modelId
+    && composerInput.value === attempt.input
+    && pendingReplyQuote === attempt.quote
+    && pendingReplyTarget === attempt.replyTarget
+    && pendingAttachments.length === attempt.attachments.length
+    && pendingAttachments.every((file, index) => file === attempt.attachments[index])
+    && [...composerMentionIds].join('\0') === attempt.mentions.join('\0')
+    && (!attempt.convoId || conversations.some((convo) => convo.id === attempt.convoId));
+}
+
 async function sendMessage({ branch = false } = {}) {
+  if (pendingComposerSend) return;
   if (
     !branch
     && editingRow
@@ -1130,8 +1156,8 @@ async function sendMessage({ branch = false } = {}) {
     const next = (input?.value || '').trim();
     if (next) {
       await submitEditedMessage(editingRow, next);
-      return;
     }
+    return;
   }
   const typed = composerInput.value.trim();
   const queuedFiles = pendingAttachments.slice();
@@ -1158,6 +1184,15 @@ async function sendMessage({ branch = false } = {}) {
     if (!source || !Array.isArray(source.messages) || !source.messages.length) return;
   }
 
+  const attempt = {
+    convoId: activeId, projectId: activeProjectId, modelId: selectedChatModel,
+    surface: appSurface, incognito: draftIncognito, workspace: draftWorkspaceRoot,
+    input: composerInput.value, quote: pendingReplyQuote, replyTarget: pendingReplyTarget,
+    attachments: queuedFiles, mentions: [...composerMentionIds],
+  };
+  pendingComposerSend = attempt;
+  updateSendEnabled();
+  try {
   stopVoiceInput({ silent: true });
   cancelMessageEdit();
   showChatView();
@@ -1172,10 +1207,19 @@ async function sendMessage({ branch = false } = {}) {
       prepared = [];
     }
   } catch (error) {
-    showAttachHint(error?.message || 'Attachment prep failed');
-    focusComposer();
+    if (activeId === attempt.convoId) {
+      showAttachHint(error?.message || 'Attachment prep failed');
+      focusComposer();
+    }
     return;
   }
+
+  // Async attachment work must never send into another chat or erase a newer draft.
+  if (!composerSendIsCurrent(attempt)) {
+    if (activeId === attempt.convoId) showComposerHint('Draft changed during preparation. Review it and send again.');
+    return;
+  }
+  if (!requireUnlockedData() || !serverReady || !selectedRemoteModel(latestState)?.ready) return;
 
   if (branch) {
     source = conversations.find((item) => item.id === source.id) || source;
@@ -1298,6 +1342,10 @@ async function sendMessage({ branch = false } = {}) {
 
   dispatchOutboundTurn(convo, outbound);
   focusComposer();
+  } finally {
+    if (pendingComposerSend === attempt) pendingComposerSend = null;
+    updateSendEnabled();
+  }
 }
 
 function focusComposer() {
@@ -1757,6 +1805,7 @@ async function runAssistantTurn(convo, {
   }
   const startEpoch = markOutboundStarting(convo.id);
   let liveStarted = false;
+  let startedStream = null;
   try {
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
@@ -1854,6 +1903,7 @@ async function runAssistantTurn(convo, {
     loopPhase,
   });
   liveStarted = true;
+  startedStream = stream;
   clearOutboundStarting(convo.id, startEpoch);
   stream.speakerBotId = speakerBotId || null;
   stream.skipQueue = !!skipQueue;
@@ -1920,6 +1970,7 @@ async function runAssistantTurn(convo, {
       body: JSON.stringify(requestBody),
       signal: stream.controller.signal,
     });
+    if (stream.cancelled || stream.replaced || activeStreams.get(convo.id) !== stream) return false;
     if (!response.ok) {
       if (response.status === 409) {
         dropLiveSubscriber(convo.id, stream);
@@ -1931,7 +1982,7 @@ async function runAssistantTurn(convo, {
           convo.updatedAt = Date.now();
           saveConversations({ immediate: true });
           if (activeId === convo.id) {
-            renderThread(convo);
+            renderThread(convo, { drainQueue: false });
             renderOutboundQueue(convo);
           }
           renderSidebar();
@@ -1960,6 +2011,13 @@ async function runAssistantTurn(convo, {
   }
   await driveAssistantSse(convo, stream, response);
   return true;
+  } catch (error) {
+    if (startedStream && activeStreams.get(convo.id) === startedStream) {
+      startedStream.controller.abort();
+      discardLiveStreamRow(startedStream);
+      finishLiveStream(convo.id, startedStream);
+    }
+    throw error;
   } finally {
     if (!liveStarted) clearOutboundStarting(convo.id, startEpoch);
   }
@@ -1967,6 +2025,7 @@ async function runAssistantTurn(convo, {
 
 function dropLiveSubscriber(convoId, stream) {
   if (activeStreams.get(convoId) !== stream) return;
+  discardLiveStreamRow(stream);
   activeStreams.delete(convoId);
   renderSidebar();
   syncComposerStreamUi();

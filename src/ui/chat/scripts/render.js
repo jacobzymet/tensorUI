@@ -3544,10 +3544,15 @@ function beginMessageEdit(row) {
   const btnSave = document.createElement('button');
   btnSave.type = 'button';
   btnSave.className = 'btn btn-primary';
-  btnSave.textContent = 'Send';
+  btnSave.textContent = 'Send & restart';
+  const status = document.createElement('div');
+  status.className = 'msg-edit-status';
+  status.setAttribute('role', 'status');
+  status.textContent = 'Sending replaces this message and all later replies.';
   bar.appendChild(btnCancel);
   bar.appendChild(btnSave);
   editor.appendChild(input);
+  editor.appendChild(status);
   editor.appendChild(bar);
 
   bubble.replaceWith(editor);
@@ -3604,6 +3609,7 @@ function beginMessageEdit(row) {
 }
 
 async function submitEditedMessage(row, rawText) {
+  if (row.dataset.editSubmitting === 'true' || !String(rawText || '').trim()) return;
   const convo = conversations.find((item) => item.id === activeId);
   if (!convo) return;
   const index = resolveUserMessageIndex(row, convo);
@@ -3615,19 +3621,26 @@ async function submitEditedMessage(row, rawText) {
     showComposerHint('Model is not ready yet. Try Send again.');
     return;
   }
-  let editStartEpoch = markOutboundStarting(convo.id);
+  row.dataset.editSubmitting = 'true';
+  const editControls = row.querySelectorAll('.msg-edit button, .msg-edit textarea');
+  const editStatus = row.querySelector('.msg-edit-status');
+  const editSend = row.querySelector('.msg-edit .btn-primary');
+  editControls.forEach((control) => { control.disabled = true; });
+  if (editSend) editSend.textContent = 'Restarting…';
+  if (editStatus) editStatus.textContent = 'Stopping the current response before sending your edit…';
+  updateSendEnabled();
+  let editStartEpoch = null;
+  try {
   const live = typeof activeStreams !== 'undefined' ? activeStreams.get(convo.id) : null;
   if (live) {
     live.replaced = true;
     live.skipQueue = true;
-    const cancelled = abortStream(convo.id, { cancelServer: true });
-    editStartEpoch = markOutboundStarting(convo.id);
-    await cancelled;
-    if (typeof outboundStartIsCurrent === 'function'
-      && !outboundStartIsCurrent(convo.id, editStartEpoch)) {
-      return;
-    }
   }
+  // Invalidate requests still starting as well as requests already streaming.
+  if (live || outboundStarting.has(convo.id)) abortStream(convo.id, { cancelServer: true });
+  editStartEpoch = markOutboundStarting(convo.id);
+  await waitForCancel(convo.id);
+  if (!outboundStartIsCurrent(convo.id, editStartEpoch)) return;
 
   const mentioned = parseCapabilityMentions(rawText);
   const text = mentioned.text;
@@ -3639,13 +3652,14 @@ async function submitEditedMessage(row, rawText) {
   const turn = resolveTurnSkills(mentionIds);
   const displayText = displayTextWithMentions(text, mentioned.mentions);
 
-  editingRow = null;
+  if (editingRow === row) editingRow = null;
   row.classList.remove('is-editing');
-  mentionInput = composerInput;
-  closeMentionMenu();
+  if (activeId === convo.id) {
+    mentionInput = composerInput;
+    closeMentionMenu();
+  }
   updateSendEnabled();
 
-  const snapshot = convo.messages.slice();
   const priorMessage = convo.messages[index];
   const priorAttachments = Array.isArray(priorMessage.attachments)
     ? priorMessage.attachments
@@ -3661,7 +3675,7 @@ async function submitEditedMessage(row, rawText) {
   convo.updatedAt = Date.now();
   saveConversations();
   renderSidebar();
-  renderThread(convo, { drainQueue: false });
+  if (activeId === convo.id) renderThread(convo, { drainQueue: false });
   const mappedAttachments = priorAttachments.map((att) => ({
     ...att,
     sendMode: att.sendMode || (att.kind === 'image' && att.dataUrl && !att.extractedText ? 'native' : 'text'),
@@ -3697,7 +3711,6 @@ async function submitEditedMessage(row, rawText) {
         forceTools: turn.forceTools,
       },
     }, editedUser, convo.title);
-    clearOutboundStarting(convo.id);
     return;
   }
   const started = await runAssistantTurn(convo, {
@@ -3710,13 +3723,19 @@ async function submitEditedMessage(row, rawText) {
     replaceLive: true,
   });
   if (started === false) {
-    clearOutboundStarting(convo.id);
-    convo.messages = snapshot;
-    convo.updatedAt = Date.now();
-    saveConversations();
-    renderThread(convo);
-    renderSidebar();
-    showComposerHint('Could not restart that turn. Try Send again.');
+    if (activeId === convo.id && !isConvoBusy(convo.id)) {
+      showComposerHint('Response was not restarted. Your edited message is saved; edit it to retry.');
+    }
+  }
+  } catch (error) {
+    if (activeId === convo.id) showComposerHint('Could not restart the response. Your edit is kept; try again.');
+  } finally {
+    if (editStartEpoch != null) clearOutboundStarting(convo.id, editStartEpoch);
+    delete row.dataset.editSubmitting;
+    editControls.forEach((control) => { control.disabled = false; });
+    if (editSend) editSend.textContent = 'Send & restart';
+    if (editStatus) editStatus.textContent = 'Sending replaces this message and all later replies.';
+    updateSendEnabled();
   }
 }
 
