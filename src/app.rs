@@ -5,11 +5,10 @@ use crate::{
     config::Config,
     crypto,
     encryption_transition::{self, Operation, Snapshot},
-    local_llm::LocalLlmManager,
     providers::{
         ApiStyle, CatalogCache, HealthCache, ProviderHealth, ProviderPublic, ProviderUpsertOptions,
         ProvidersConfig, RemoteModelOption, enrich_local_catalog, mask_token,
-        normalize_provider_base, probe_provider_endpoint,
+        probe_provider_endpoint,
     },
     store::{self, StorageMode, StoreError},
 };
@@ -27,7 +26,6 @@ pub struct App {
     disk_key: Option<crypto::DiskKey>,
     /// Prevent concurrent processes from interleaving protected-data writes.
     _data_lock: crate::secure_fs::DataLock,
-    pub local_llm: LocalLlmManager,
 }
 
 impl App {
@@ -55,7 +53,6 @@ impl App {
             remote_catalog: CatalogCache::default(),
             disk_key: None,
             _data_lock: data_lock,
-            local_llm: LocalLlmManager::default(),
         };
         // Also sanitizes plaintext credentials left by older provider save paths.
         if changed || app.encryption_enabled() {
@@ -69,7 +66,6 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
-        let _ = self.local_llm.stop();
         self.lock_disk_encryption();
     }
 
@@ -300,6 +296,28 @@ impl App {
         self.remote_model_catalog_peek().unwrap_or_default()
     }
 
+    /// True while at least one configured provider has not been probed yet.
+    /// A partial catalog from the first host to answer is not "done".
+    pub fn remote_catalogs_pending(&self) -> bool {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return false;
+        }
+        self.config.providers.items.iter().any(|provider| {
+            let base = provider.base.trim();
+            if base.is_empty() {
+                return false;
+            }
+            let token = provider.token.trim();
+            self.remote_catalog
+                .peek(provider.api_style, base, token)
+                .is_none()
+                && self
+                    .remote_health
+                    .peek(provider.api_style, base, token)
+                    .is_none()
+        })
+    }
+
     /// Merged model catalogs from every saved provider, stamped with provider badges.
     /// `None` means no provider has been probed yet.
     pub fn remote_model_catalog_peek(&self) -> Option<Vec<RemoteModelOption>> {
@@ -439,36 +457,6 @@ impl App {
     pub fn activate_provider(&mut self, id: &str) -> Result<(), String> {
         self.require_provider_persistence_unlocked()?;
         self.mutate_providers(|providers| providers.set_active(id))
-    }
-
-    /// Register or refresh the managed llama-server provider and make it default.
-    pub fn ensure_local_llama_provider(&mut self, base_url: &str) -> Result<(), String> {
-        self.require_provider_persistence_unlocked()?;
-        let id = crate::local_llm::provider_id();
-        let name = crate::local_llm::provider_name();
-        let Some(normalized) = normalize_provider_base(base_url, ApiStyle::Openai) else {
-            return Err("Invalid local llama-server base URL.".into());
-        };
-        self.mutate_providers(|providers| {
-            if let Some(provider) = providers.items.iter_mut().find(|p| p.id == id) {
-                provider.name = name.to_string();
-                provider.base = normalized;
-                provider.api_style = ApiStyle::Openai;
-                provider.allow_insecure_tls = false;
-                provider.token.clear();
-                providers.active_provider_id = id.to_string();
-            } else {
-                if providers.items.len() >= 32 {
-                    return Err("Maximum of 32 providers reached.".into());
-                }
-                let mut provider =
-                    crate::providers::Provider::new(name, normalized, "", ApiStyle::Openai);
-                provider.id = id.to_string();
-                providers.active_provider_id = id.to_string();
-                providers.items.push(provider);
-            }
-            Ok(())
-        })
     }
 
     fn mutate_providers(

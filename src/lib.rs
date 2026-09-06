@@ -8,7 +8,6 @@ pub mod desktop;
 pub mod encryption_transition;
 pub mod http;
 pub mod live;
-pub mod local_llm;
 pub mod prompts;
 pub mod providers;
 pub mod secure_fs;

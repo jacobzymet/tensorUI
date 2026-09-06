@@ -42,6 +42,47 @@ mod tests {
         assert!(!CHAT_JS.contains("prunePinnedModels("));
         assert!(!CHAT_JS.contains("pruneRecentModels("));
         assert!(CHAT_JS.contains("pinnedModelIds: pinnedModelIds.slice()"));
+        assert!(CHAT_JS.contains("remote_catalog_pending"));
+        assert!(CHAT_JS.contains("if (!selectedChatModel && catalogComplete && !menuOpen)"));
+        assert!(!CHAT_JS.contains("!allValues.includes(selectedChatModel)"));
+    }
+
+    #[test]
+    fn startup_never_sends_through_a_transient_fallback_model() {
+        assert!(CHAT_JS.contains("function selectedModelIsReady("));
+        assert!(CHAT_JS.contains("&& modelReady"));
+        assert!(
+            CHAT_JS.contains("if (!modelCatalogIsComplete(data?.network, options)) return null;")
+        );
+        assert!(CHAT_JS.contains("if (!serverReady || !selectedTurnRemote?.ready)"));
+        assert!(CHAT_JS.contains("if (!remote?.ready)"));
+        assert!(CHAT_JS.contains("turnModel: remote.model"));
+        assert!(CHAT_JS.contains("contextualModelError("));
+    }
+
+    #[test]
+    fn sent_user_prompt_pins_while_the_thread_scrolls() {
+        assert!(!CHAT_HTML.contains("id=\"userPromptPin\""));
+        assert!(!CHAT_HTML.contains("id=\"userPromptPinBubble\""));
+        assert!(!CHAT_JS.contains("function syncUserPromptPin("));
+        assert!(!CHAT_JS.contains("function pinUserPrompt("));
+        assert!(CHAT_CSS.contains("position: sticky;"));
+        assert!(CHAT_CSS.contains("container-type: scroll-state;"));
+        assert!(CHAT_CSS.contains("@container scroll-state(stuck: top)"));
+        assert!(CHAT_CSS.contains("-webkit-line-clamp: 2"));
+        assert!(!CHAT_CSS.contains(".msg.msg-role-user.is-stuck"));
+    }
+
+    #[test]
+    fn live_loading_animation_survives_thread_navigation() {
+        assert!(CHAT_JS.contains("const priorMounts = Number(stream.domMountCount) || 0;"));
+        assert!(CHAT_JS.contains("thinkingLabel.style.animationDelay"));
+        assert!(CHAT_JS.contains("if (priorMounts === 0)"));
+        assert!(CHAT_JS.contains("stream.domMountCount = priorMounts + 1;"));
+        assert!(CHAT_JS.contains("stream.statusLabel = baseLabel;"));
+        assert!(CHAT_JS.contains("function syncConvoBusyRingPhase("));
+        assert!(CHAT_JS.contains("--convo-busy-delay"));
+        assert!(CHAT_CSS.contains("animation-delay: var(--convo-busy-delay, 0ms);"));
     }
 
     #[test]
@@ -78,7 +119,7 @@ mod tests {
     fn provider_manager_is_integrated_into_settings() {
         assert!(CHAT_HTML.contains("data-settings-pane=\"providers\""));
         assert!(CHAT_HTML.contains("id=\"providerList\""));
-        assert!(CHAT_HTML.contains("id=\"localLlmBody\""));
+        assert!(!CHAT_HTML.contains("id=\"localLlmBody\""));
         assert!(CHAT_JS.contains("function bindProviderSettings("));
         assert!(!CHAT_HTML.contains("settings-providers-frame"));
         assert!(!CHAT_HTML.contains("data-src=\"/settings?embedded=1\""));

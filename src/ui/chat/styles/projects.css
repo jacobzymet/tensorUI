@@ -229,7 +229,8 @@
     min-height: 0;
     height: 100%;
   }
-  .chat-column > .chat-viewport {
+  .chat-thread-stage,
+  .chat-thread-stage > .chat-viewport {
     height: auto;
     flex: 1 1 auto;
   }

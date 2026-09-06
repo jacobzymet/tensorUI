@@ -131,6 +131,10 @@ impl LiveTurn {
         self.cancel.send_replace(true);
     }
 
+    fn is_cancelling(&self) -> bool {
+        *self.cancel.borrow()
+    }
+
     fn meta_frame(&self) -> Vec<u8> {
         let payload = serde_json::to_string(&self.snapshot_info()).unwrap_or_else(|_| "{}".into());
         format!("event: meta\ndata: {payload}\n\n").into_bytes()
@@ -273,6 +277,7 @@ impl LiveHub {
             let mut turns = self.lock_turns();
             if let Some(existing) = turns.get(&conversation_id)
                 && !existing.finished.load(Ordering::SeqCst)
+                && !existing.is_cancelling()
             {
                 return Err(existing.snapshot_info());
             }
@@ -473,6 +478,35 @@ mod tests {
             .map(|frame| String::from_utf8_lossy(&frame).into_owned())
             .collect::<String>();
         assert!(joined.contains("[DONE]"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_turn_can_be_replaced_before_its_source_settles() {
+        let hub = LiveHub::new();
+        let first = hub
+            .start(info("c4"), Box::pin(futures_util::stream::pending()))
+            .expect("first start");
+        assert!(hub.cancel("c4", Some("turn_test")));
+
+        let mut replacement_info = info("c4");
+        replacement_info.turn_id = "turn_replacement".into();
+        let replacement = hub
+            .start(replacement_info, source(vec![b"data: replacement\n\n"]))
+            .expect("a cancelling turn must not block its replacement");
+
+        let replacement_frames = collect(replacement).await;
+        let replacement_text = replacement_frames
+            .iter()
+            .map(|frame| String::from_utf8_lossy(frame).into_owned())
+            .collect::<String>();
+        assert!(replacement_text.contains("replacement"));
+
+        let first_text = collect(first)
+            .await
+            .into_iter()
+            .map(|frame| String::from_utf8_lossy(&frame).into_owned())
+            .collect::<String>();
+        assert!(first_text.contains("[DONE]"));
     }
 
     #[tokio::test]

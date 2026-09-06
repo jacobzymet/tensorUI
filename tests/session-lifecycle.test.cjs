@@ -16,6 +16,75 @@ function declaration(name) {
   return match[0];
 }
 
+const runtime = readFileSync(
+  join(__dirname, '../src/ui/chat/scripts/runtime.js'), 'utf8'
+).replace(/\r\n/g, '\n');
+
+function runtimeDeclaration(name) {
+  const match = runtime.match(new RegExp('^(?:async )?function ' + name + '\\([\\s\\S]*?^\\}$', 'm'));
+  assert.ok(match, 'missing function ' + name);
+  return match[0];
+}
+
+function resumeHarness() {
+  const state = vm.createContext({
+    activeStreams: new Map(),
+    outboundStarting: new Set(),
+    serverReady: true,
+    storageReady: true,
+    diskEncryptionLocked: () => false,
+    conversations: [{ id: 'chat-1', messages: [] }],
+    activeId: 'chat-1',
+    emptyState: null,
+    AbortController,
+    renderSidebar() {},
+    syncComposerStreamUi() {},
+    ensureStreamDom() {},
+    scrollToBottom() {},
+    reclaimUnappliedSteers() {},
+    discardLiveStreamRow(stream) { stream.discarded = true; },
+  });
+  for (const name of ['resumeLiveTurns', 'attachLiveTurn', 'beginLiveStream', 'finishLiveStream']) {
+    vm.runInContext(runtimeDeclaration(name), state);
+  }
+  return state;
+}
+
+test('background resume cannot occupy the stream while an edited resend starts', async () => {
+  const state = resumeHarness();
+  state.outboundStarting.add('chat-1');
+  state.fetch = () => { throw new Error('must not reconnect to the old turn'); };
+  await state.resumeLiveTurns([{ conversation_id: 'chat-1', turn_id: 'old-turn' }]);
+  await state.attachLiveTurn(state.conversations[0], { turn_id: 'old-turn' });
+  assert.equal(state.activeStreams.size, 0);
+  assert.equal(state.outboundStarting.has('chat-1'), true);
+});
+
+test('a resume already awaiting store sync yields to a newly started resend', async () => {
+  const state = resumeHarness();
+  state.activeId = 'another-chat';
+  let finishSync;
+  state.syncConvoFromStore = () => new Promise((resolve) => { finishSync = resolve; });
+  state.fetch = () => { throw new Error('must not reconnect to the old turn'); };
+  const pending = state.resumeLiveTurns([{ conversation_id: 'chat-1', turn_id: 'old-turn' }]);
+  state.outboundStarting.add('chat-1');
+  finishSync(state.conversations[0]);
+  await pending;
+  assert.equal(state.activeStreams.size, 0);
+});
+
+test('a vanished live turn removes its Processing row and releases the composer', async () => {
+  const state = resumeHarness();
+  let stream;
+  state.fetch = async () => {
+    stream = state.activeStreams.get('chat-1');
+    return { ok: false, status: 404 };
+  };
+  await state.attachLiveTurn(state.conversations[0], { turn_id: 'old-turn' });
+  assert.equal(stream.discarded, true);
+  assert.equal(state.activeStreams.size, 0);
+});
+
 test('Stop invalidates a pending start without clearing a newer attempt', () => {
   const state = vm.createContext({
     outboundStarting: new Set(),

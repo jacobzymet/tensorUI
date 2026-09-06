@@ -213,7 +213,8 @@
               </button>
             </div>
           </header>
-          <div class="chat-viewport" id="chatViewport" tabindex="0">
+          <div class="chat-thread-stage" id="chatThreadStage">
+            <div class="chat-viewport" id="chatViewport" tabindex="0">
             <div class="empty-state" id="emptyState">
               <div class="empty-state-inner" id="emptyStateInner">
                 <canvas class="orb-mark" id="orbMark" role="img" aria-label="TensorMI Harness"></canvas>
@@ -325,6 +326,7 @@
             <div class="thread-wrap is-hidden" id="threadWrap">
               <div id="chatThread"></div>
             </div>
+          </div>
           </div>
           <div class="chat-composer-dock" id="composerDock"></div>
           <div class="chat-terminal" id="chatTerminal" aria-hidden="true" inert>
@@ -544,55 +546,6 @@
               </p>
               <span id="providerConnectionMark" class="is-hidden" aria-hidden="true"></span>
               <p id="providerError" class="field-hint provider-error is-hidden" role="alert"></p>
-            </div>
-
-            <div class="settings-section">
-              <h3 class="settings-section-title">Local LLMs</h3>
-              <p class="field-hint">Start a GGUF model on this machine with <code>org/repo:quant</code> from Hugging Face.</p>
-              <div id="localLlmMissing" class="is-hidden" role="status">
-                <p id="localLlmInstallDetail" class="field-hint">Checking for llama-server…</p>
-                <a class="btn btn-primary" id="localLlmInstallLink" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">Install llama.cpp</a>
-              </div>
-              <div id="localLlmBody" class="is-hidden">
-                <p id="localLlmReady" class="field-hint" title="">llama-server ready</p>
-                <div id="localLlmRunning" class="settings-data-card is-hidden" aria-live="polite">
-                  <strong id="localLlmRunningTitle">Running</strong>
-                  <p id="localLlmRunningDetail">—</p>
-                  <button type="button" class="btn btn-danger-ghost" id="btnStopLocalLlm">Stop</button>
-                </div>
-                <div id="localLlmControls">
-                  <div class="settings-row">
-                    <label class="field-label" for="localLlmHf">Model</label>
-                    <div>
-                      <div class="provider-inline-actions">
-                        <input class="field-input" id="localLlmHf" type="text" maxlength="256" placeholder="ggml-org/gpt-oss-120b-GGUF:Q4_K_M" autocomplete="off" spellcheck="false">
-                        <button type="button" class="btn btn-primary" id="btnStartLocalLlm">Start</button>
-                      </div>
-                      <p class="field-hint">Hugging Face id, including the quant.</p>
-                    </div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="field-label" for="localLlmPort">Port</label>
-                    <input class="field-input" id="localLlmPort" type="number" min="1" max="65535" value="8080">
-                  </div>
-                  <div class="settings-row">
-                    <label class="field-label" for="localLlmThreads">Threads</label>
-                    <input class="field-input" id="localLlmThreads" type="number" min="1" max="256" value="14">
-                  </div>
-                  <label class="field-check" for="localLlmMmap" title="Memory-map the GGUF on CPU so llama-server uses less RAM">
-                    <input type="checkbox" id="localLlmMmap" checked>
-                    <span>Memory-map the model <span style="color:var(--color-muted)">(less RAM on CPU)</span></span>
-                  </label>
-                  <p id="localLlmError" class="field-hint provider-error is-hidden" role="alert"></p>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-section is-hidden" id="localLlmCacheWrap">
-              <h3 class="settings-section-title">On this device</h3>
-              <p id="localLlmCacheHint" class="field-hint">Cached GGUFs</p>
-              <ul id="localLlmCacheList" class="provider-list" aria-live="polite"></ul>
-              <p id="localLlmCacheEmpty" class="field-hint">No cached models yet — start one above to download.</p>
             </div>
           </section>
 

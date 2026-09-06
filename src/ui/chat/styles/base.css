@@ -1073,6 +1073,7 @@ html:not(.ui-ready) .chat-sidebar {
     transparent 100%
   );
   animation: convo-spin 1.15s linear infinite;
+  animation-delay: var(--convo-busy-delay, 0ms);
 }
 @keyframes convo-spin {
   from { transform: translate(-50%, -50%) rotate(0deg); }

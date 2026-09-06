@@ -794,6 +794,11 @@ function hydrateModelPickerState() {
     ? settings.selectedChatModel
     : '';
   selectedRemoteModelId = selectedChatModel;
+  if (selectedChatModel && chatModelSelect) {
+    const parts = selectedChatModel.split('|').filter(Boolean);
+    chatModelSelect.textContent = parts[parts.length - 1] || 'Model';
+    chatModelSelect.title = 'Restoring saved model…';
+  }
   recentModelIds = normalizeModelIds(settings.recentModelIds, RECENT_MODELS_MAX);
   pinnedModelIds = normalizeModelIds(settings.pinnedModelIds, PINNED_MODELS_MAX);
   collapsedModelProviders = normalizeModelIds(settings.collapsedModelProviders, 64);
@@ -1666,6 +1671,9 @@ let serverReady = false;
  *     | {type:'tool', name:string, detail:string, result:string, note?:string, live:boolean}
  *   >,
  *   errorMessage: string|null,
+ *   startedAt: number,
+ *   statusLabel: string,
+ *   domMountCount: number,
  *   dom: null|{row:HTMLElement,statusEl:HTMLElement,thinkingLabel:HTMLElement,traceEl:HTMLElement,answerEl:HTMLElement,thinkingOrb:any},
  * }>}
  */

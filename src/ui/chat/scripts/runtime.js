@@ -132,17 +132,29 @@ function createStreamTyper(onPaint) {
   };
 }
 
+function selectedModelIsReady(data = latestState, modelId = selectedChatModel) {
+  const remote = selectedRemoteModel(data, modelId);
+  return !!(remote && remote.ready);
+}
+
 function updateSendEnabled() {
   const hasText = composerInput.value.trim() !== '';
   const hasFiles = pendingAttachments.length > 0;
   const hasQuote = !!(pendingReplyQuote && String(pendingReplyQuote).trim());
   const editingLive = !!(editingRow && !editingRow.classList.contains('msg-queued'));
   const botsDraft = typeof isBotsSurface === 'function' && isBotsSurface() && !activeId;
+  const modelReady = selectedModelIsReady();
   const canCompose = !diskEncryptionLocked()
     && serverReady
+    && modelReady
     && !botsDraft
     && (hasText || hasFiles || hasQuote || editingLive);
   btnSend.disabled = !canCompose;
+  const waitingLabel = selectedChatModel
+    ? 'Waiting for ' + modelIdLabel(selectedChatModel)
+    : 'Waiting for a model';
+  btnSend.title = modelReady ? 'Send message' : waitingLabel;
+  btnSend.setAttribute('aria-label', modelReady ? 'Send message' : waitingLabel);
   if (btnBranch) {
     const botsConvo = typeof isBotsConvo === 'function'
       && isBotsConvo(conversations.find((item) => item.id === activeId));
@@ -809,11 +821,15 @@ function catalogOptionFromRemote(model) {
 }
 
 /**
- * `remote_count` counts configured providers, not providers that returned models, so
- * a provider with an empty or failing catalog must not keep this permanently false.
+ * A catalog is complete only after every configured provider has been probed.
+ * The first host to answer must not look "done" — that used to overwrite the
+ * saved default model with whatever happened to arrive first, then persist it.
+ * An empty or failing catalog after a probe still counts as probed.
  */
 function modelCatalogIsComplete(network, options) {
-  return options.length > 0 && !network?.remote_checking;
+  return !!network?.remote_saved
+    && !network?.remote_checking
+    && !network?.remote_catalog_pending;
 }
 
 function resolveCollapsedProviderKey(savedKey, options) {
@@ -847,13 +863,26 @@ function syncModelSelector(data) {
 
   if (!remoteModels.length) {
     if (!menuOpen) closeModelMenu();
-    chatModelSelectWrap.classList.add('is-hidden');
+    if (selectedChatModel) {
+      const restoring = !!network.remote_checking || !!network.remote_catalog_pending;
+      chatModelSelectWrap.classList.remove('is-hidden');
+      chatModelSelect.textContent = modelIdLabel(selectedChatModel) || 'Model';
+      chatModelSelect.disabled = true;
+      chatModelSelect.toggleAttribute('aria-busy', restoring);
+      chatModelSelect.title = restoring
+        ? 'Restoring saved model…'
+        : 'Saved model is unavailable';
+    } else {
+      chatModelSelectWrap.classList.add('is-hidden');
+    }
     syncModelOriginPill(false);
     modelMenuOptions = [];
     if (!wasHidden) refreshStarfieldClearZone();
     return;
   }
   chatModelSelectWrap.classList.remove('is-hidden');
+  chatModelSelect.disabled = false;
+  chatModelSelect.removeAttribute('aria-busy');
   if (wasHidden) refreshStarfieldClearZone();
 
   const remoteOptions = remoteModels.map(catalogOptionFromRemote);
@@ -876,9 +905,10 @@ function syncModelSelector(data) {
     selectedChatModel = resolvedSelected;
     pickerChanged = true;
   }
-  const allValues = remoteOptions.map((o) => o.value);
   const catalogComplete = modelCatalogIsComplete(network, remoteOptions);
-  if ((!selectedChatModel || !allValues.includes(selectedChatModel)) && catalogComplete && !menuOpen) {
+  // Only invent a default when nothing is saved. A saved id that is not in
+  // this snapshot stays selected so a later provider catalog can match it.
+  if (!selectedChatModel && catalogComplete && !menuOpen) {
     selectedChatModel = remoteOptions[0].value;
     pickerChanged = true;
   }
@@ -898,16 +928,23 @@ function syncModelSelector(data) {
     renderModelMenuList();
   }
   const selected = remoteOptions.find((o) => o.value === selectedChatModel);
+  const selectionPending = !!selectedChatModel && !selected && !catalogComplete;
   if (!menuOpen) {
     chatModelSelect.textContent = selected
       ? selected.label
       : (modelIdLabel(selectedChatModel) || 'Model');
-    setIdentityTitle(
-      chatModelSelect,
-      selected
-        ? modelOptionTitle(selected.label, selected.provider)
-        : (selectedChatModel ? modelIdLabel(selectedChatModel) : '')
-    );
+    if (selectionPending) {
+      chatModelSelect.title = 'Restoring ' + modelIdLabel(selectedChatModel) + '…';
+      chatModelSelect.setAttribute('aria-busy', 'true');
+    } else {
+      chatModelSelect.removeAttribute('aria-busy');
+      setIdentityTitle(
+        chatModelSelect,
+        selected
+          ? modelOptionTitle(selected.label, selected.provider)
+          : (selectedChatModel ? modelIdLabel(selectedChatModel) : '')
+      );
+    }
   }
   selectedRemoteModelId = selectedChatModel;
   syncModelOriginPill(true, selected && selected.provider);
@@ -934,7 +971,7 @@ function selectedRemoteModel(data, modelId) {
   const matched = models.find((model) => model.id === resolved)
     || models.find((model) => model.id === saved);
   if (matched) return matched;
-  if (saved && !modelCatalogIsComplete(data?.network, options)) return null;
+  if (!modelCatalogIsComplete(data?.network, options)) return null;
   return saved ? null : (models[0] || null);
 }
 
@@ -984,21 +1021,31 @@ function updateInferenceState(data) {
     updateSendEnabled();
     return;
   }
-  const remoteOk = !!network.remote_ok || !!(network.remote_models || []).length;
   const remoteChecking = !!network.remote_checking
-    || (!!network.remote_saved && !remoteOk && !network.remote_kind && !(network.remote_models || []).length);
+    || (!!network.remote_saved
+      && !network.remote_ok
+      && !network.remote_kind
+      && !(network.remote_models || []).length);
   const remoteSelected = selectedRemoteModel(data);
-  const connected = !!(remoteSelected?.ready || remoteOk);
-  // Switching models can briefly look "checking" even though we already have a
-  // catalog to talk to. Don't disable Send/resend across that blip.
-  if (!(remoteChecking && !connected && serverReady && selectedChatModel)) {
-    serverReady = connected;
-  }
+  const catalogComplete = modelCatalogIsComplete(
+    network,
+    modelMenuOptions.length ? modelMenuOptions : (network.remote_models || []).map(catalogOptionFromRemote)
+  );
+  const selectionPending = !!network.remote_saved && !remoteSelected && !catalogComplete;
+  const selectionUnavailable = !!selectedChatModel && !remoteSelected && catalogComplete;
+  serverReady = !!remoteSelected?.ready;
 
-  if (remoteChecking) {
-    modelHintEl.textContent = '';
-    modelHintEl.classList.add('is-hidden');
-    hideComposerHint();
+  if (selectionPending || remoteChecking) {
+    const label = modelIdLabel(selectedChatModel);
+    const pendingText = label ? ('Connecting to ' + label + '…') : 'Loading models…';
+    modelHintEl.textContent = pendingText;
+    modelHintEl.classList.remove('is-hidden');
+    showComposerHint(pendingText);
+  } else if (selectionUnavailable) {
+    const unavailableText = modelIdLabel(selectedChatModel) + ' is unavailable. Choose another model.';
+    modelHintEl.textContent = unavailableText;
+    modelHintEl.classList.remove('is-hidden');
+    showComposerHint(unavailableText, { warn: true });
   } else if (!serverReady) {
     modelHintEl.textContent = '';
     modelHintEl.classList.add('is-hidden');
@@ -1095,7 +1142,15 @@ async function sendMessage({ branch = false } = {}) {
       speakerHandle: pendingReplyTarget.speakerHandle || '',
     }
     : null;
-  if ((!typed && !queuedFiles.length && !replyQuote) || !serverReady) return;
+  if (!typed && !queuedFiles.length && !replyQuote) return;
+  const selectedTurnRemote = selectedRemoteModel(latestState);
+  if (!serverReady || !selectedTurnRemote?.ready) {
+    const label = modelIdLabel(selectedChatModel);
+    showComposerHint(
+      label ? ('Still connecting to ' + label + '…') : 'Still loading models…'
+    );
+    return;
+  }
   if (!requireUnlockedData()) return;
 
   let source = conversations.find((item) => item.id === activeId);
@@ -1258,6 +1313,7 @@ function ensureStreamDom(convo, stream) {
   if (stream?.hardStopped) return null;
   if (activeId !== convo.id) return null;
   if (stream.dom && stream.dom.row.isConnected) return stream.dom;
+  const priorMounts = Number(stream.domMountCount) || 0;
 
   const assistantRow = document.createElement('div');
   assistantRow.className = 'msg msg-role-assistant';
@@ -1272,8 +1328,11 @@ function ensureStreamDom(convo, stream) {
   orbCanvas.className = 'orb-sm';
   const thinkingLabel = document.createElement('span');
   thinkingLabel.className = 'thinking-label';
-  thinkingLabel.dataset.base = 'Processing…';
-  thinkingLabel.textContent = streamStatusLabel(stream, 'Processing…');
+  const statusBase = String(stream.statusLabel || 'Processing…').trim() || 'Processing…';
+  thinkingLabel.dataset.base = statusBase;
+  thinkingLabel.textContent = streamStatusLabel(stream, statusBase);
+  const elapsed = Math.max(0, Date.now() - (Number(stream.startedAt) || Date.now()));
+  thinkingLabel.style.animationDelay = '-' + (elapsed % 1500) + 'ms';
   statusEl.appendChild(orbCanvas);
   statusEl.appendChild(thinkingLabel);
 
@@ -1301,8 +1360,11 @@ function ensureStreamDom(convo, stream) {
   const followUp = chatThread.querySelector('.msg-queued');
   if (followUp) chatThread.insertBefore(assistantRow, followUp);
   else chatThread.appendChild(assistantRow);
-  queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
+  if (priorMounts === 0) {
+    queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
+  }
   const thinkingOrb = mountOrb(orbCanvas, 20);
+  stream.domMountCount = priorMounts + 1;
   stream.dom = {
     row: assistantRow,
     statusEl,
@@ -1703,9 +1765,13 @@ async function runAssistantTurn(convo, {
     && !outboundStartIsCurrent(convo.id, startEpoch)) {
     return false;
   }
-  if (!serverReady) {
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
+  const speakerModelId = speakerBot && speakerBot.model ? speakerBot.model : selectedChatModel;
+  const remote = selectedRemoteModel(latestState, speakerModelId);
+  if (!remote?.ready) {
     if (typeof showComposerHint === 'function') {
-      showComposerHint('Model is not ready yet. Try Send again.');
+      const label = modelIdLabel(speakerModelId);
+      showComposerHint(label ? ('Still connecting to ' + label + '…') : 'Model is not ready yet.');
     }
     return false;
   }
@@ -1783,6 +1849,7 @@ async function runAssistantTurn(convo, {
     deepResearchOutput,
     turnSkills,
     turnForceTools,
+    turnModel: remote.model,
     speakerBotId: speakerBotId || null,
     loopPhase,
   });
@@ -1792,7 +1859,6 @@ async function runAssistantTurn(convo, {
   stream.skipQueue = !!skipQueue;
   syncStreamSpeakerChrome(convo, stream);
 
-  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
   stream.speakerModelId = speakerBot && speakerBot.model ? speakerBot.model : null;
   let apiMessages;
   if (speakerBot && typeof botApiMessages === 'function') {
@@ -1824,7 +1890,6 @@ async function runAssistantTurn(convo, {
     apiMessages.unshift({ role: 'system', content: systemParts.join('\n\n') });
   }
 
-  const remote = selectedRemoteModel(latestState, stream.speakerModelId);
   const speakerEffort = typeof thinkingEffortForModel === 'function'
     ? thinkingEffortForModel(remote)
     : (thinkingSupported && activeThinkingEffort !== 'auto' ? activeThinkingEffort : null);
@@ -1890,7 +1955,7 @@ async function runAssistantTurn(convo, {
         return;
       }
     } else {
-      stream.errorMessage = error.message || 'The request failed.';
+      stream.errorMessage = contextualModelError(error.message, stream.turnModel);
     }
   }
   await driveAssistantSse(convo, stream, response);
@@ -1977,7 +2042,7 @@ async function resumeLiveTurns(list) {
   if (!Array.isArray(list) || diskEncryptionLocked() || !storageReady) return;
   for (const info of list) {
     const id = info && String(info.conversation_id || '').trim();
-    if (!id || activeStreams.has(id)) continue;
+    if (!id || activeStreams.has(id) || outboundStarting.has(id)) continue;
     if (typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) {
       continue;
     }
@@ -2006,7 +2071,7 @@ async function resumeLiveTurns(list) {
 }
 
 async function attachLiveTurn(convo, info) {
-  if (!convo || activeStreams.has(convo.id) || !serverReady) return;
+  if (!convo || activeStreams.has(convo.id) || outboundStarting.has(convo.id) || !serverReady) return;
   if (typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) return;
   beginLiveStream(convo, {
     useAgent: !!info?.agent,
@@ -2026,6 +2091,7 @@ async function attachLiveTurn(convo, info) {
     });
     if (!response.ok) {
       if (response.status === 404) {
+        discardLiveStreamRow(stream);
         finishLiveStream(convo.id, stream);
         return;
       }
@@ -2073,6 +2139,9 @@ function beginLiveStream(convo, {
     catchingUp: !!catchingUp,
     turnId: turnId || null,
     turnModel: String(turnModel || ''),
+    startedAt: Date.now(),
+    statusLabel: 'Processing…',
+    domMountCount: 0,
     speakerBotId: speakerBotId || null,
     loopPhase: loopPhase && typeof loopPhase === 'object' ? { ...loopPhase } : null,
     convoId: convo.id,
@@ -2107,8 +2176,10 @@ function streamStatusLabel(stream, base) {
 }
 
 function setStreamThinkingLabel(stream, base) {
-  if (!stream?.dom?.thinkingLabel) return;
+  if (!stream) return;
   const baseLabel = String(base || 'Processing…').trim() || 'Processing…';
+  stream.statusLabel = baseLabel;
+  if (!stream.dom?.thinkingLabel) return;
   stream.dom.thinkingLabel.dataset.base = baseLabel;
   const next = streamStatusLabel(stream, baseLabel);
   if (stream.dom.thinkingLabel.textContent !== next) {
@@ -2144,7 +2215,9 @@ function discardLiveStreamRow(stream) {
 
 async function driveAssistantSse(convo, stream, response) {
   const remote = selectedRemoteModel(latestState, stream.speakerModelId);
-  const fallbackTurnModel = String(remote?.model || latestState?.network?.remote_model || 'model').trim();
+  const fallbackTurnModel = String(
+    stream.turnModel || remote?.model || latestState?.network?.remote_model || 'model'
+  ).trim();
   const usageStats = {
     completionTokens: 0,
     promptTokens: 0,
@@ -2154,18 +2227,16 @@ async function driveAssistantSse(convo, stream, response) {
   let firstTokenAt = null;
 
   const typer = createStreamTyper((replyText, streaming) => {
-    if (activeId === convo.id && stream.dom) {
-      const nextLabel = isThinkingOpen(replyText)
-        ? 'Reasoning…'
-        : stream.useAgent
-          ? (stream.deepResearch
-            ? (stream.deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
-            : 'Writing answer')
-          : (replyText && replyText.trim())
-            ? 'Writing…'
-            : 'Processing…';
-      setStreamThinkingLabel(stream, nextLabel);
-    }
+    const nextLabel = isThinkingOpen(replyText)
+      ? 'Reasoning…'
+      : stream.useAgent
+        ? (stream.deepResearch
+          ? (stream.deepResearchOutput === 'brief' ? 'Writing brief' : 'Writing report')
+          : 'Writing answer')
+        : (replyText && replyText.trim())
+          ? 'Writing…'
+          : 'Processing…';
+    setStreamThinkingLabel(stream, nextLabel);
     paintStreamIntoView(convo, stream, replyText, streaming);
   });
   const markFirstToken = () => {
@@ -2186,9 +2257,7 @@ async function driveAssistantSse(convo, stream, response) {
       commitStreamBuffer(stream, typer);
       if (stream.dom) stream.dom.row.dataset.raw = '';
       const part = upsertLiveToolPart(stream, payload);
-      if (stream.dom) {
-        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
-      }
+      setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
     } else if (payload.phase === 'tool_approval') {
       const part = upsertLiveToolPart(stream, payload);
       if (part) {
@@ -2196,9 +2265,7 @@ async function driveAssistantSse(convo, stream, response) {
         part.approvalRisk = payload.risk ? String(payload.risk) : (part.approvalRisk || 'write');
         part.executing = false;
       }
-      if (stream.dom) {
-        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
-      }
+      setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'tool_executing') {
       const part = upsertLiveToolPart(stream, payload);
@@ -2206,9 +2273,7 @@ async function driveAssistantSse(convo, stream, response) {
         part.approval = 'allowed';
         part.executing = true;
       }
-      if (stream.dom) {
-        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
-      }
+      setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'terminal') {
       if (typeof onAgentTerminalEvent === 'function') onAgentTerminalEvent(payload);
@@ -2289,9 +2354,7 @@ async function driveAssistantSse(convo, stream, response) {
         if (!stream.images) stream.images = Object.create(null);
         stream.images[String(payload.image_id)] = String(payload.image);
       }
-      if (stream.dom) {
-        setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
-      }
+      setStreamThinkingLabel(stream, liveToolStatusLabel(stream, payload));
       if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'clarify') {
       commitStreamBuffer(stream, typer);
@@ -2308,8 +2371,8 @@ async function driveAssistantSse(convo, stream, response) {
         submitting: false,
       };
       stream.timeline.push(clarifyPart);
+      setStreamThinkingLabel(stream, 'Waiting for your answers…');
       if (stream.dom) {
-        setStreamThinkingLabel(stream, 'Waiting for your answers…');
         mountClarifyForm(stream, clarifyPart);
       }
       if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
@@ -2322,7 +2385,7 @@ async function driveAssistantSse(convo, stream, response) {
         part.summary = String(payload.summary || '').trim();
         mountClarifyForm(stream, part);
       }
-      if (stream.dom) setStreamThinkingLabel(stream, 'Researching…');
+      setStreamThinkingLabel(stream, 'Researching…');
       if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
     } else if (payload.phase === 'steer_ready' && payload.id) {
       stream.steerId = String(payload.id);
@@ -2347,12 +2410,12 @@ async function driveAssistantSse(convo, stream, response) {
       const entry = entryIdx >= 0 ? pending.splice(entryIdx, 1)[0] : null;
       if (entry) entry.applied = true;
       applySteeredEntry(convo, stream, text, entry);
-      if (stream.dom) setStreamThinkingLabel(stream, 'Steering…');
+      setStreamThinkingLabel(stream, 'Steering…');
     } else if (payload.phase === 'status' && payload.message) {
       const msg = String(payload.message);
       const waiting = /waiting for (your )?approval/i.test(msg);
       const canAsk = stream.timeline.some((part) => part.type === 'tool' && part.approval === 'pending');
-      if (stream.dom && (!waiting || canAsk)) {
+      if (!waiting || canAsk) {
         setStreamThinkingLabel(stream, msg);
       }
     } else if (payload.phase === 'notice' && payload.message) {
@@ -2360,7 +2423,7 @@ async function driveAssistantSse(convo, stream, response) {
       if (text && !stream.timeline.some((part) => part.type === 'notice' && part.content === text)) {
         stream.timeline.push({ type: 'notice', content: text });
       }
-      if (stream.dom && text) setStreamThinkingLabel(stream, text);
+      if (text) setStreamThinkingLabel(stream, text);
     }
     paintStreamIntoView(convo, stream, typer.shown, true);
   };
@@ -2408,9 +2471,15 @@ async function driveAssistantSse(convo, stream, response) {
           }
           if (parsed.event === 'error') {
             try {
-              stream.errorMessage = JSON.parse(parsed.data).error || parsed.data;
+              stream.errorMessage = contextualModelError(
+                JSON.parse(parsed.data).error || parsed.data,
+                stream.turnModel || fallbackTurnModel
+              );
             } catch {
-              stream.errorMessage = parsed.data;
+              stream.errorMessage = contextualModelError(
+                parsed.data,
+                stream.turnModel || fallbackTurnModel
+              );
             }
             continue;
           }
@@ -2460,7 +2529,10 @@ async function driveAssistantSse(convo, stream, response) {
         return;
       }
     } else {
-      stream.errorMessage = error.message || 'The request failed.';
+      stream.errorMessage = contextualModelError(
+        error.message,
+        stream.turnModel || fallbackTurnModel
+      );
     }
   }
 

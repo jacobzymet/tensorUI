@@ -82,10 +82,36 @@
   display: flex;
   flex-direction: column;
 }
-.chat-column > .chat-viewport {
+.chat-thread-stage {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chat-thread-stage > .chat-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+#chatThread > .msg.msg-role-user:not(.msg-queued) {
+  position: sticky;
+  top: 0.45rem;
+  z-index: 6;
+  container-type: scroll-state;
+  pointer-events: none;
+}
+#chatThread > .msg.msg-role-user:not(.msg-queued) > * {
+  pointer-events: auto;
+}
+@container scroll-state(stuck: top) {
+  .msg.msg-role-user:not(.msg-queued) > .msg-bubble {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
 }
 /* Activity timeline for the selected assistant turn (desktop). */
 .trace-sidebar {

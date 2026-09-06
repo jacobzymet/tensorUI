@@ -7,10 +7,9 @@ A more permissive alternative to [Open WebUI](https://github.com/open-webui/open
 - OpenAI-compatible and Anthropic Messages–compatible providers, local or cloud
 - Chats, projects, Loops (multi-model group chats), memory, model pins, and attachments
 - Agent mode with approvals, web search, URL fetching, deep research, browser control, filesystem access, terminal access, and custom skills
-- Optional local GGUF model management through an installed `llama-server`
 - Passphrase-based encryption at rest for chats, preferences, provider credentials, and skills
 
-TensorMI does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anthropic, or another compatible endpoint; or install `llama-server` and launch a Hugging Face/GGUF model from **Settings → Providers → Local LLMs**.
+TensorMI does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anthropic, or another compatible endpoint.
 
 ## Install and run
 
@@ -42,7 +41,6 @@ Default URL: `http://tensormi.localhost:3930`. `/settings` redirects to **Settin
 sudo apt install pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
-- Using **Local LLMs** requires `llama-server` on `PATH`, or `TENSORUI_LLAMA_SERVER` set to its executable.
 - The optional browser-control tool requires Chrome or Edge.
 
 ## Web search

@@ -375,6 +375,14 @@ function renderMemoryNoticesHtml(message) {
   );
 }
 
+function contextualModelError(message, model) {
+  const detail = String(message || 'The request failed.').trim();
+  if (!/\b404\b|not found/i.test(detail)) return detail;
+  const label = String(model || '').trim() || 'the selected model';
+  return 'The provider returned 404 for ' + label
+    + '. Check its Base URL and model ID in Settings > Providers.';
+}
+
 function renderAssistantMessage(message, { streaming = false, collapseTimeline = null, notesCollapsed = true } = {}) {
   const previousImages = markdownImages;
   setMarkdownImages(message && message.images);
@@ -399,6 +407,10 @@ function renderAssistantMessage(message, { streaming = false, collapseTimeline =
 
     if (!timelineHtml) {
       if (processNotesHtml || memoryHtml) return finalHtml;
+      if (message?.error) {
+        const error = contextualModelError(message.error, message.model);
+        return '<div class="agent-final-answer msg-error">' + escapeHtml(error) + '</div>';
+      }
       return message.content
         ? renderAssistantHtml(message.content, { streaming: false }) + memoryHtml
         : finalHtml;
@@ -407,7 +419,8 @@ function renderAssistantMessage(message, { streaming = false, collapseTimeline =
     if (isDesktopTraceLayout()) {
       if (finalHtml) return finalHtml;
       if (message?.error) {
-        return '<div class="agent-final-answer msg-error">' + escapeHtml(message.error) + '</div>';
+        const error = contextualModelError(message.error, message.model);
+        return '<div class="agent-final-answer msg-error">' + escapeHtml(error) + '</div>';
       }
       return '<div class="agent-final-answer msg-error">No response.</div>';
     }
@@ -2284,12 +2297,30 @@ function bindConvoListReorder(listEl) {
   });
 }
 
+const CONVO_BUSY_CYCLE_MS = 1150;
+const convoBusyAnimationStartedAt = new Map();
+
+function syncConvoBusyRingPhase(ring, convoId) {
+  if (!ring || !convoId) return;
+  let startedAt = convoBusyAnimationStartedAt.get(convoId);
+  if (!startedAt) {
+    startedAt = Number(activeStreams.get(convoId)?.startedAt) || Date.now();
+    convoBusyAnimationStartedAt.set(convoId, startedAt);
+  }
+  const elapsed = Math.max(0, Date.now() - startedAt);
+  ring.style.setProperty('--convo-busy-delay', '-' + (elapsed % CONVO_BUSY_CYCLE_MS) + 'ms');
+}
+
 function syncSidebarBusyUi() {
   document.querySelectorAll('.convo-item[data-convo-id]').forEach((item) => {
-    const busy = typeof isConvoBusy === 'function' && isConvoBusy(item.dataset.convoId);
+    const convoId = item.dataset.convoId;
+    const busy = typeof isConvoBusy === 'function' && isConvoBusy(convoId);
     item.classList.toggle('is-streaming', busy);
     if (busy) item.setAttribute('aria-busy', 'true');
-    else item.removeAttribute('aria-busy');
+    else {
+      item.removeAttribute('aria-busy');
+      convoBusyAnimationStartedAt.delete(convoId);
+    }
     let ring = item.querySelector(':scope > .convo-busy-ring');
     if (busy && !ring) {
       ring = document.createElement('span');
@@ -2299,6 +2330,7 @@ function syncSidebarBusyUi() {
     } else if (!busy && ring) {
       ring.remove();
     }
+    if (busy && ring) syncConvoBusyRingPhase(ring, convoId);
   });
 }
 
@@ -2310,13 +2342,16 @@ function createConvoItem(convo, { nested = false } = {}) {
   if (notificationIsUnread(convo)) item.classList.add('has-unread');
   item.dataset.convoId = convo.id;
   if (nested) item.classList.add('is-nested');
-  if (isConvoBusy(convo.id)) item.classList.add('is-streaming');
+  const busy = isConvoBusy(convo.id);
+  if (busy) item.classList.add('is-streaming');
+  else convoBusyAnimationStartedAt.delete(convo.id);
   const fullTitle = convo.title || (convo.incognito ? 'Ghost Chat' : 'New chat');
   const botsConvoItem = typeof isBotsConvo === 'function' && isBotsConvo(convo);
-  if (isConvoBusy(convo.id)) {
+  if (busy) {
     const ring = document.createElement('span');
     ring.className = 'convo-busy-ring';
     ring.setAttribute('aria-hidden', 'true');
+    syncConvoBusyRingPhase(ring, convo.id);
     item.appendChild(ring);
     item.setAttribute('aria-busy', 'true');
   }

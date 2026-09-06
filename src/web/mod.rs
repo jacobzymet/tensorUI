@@ -334,10 +334,6 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             axum::routing::patch(update_provider).delete(delete_provider),
         )
         .route("/api/providers/{id}/activate", post(activate_provider))
-        .route("/api/local-llms", get(local_llms_status))
-        .route("/api/local-llms/cache", get(local_llms_cache))
-        .route("/api/local-llms/start", post(local_llms_start))
-        .route("/api/local-llms/stop", post(local_llms_stop))
         .route("/api/focus", post(focus))
         .route("/api/open-url", post(open_url))
         .route("/api/data", get(data_info).post(set_storage_mode))
@@ -781,14 +777,8 @@ async fn chat_completions(
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
-    if let Some(id) = conversation_id.as_deref()
-        && let Some(existing) = crate::live::hub().info(id)
-        && !existing.finished
-    {
-        return Err(ApiError::conflict(
-            "A response is already in progress for that conversation.",
-        ));
-    }
+    // LiveHub::start atomically checks whether an existing turn blocks this one.
+    // A cancelled turn may still be finishing teardown and is replaceable.
     let stream = match serde_json::from_value::<AgentRequest>(body.clone()) {
         Ok(mut request) if agent::should_run_agent(&request, &user_skills) => {
             if request.messages.is_empty() {
@@ -1327,107 +1317,6 @@ async fn activate_provider(
 }
 
 #[derive(Debug, Serialize)]
-struct LocalLlmsStatusResponse {
-    install: crate::local_llm::LlamaServerInstall,
-    running: Option<crate::local_llm::RunningLocalLlm>,
-    default_threads: u32,
-    default_port: u16,
-    cache_dir: Option<String>,
-    state: AppState,
-}
-
-#[derive(Debug, Serialize)]
-struct LocalLlmsCacheResponse {
-    cache_dir: Option<String>,
-    models: Vec<crate::local_llm::CachedModel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StartLocalLlmBody {
-    #[serde(default)]
-    hf: Option<String>,
-    #[serde(default)]
-    model_path: Option<String>,
-    #[serde(default = "default_true")]
-    mmap: bool,
-    #[serde(default)]
-    port: Option<u16>,
-    #[serde(default)]
-    threads: Option<u32>,
-}
-
-async fn local_llms_status(
-    State(app): State<SharedApp>,
-) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
-    let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    let install = crate::local_llm::detect_llama_server();
-    let running = app.local_llm.status();
-    let cache_dir = crate::local_llm::llama_cache_dir()
-        .ok()
-        .map(|p| p.display().to_string());
-    let default_threads = std::thread::available_parallelism()
-        .map(|n| n.get() as u32)
-        .unwrap_or(4)
-        .saturating_sub(2)
-        .max(1);
-    Ok(Json(LocalLlmsStatusResponse {
-        install,
-        running,
-        default_threads,
-        default_port: 8080,
-        cache_dir,
-        state: AppState::from_app(&app),
-    }))
-}
-
-async fn local_llms_cache(
-    State(_app): State<SharedApp>,
-) -> Result<Json<LocalLlmsCacheResponse>, ApiError> {
-    let models = crate::local_llm::list_cached_models().map_err(ApiError::bad_request)?;
-    let cache_dir = crate::local_llm::llama_cache_dir()
-        .ok()
-        .map(|p| p.display().to_string());
-    Ok(Json(LocalLlmsCacheResponse { cache_dir, models }))
-}
-
-async fn local_llms_start(
-    State(app): State<SharedApp>,
-    Json(body): Json<StartLocalLlmBody>,
-) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
-    {
-        let mut app = app.lock().map_err(|_| ApiError::lock())?;
-        let meta = crate::local_llm::start_local_llm(
-            &mut app.local_llm,
-            crate::local_llm::StartLocalLlm {
-                hf: body.hf,
-                model_path: body.model_path,
-                mmap: body.mmap,
-                port: body.port,
-                threads: body.threads,
-                host: Some("127.0.0.1".into()),
-            },
-        )
-        .map_err(ApiError::bad_request)?;
-        if let Err(error) = app.ensure_local_llama_provider(&meta.base_url) {
-            let _ = app.local_llm.stop();
-            return Err(ApiError::bad_request(error));
-        }
-    }
-    schedule_provider_cache_warm(Arc::clone(&app));
-    local_llms_status(State(app)).await
-}
-
-async fn local_llms_stop(
-    State(app): State<SharedApp>,
-) -> Result<Json<LocalLlmsStatusResponse>, ApiError> {
-    {
-        let mut app = app.lock().map_err(|_| ApiError::lock())?;
-        app.local_llm.stop().map_err(ApiError::bad_request)?;
-    }
-    local_llms_status(State(app)).await
-}
-
-#[derive(Debug, Serialize)]
 struct DataInfo {
     storage: &'static str,
     browser_storage: bool,
@@ -1807,6 +1696,7 @@ struct NetworkSummary {
     remote_saved: bool,
     remote_ok: bool,
     remote_checking: bool,
+    remote_catalog_pending: bool,
     remote_kind: Option<&'static str>,
     remote_error: Option<String>,
     remote_model: Option<String>,
@@ -1828,6 +1718,7 @@ impl NetworkSummary {
             remote_saved: false,
             remote_ok: false,
             remote_checking: false,
+            remote_catalog_pending: false,
             remote_kind: None,
             remote_error: None,
             remote_model: None,
@@ -1862,6 +1753,7 @@ impl NetworkSummary {
             None
         };
         let catalog_known = remote_saved && app.remote_model_catalog_peek().is_some();
+        let remote_catalog_pending = remote_saved && app.remote_catalogs_pending();
         let remote_models = if remote_saved {
             app.remote_model_catalog_cached()
         } else {
@@ -1884,6 +1776,7 @@ impl NetworkSummary {
             remote_saved,
             remote_ok,
             remote_checking,
+            remote_catalog_pending,
             remote_kind: if remote_checking {
                 Some("checking")
             } else if !remote_models.is_empty() {
@@ -2050,7 +1943,6 @@ mod tests {
             (Method::GET, "/api/data/store"),
             (Method::GET, "/api/data/preferences"),
             (Method::GET, "/api/skills"),
-            (Method::GET, "/api/local-llms"),
             (Method::POST, "/api/data/open"),
             (Method::POST, "/api/data/encryption/lock"),
             (Method::POST, "/api/ui/appearance"),

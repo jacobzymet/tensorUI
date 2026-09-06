@@ -70,38 +70,6 @@ where
     })
 }
 
-pub fn stream_completion(
-    api_base: &str,
-    api_key: Option<&str>,
-    mut payload: serde_json::Value,
-) -> ChatStream {
-    let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
-    let token = api_key
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .unwrap_or("")
-        .to_string();
-    let api_base = api_base.to_string();
-    stream_from_worker(move |tx| async move {
-        if let Some(object) = payload.as_object_mut() {
-            object.insert("stream".into(), serde_json::json!(true));
-            object
-                .entry("model")
-                .or_insert_with(|| serde_json::json!("local"));
-        }
-        proxy_openai_sse(
-            &api_base,
-            &url,
-            &token,
-            &payload,
-            &tx,
-            "llama-server",
-            false,
-        )
-        .await
-    })
-}
-
 pub fn stream_remote_completion(
     api_base: &str,
     token: &str,

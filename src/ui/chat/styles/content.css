@@ -871,17 +871,6 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   font-size: var(--text-xs);
 }
 .provider-card .field-hint { margin: 0; }
-.provider-inline-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-.provider-inline-actions .field-input {
-  flex: 1 1 12rem;
-  min-width: 0;
-}
-.provider-inline-actions .btn { flex: 0 0 auto; }
 .connection-test {
   display: grid;
   gap: 0.15rem;
@@ -891,26 +880,6 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
 .connection-test.is-fail strong,
 .provider-error { color: var(--color-danger); }
 .connection-test.is-checking strong { color: var(--color-accent); }
-#localLlmMissing,
-#localLlmBody {
-  display: grid;
-  gap: 1rem;
-  justify-items: start;
-}
-#localLlmBody { justify-items: stretch; }
-#localLlmControls {
-  display: grid;
-  gap: 1rem;
-}
-#localLlmControls.is-disabled {
-  opacity: 0.55;
-  pointer-events: none;
-}
-#localLlmCacheHint {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .settings-pane-title {
   font-family: var(--font-display);
   font-size: var(--text-xl);
