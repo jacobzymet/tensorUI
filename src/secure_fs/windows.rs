@@ -97,6 +97,20 @@ mod tests {
         DACL_SECURITY_INFORMATION,
     };
 
+    fn contains_user_ace(sddl: &str, sid: &str) -> bool {
+        sddl.contains(&format!(";;;{sid})"))
+            // Windows canonicalizes the local Administrator account's RID 500
+            // SID to the equivalent well-known SDDL alias on some hosts.
+            || (sid.ends_with("-500") && sddl.contains(";;;LA)"))
+    }
+
+    #[test]
+    fn local_administrator_alias_matches_only_the_rid_500_user() {
+        let sddl = "D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)";
+        assert!(contains_user_ace(sddl, "S-1-5-21-1-2-3-500"));
+        assert!(!contains_user_ace(sddl, "S-1-5-21-1-2-3-1001"));
+    }
+
     #[test]
     fn private_files_and_directories_have_protected_user_only_acls() {
         let temp = tempfile::tempdir().unwrap();
@@ -141,7 +155,7 @@ mod tests {
                 LocalFree(descriptor);
                 assert!(text.starts_with("D:P"), "{text}");
                 assert_eq!(text.matches("(A;").count(), 2, "{text}");
-                assert!(text.contains(&user_sid().unwrap()), "{text}");
+                assert!(contains_user_ace(&text, &user_sid().unwrap()), "{text}");
                 assert!(text.contains(";;;SY)"), "{text}");
             }
         }
