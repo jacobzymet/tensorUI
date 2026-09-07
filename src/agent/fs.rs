@@ -839,14 +839,17 @@ fn resolve_under(root: &Path, raw: &str) -> Result<PathBuf, String> {
     } else {
         root.join(normalized)
     };
+    // Reject lexical escapes before resolving existing components. On a
+    // case-insensitive filesystem, canonicalizing `../workspace` can map it
+    // back to a root named `Workspace` and hide that the input left the root.
+    if !is_within(root, &prefix) {
+        return Err("Path is outside the workspace.".into());
+    }
     if let Ok(canon) = canonicalize_existing_prefix(&prefix) {
         if !is_within(root, &canon) {
             return Err("Path is outside the workspace.".into());
         }
         return Ok(canon);
-    }
-    if !is_within(root, &prefix) {
-        return Err("Path is outside the workspace.".into());
     }
     Ok(prefix)
 }
