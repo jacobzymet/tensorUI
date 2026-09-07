@@ -11,6 +11,7 @@ pub mod live;
 pub mod prompts;
 pub mod providers;
 pub mod secure_fs;
+mod session;
 pub mod store;
 pub mod system;
 pub mod updates;

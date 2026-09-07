@@ -94,6 +94,17 @@ let pendingReplyTarget = null;
 let attachmentsSupported = false;
 let modelContextLength = null;
 let tesseractLoading = null;
+let ocrEpoch = 0;
+let ocrAbortController = new AbortController();
+const ocrWorkers = new Set();
+
+function cancelOcrWorkers() {
+  ocrEpoch += 1;
+  ocrAbortController.abort();
+  ocrAbortController = new AbortController();
+  for (const worker of ocrWorkers) void worker.terminate().catch(() => {});
+  ocrWorkers.clear();
+}
 
 function selectedModelMeta() {
   const remote = selectedRemoteModel(latestState);
@@ -502,13 +513,13 @@ async function ensureTesseract() {
   if (tesseractLoading) return tesseractLoading;
   tesseractLoading = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.src = '/ocr/tesseract.min.js';
     script.async = true;
     script.onload = () => {
       if (window.Tesseract) resolve(window.Tesseract);
       else reject(new Error('Tesseract.js failed to load'));
     };
-    script.onerror = () => reject(new Error('Could not load OCR engine (network required the first time)'));
+    script.onerror = () => { script.remove(); reject(new Error('Could not load the bundled OCR engine')); };
     document.head.appendChild(script);
   }).finally(() => {
     // keep resolved module on window; allow retry on hard failure
@@ -522,11 +533,34 @@ async function ensureTesseract() {
 }
 
 async function ocrAttachmentImage(att) {
+  const epoch = ocrEpoch;
+  const signal = ocrAbortController.signal;
   const Tesseract = await ensureTesseract();
-  const result = await Tesseract.recognize(att.dataUrl || att.previewUrl, 'eng', {
+  if (epoch !== ocrEpoch) throw new Error('OCR cancelled');
+  const worker = await Tesseract.createWorker('eng', 1, {
+    workerPath: new URL('/ocr/worker.min.js', location.origin).href,
+    corePath: new URL('/ocr', location.origin).href,
+    langPath: new URL('/ocr', location.origin).href,
+    workerBlobURL: false,
+    cacheMethod: 'none',
     logger: () => {},
   });
-  return String(result?.data?.text || '').trim();
+  ocrWorkers.add(worker);
+  let onAbort;
+  try {
+    if (epoch !== ocrEpoch) throw new Error('OCR cancelled');
+    const cancelled = new Promise((_, reject) => {
+      onAbort = () => reject(new Error('OCR cancelled'));
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const result = await Promise.race([worker.recognize(att.dataUrl || att.previewUrl), cancelled]);
+    if (epoch !== ocrEpoch) throw new Error('OCR cancelled');
+    return String(result?.data?.text || '').trim();
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+    ocrWorkers.delete(worker);
+    await worker.terminate().catch(() => {});
+  }
 }
 
 async function prepareAttachmentsForSend(attachments) {

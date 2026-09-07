@@ -118,6 +118,8 @@ Enable encryption under **Settings → Local Data**. TensorMI derives a 256-bit 
 
 The protection covers offline confidentiality and integrity of chats, preferences, provider definitions and credentials, and skills. It does not protect plaintext copies or backups made before encryption, filesystem snapshots, malware or another process in the logged-in session, rollback to an older complete encrypted data set, memory forensics while unlocked, forgotten passphrases, or hardware failure. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems. **Forgotten passphrases cannot be recovered.**
 
+Workspace files, terminal history, downloads, OS caches, and browser profiles from older versions are outside this encryption boundary. Agent browsing now uses isolated temporary private contexts, cleaned up on lock and normal shutdown. Windows app data files and directories receive protected ACLs for the current user and LocalSystem, including custom locations. See [the security review](SECURITY_REVIEW.md) for hardening changes, dependency findings, and validation limits.
+
 ## Build and verify
 
 ```powershell

@@ -19,7 +19,7 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::secure_fs;
 
@@ -244,11 +244,10 @@ pub fn is_envelope(value: &Value) -> bool {
 }
 
 pub fn encrypt_value(key: &DiskKey, value: &Value, aad: &[u8]) -> Result<Value> {
-    let mut plaintext =
-        serde_json::to_vec(value).context("could not serialize JSON for encryption")?;
-    let envelope = encrypt_bytes(key, &plaintext, aad)?;
-    plaintext.zeroize();
-    Ok(envelope)
+    let plaintext = Zeroizing::new(
+        serde_json::to_vec(value).context("could not serialize JSON for encryption")?,
+    );
+    encrypt_bytes(key, &plaintext, aad)
 }
 
 fn encrypt_bytes(key: &DiskKey, plaintext: &[u8], aad: &[u8]) -> Result<Value> {

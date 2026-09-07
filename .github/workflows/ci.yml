@@ -42,7 +42,11 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -54,6 +58,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Install WebKitGTK
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -64,6 +69,10 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+      - name: Backported GLib iterator regression tests (optimized)
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path vendor/glib/Cargo.toml --release variant_str_iter
 
   fmt:
     name: Format
@@ -78,4 +87,4 @@ jobs:
           components: rustfmt
 
       - name: rustfmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt --package tensorui -- --check

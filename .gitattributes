@@ -1,0 +1,2 @@
+# Bundled runtime assets retain the exact bytes recorded in their manifest.
+src/ui/vendor/ocr/* -text

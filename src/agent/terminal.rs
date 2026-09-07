@@ -150,6 +150,7 @@ pub async fn open_session(
     cols: u16,
     rows: u16,
 ) -> Result<OpenedSession, String> {
+    let lease = crate::session::lease()?;
     let ws = Workspace::open(workspace_root)?;
     let cwd = PathBuf::from(ws.root_display());
     let display = ws.root_display();
@@ -178,10 +179,14 @@ pub async fn open_session(
     )?;
 
     let mut map = sessions().lock().await;
-    if map.len() >= MAX_LIVE_SESSIONS {
+    if !lease.valid() || map.len() >= MAX_LIVE_SESSIONS {
         let _ = to_pty_tx.send(ToPty::Shutdown);
         kill_process_tree(pid);
-        return Err("Too many terminals open. Close one first.".into());
+        return Err(if !lease.valid() {
+            "Encrypted local data is locked.".into()
+        } else {
+            "Too many terminals open. Close one first.".into()
+        });
     }
     let used: Vec<String> = map.values().map(|slot| slot.title.clone()).collect();
     let title = next_title(&used);
@@ -227,6 +232,25 @@ pub async fn attach_session(id: &str) -> Option<SessionIo> {
         stdout,
         replay,
     })
+}
+
+pub async fn close_all_sessions() {
+    let slots: Vec<_> = sessions()
+        .lock()
+        .await
+        .drain()
+        .map(|(_, slot)| slot)
+        .collect();
+    for slot in slots {
+        let _ = slot.to_pty.send(ToPty::Shutdown);
+        let pid = slot.pid.load(Ordering::Relaxed);
+        let _ = tokio::task::spawn_blocking(move || kill_process_tree(pid)).await;
+        slot.replay
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+    }
+    commands::close_all().await;
 }
 
 pub async fn run_agent_command(

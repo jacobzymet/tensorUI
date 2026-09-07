@@ -3216,6 +3216,8 @@ function renderMarkdown(text) {
   const raw = window.marked.parse(source, { async: false });
   return window.DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },
+    FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'base', 'link', 'meta'],
+    FORBID_ATTR: ['style', 'id', 'name'],
     ADD_ATTR: ['target', 'align', 'loading', 'decoding', 'referrerpolicy'],
     ADD_DATA_URI_TAGS: ['img'],
   });

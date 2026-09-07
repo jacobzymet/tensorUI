@@ -36,6 +36,12 @@ struct Slot {
     cancel: watch::Sender<bool>,
 }
 
+pub(super) async fn close_all() {
+    for (_, slot) in commands().lock().await.drain() {
+        slot.cancel.send_replace(true);
+    }
+}
+
 struct State {
     output: BoundedOutput,
     running: bool,
@@ -59,11 +65,15 @@ pub async fn start(
     owner: &str,
     wait_ms: u64,
 ) -> Result<CommandResult, String> {
+    let lease = crate::session::lease()?;
     if owner.is_empty() {
         return Err("A conversation session is required to start an agent command.".into());
     }
     let workspace_path = workspace.resolve(".")?;
     let mut slots = commands().lock().await;
+    if !lease.valid() {
+        return Err("Encrypted local data is locked.".into());
+    }
     slots.retain(|_, slot| {
         let expired = slot
             .state

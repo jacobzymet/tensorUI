@@ -2171,6 +2171,7 @@ function refreshUiFromMemoryStore() {
 }
 
 function clearMemoryAfterLock() {
+  if (typeof cancelOcrWorkers === 'function') cancelOcrWorkers();
   storageWriteEpoch += 1;
   clearTimeout(saveStoreTimer);
   saveStoreTimer = null;
@@ -2178,6 +2179,20 @@ function clearMemoryAfterLock() {
   saveSettingsTimer = null;
   abortAllStreams({ cancelServer: false });
   activeStreams.clear();
+  if (typeof clearTerminalMemory === 'function') clearTerminalMemory();
+  if (typeof setTerminalOpen === 'function') setTerminalOpen(false);
+  if (typeof stopVoiceInput === 'function') stopVoiceInput({ silent: true });
+  if (typeof cancelMessageEdit === 'function') cancelMessageEdit({ resumeQueue: false });
+  composerInput.value = '';
+  clearPendingAttachments();
+  clearPendingReplyQuote();
+  composerMentionIds.clear();
+  if (typeof setMarkdownImages === 'function') setMarkdownImages(null);
+  if (typeof latestState !== 'undefined') latestState = null;
+  chatThread.replaceChildren();
+  if (typeof traceSidebarBody !== 'undefined') traceSidebarBody?.replaceChildren();
+  activeId = null;
+  draftWorkspaceRoot = '';
   outboundQueues.clear();
   editingQueueId = null;
   stickByConvo.clear();

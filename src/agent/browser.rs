@@ -64,6 +64,8 @@ fn sessions() -> &'static Mutex<HashMap<String, Session>> {
 struct Session {
     browser: Browser,
     page: Page,
+    // Never reuse a persistent profile containing browsing history or cookies.
+    _profile: tempfile::TempDir,
 }
 
 pub fn is_browser_tool(name: &str) -> bool {
@@ -356,15 +358,25 @@ where
 }
 
 async fn ensure_session(session_id: &str) -> Result<Page, String> {
+    let lease = crate::session::lease()?;
     let key = session_key(session_id);
     let mut map = sessions().lock().await;
+    if !lease.valid() {
+        return Err("Encrypted local data is locked.".into());
+    }
     if let Some(session) = map.get(&key)
         && page_alive(&session.page).await
     {
         return Ok(session.page.clone());
     }
-    map.remove(&key);
-    let session = launch_session(&key).await?;
+    if let Some(mut stale) = map.remove(&key) {
+        let _ = stale.browser.kill().await;
+    }
+    let mut session = launch_session(&key).await?;
+    if !lease.valid() {
+        let _ = session.browser.kill().await;
+        return Err("Encrypted local data is locked.".into());
+    }
     let page = session.page.clone();
     map.insert(key, session);
     Ok(page)
@@ -378,18 +390,57 @@ async fn page_alive(page: &Page) -> bool {
         == Some(2)
 }
 
-async fn launch_session(session_id: &str) -> Result<Session, String> {
-    let mut builder = BrowserConfig::builder().with_head().window_size(1280, 800);
+pub async fn close_all_sessions() {
+    let sessions: Vec<_> = sessions()
+        .lock()
+        .await
+        .drain()
+        .map(|(_, session)| session)
+        .collect();
+    for mut session in sessions {
+        let _ = timeout(Duration::from_secs(2), session.browser.close()).await;
+        let _ = session.browser.kill().await;
+        if let Err(error) = session._profile.close() {
+            eprintln!("Could not remove temporary browser profile: {error}");
+        }
+    }
+}
+
+async fn launch_session(_session_id: &str) -> Result<Session, String> {
+    let mut builder = BrowserConfig::builder()
+        .respect_https_errors()
+        .window_size(1280, 800);
+    #[cfg(test)]
+    {
+        builder = builder.new_headless_mode();
+    }
+    #[cfg(not(test))]
+    {
+        builder = builder.with_head();
+    }
     if let Some(exe) = find_browser_executable() {
+        #[cfg(windows)]
+        if exe
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("msedge.exe"))
+        {
+            // Edge may relaunch through its compatibility layer, detaching the
+            // process/stderr that Chromiumoxide uses to obtain the CDP endpoint.
+            // Playwright uses the same switch for reliable Edge startup.
+            builder = builder.arg("edge-skip-compat-layer-relaunch");
+        }
         builder = builder.chrome_executable(exe);
     }
-    let profile = profile_dir(session_id);
-    let _ = fs::create_dir_all(&profile);
-    builder = builder.user_data_dir(profile);
+    let profile = tempfile::Builder::new()
+        .prefix("tensormi-browser-")
+        .tempdir()
+        .map_err(|err| format!("Could not create private browser profile: {err}"))?;
+    secure_fs::ensure_private_dir(profile.path()).map_err(|err| err.to_string())?;
+    builder = builder.user_data_dir(profile.path());
     let config = builder
         .build()
         .map_err(|err| format!("Could not configure Chrome: {err}"))?;
-    let (browser, mut handler) = timeout(LAUNCH_TIMEOUT, Browser::launch(config))
+    let (mut browser, mut handler) = timeout(LAUNCH_TIMEOUT, Browser::launch(config))
         .await
         .map_err(|_| "Timed out launching Chrome/Edge. Is a Chromium browser installed?".to_string())?
         .map_err(|err| {
@@ -404,11 +455,24 @@ async fn launch_session(session_id: &str) -> Result<Session, String> {
             }
         }
     });
-    let page = browser
-        .new_page("about:blank")
-        .await
-        .map_err(|err| format!("Could not open a tab: {err}"))?;
-    Ok(Session { browser, page })
+    if let Err(error) = browser.start_incognito_context().await {
+        let _ = browser.kill().await;
+        return Err(format!(
+            "Could not create private browsing context: {error}"
+        ));
+    }
+    let page = match browser.new_page("about:blank").await {
+        Ok(page) => page,
+        Err(error) => {
+            let _ = browser.kill().await;
+            return Err(format!("Could not open a tab: {error}"));
+        }
+    };
+    Ok(Session {
+        browser,
+        page,
+        _profile: profile,
+    })
 }
 
 async fn snapshot(page: &Page) -> Result<String, String> {
@@ -571,12 +635,6 @@ fn save_screenshot(
     Ok(abs.display().to_string())
 }
 
-fn profile_dir(session_id: &str) -> PathBuf {
-    store::data_dir()
-        .join("browser-profiles")
-        .join(session_key(session_id))
-}
-
 pub fn find_browser_executable() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("CHROME_PATH") {
         let path = PathBuf::from(path.trim());
@@ -699,6 +757,21 @@ const SNAPSHOT_JS: &str = r#"() => {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires an installed Chromium browser"]
+    async fn browser_shutdown_removes_its_private_profile() {
+        let session = launch_session("security-regression").await.unwrap();
+        let path = session._profile.path().to_path_buf();
+        assert!(path.is_dir());
+        sessions()
+            .lock()
+            .await
+            .insert("security-regression".into(), session);
+        close_all_sessions().await;
+        assert!(!path.exists(), "temporary profile remained after shutdown");
+        assert!(sessions().lock().await.is_empty());
+    }
 
     #[test]
     fn rejects_non_http_urls() {

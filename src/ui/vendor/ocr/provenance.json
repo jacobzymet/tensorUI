@@ -1,0 +1,23 @@
+[
+  {
+    "integrity": "sha512-/sPvMvrCtgxnNRCjbTYbr7BRu0yfWDsMZQ2a/T5aN/L1t8wUQN6tTWv6p6FwzpoEBA0jrN2UD2SX4QQFRdoDbA==",
+    "url": "https://registry.npmjs.org/tesseract.js/-/tesseract.js-6.0.1.tgz",
+    "name": "tesseract.js",
+    "license": "Apache-2.0",
+    "version": "6.0.1"
+  },
+  {
+    "integrity": "sha512-pv4GjmramjdObhDyR1q85Td8X60Puu/lGQn7Kw2id05LLgHhAcWgnz6xSdMCSxBMWjQDmMyDXPTC2aqADdpiow==",
+    "url": "https://registry.npmjs.org/tesseract.js-core/-/tesseract.js-core-6.1.2.tgz",
+    "name": "tesseract.js-core",
+    "license": "Apache-2.0",
+    "version": "6.1.2"
+  },
+  {
+    "integrity": "sha512-mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg==",
+    "url": "https://registry.npmjs.org/@tesseract.js-data/eng/-/eng-1.0.0.tgz",
+    "name": "@tesseract.js-data/eng",
+    "license": "MIT",
+    "version": "1.0.0"
+  }
+]

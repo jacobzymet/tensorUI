@@ -28,10 +28,11 @@ function harness(timeline = []) {
   });
   for (const name of [
     'agentStepRailHtml', 'wrapTimelineStep', 'skillLabel', 'toolBodyFromArgs',
-    'skillLiveVerb', 'skillToolIcon', 'formatToolElapsed', 'toolDurationMs',
+    'skillLiveVerb', 'liveToolStatusLabel', 'liveToolStatusText', 'skillToolIcon', 'formatToolElapsed', 'toolDurationMs',
     'skillDetailLabel', 'agentStepResultHtml', 'agentStepHtml',
   ]) vm.runInContext(declaration(render, name), context);
   vm.runInContext(declaration(runtime, 'timelineSignature'), context);
+  vm.runInContext(declaration(runtime, 'setStreamThinkingLabel'), context);
 
   const eventStart = runtime.indexOf('  const onAgentEvent = (payload) => {');
   const eventEnd = runtime.indexOf('  if (stream.catchingUp)', eventStart);

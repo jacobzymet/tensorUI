@@ -114,6 +114,24 @@ fn request_token<B>(request: &Request<B>) -> Option<&str> {
         .find_map(|cookie| cookie.strip_prefix(&format!("{SESSION_COOKIE}=")))
 }
 
+fn trusted_api_origin(headers: &HeaderMap, security: &ApiSecurity) -> bool {
+    // A malformed Origin is not an absent Origin. Other loopback ports are
+    // same-site but are not trusted origins for this local control server.
+    let origin_ok = match headers.get(header::ORIGIN) {
+        None => true,
+        Some(value) => value
+            .to_str()
+            .is_ok_and(|origin| security.origins.iter().any(|allowed| origin == allowed)),
+    };
+    let fetch_site_ok = match headers.get("sec-fetch-site") {
+        None => true, // Native clients still authenticate with the session token.
+        Some(value) => value
+            .to_str()
+            .is_ok_and(|site| matches!(site, "same-origin" | "none")),
+    };
+    origin_ok && fetch_site_ok
+}
+
 async fn secure_local_request(
     State(security): State<ApiSecurity>,
     request: Request<Body>,
@@ -135,11 +153,7 @@ async fn secure_local_request(
 
     let is_api = request.uri().path().starts_with("/api/");
     if is_api {
-        let origin_ok = request
-            .headers()
-            .get(header::ORIGIN)
-            .and_then(|value| value.to_str().ok())
-            .is_none_or(|origin| security.origins.iter().any(|allowed| origin == allowed));
+        let origin_ok = trusted_api_origin(request.headers(), &security);
         let token_ok =
             request_token(&request).is_some_and(|token| secret_eq(token, &security.token));
         if !origin_ok || !token_ok {
@@ -175,7 +189,7 @@ fn harden_local_response(headers: &mut HeaderMap, is_api: bool) {
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("frame-ancestors 'none'"),
+        HeaderValue::from_static("frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; script-src-attr 'none'"),
     );
     if is_api {
         headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -187,12 +201,44 @@ async fn require_unlocked_api(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let control = matches!(
+        request.uri().path(),
+        "/api/data/encryption/lock"
+            | "/api/data/encryption/unlock"
+            | "/api/data/encryption/enable"
+            | "/api/data/encryption/disable"
+    );
+    let lease = crate::session::lease();
     let locked = app
         .lock()
         .map(|guard| guard.encryption_enabled() && !guard.encryption_unlocked())
         .unwrap_or(true);
     if !locked {
-        return next.run(request).await;
+        if control {
+            return next.run(request).await;
+        }
+        if let Ok(mut lease) = lease {
+            let response = tokio::select! {
+                biased;
+                _ = lease.revoked() => return StatusCode::LOCKED.into_response(),
+                response = next.run(request) => response,
+            };
+            let (parts, body) = response.into_parts();
+            let stream = async_stream::stream! {
+                let mut data = body.into_data_stream();
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = lease.revoked() => break,
+                        chunk = data.next() => match chunk {
+                            Some(chunk) => yield chunk,
+                            None => break,
+                        },
+                    }
+                }
+            };
+            return Response::from_parts(parts, Body::from_stream(stream));
+        }
     }
 
     if locked_api_request_allowed(request.method(), request.uri().path()) {
@@ -304,6 +350,11 @@ async fn pause_provider_cache_warm() {
 }
 
 pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> {
+    let locked = app
+        .lock()
+        .map(|app| app.encryption_enabled() && !app.encryption_unlocked())
+        .unwrap_or(true);
+    crate::session::set_locked(locked);
     // Probe providers before the first browser poll so Chat doesn't flash unreachable.
     schedule_provider_cache_warm(Arc::clone(&app));
 
@@ -392,6 +443,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
         .route("/highlight.min.js", get(highlight_script))
         .route("/marked.min.js", get(marked_script))
         .route("/purify.min.js", get(purify_script))
+        .route("/ocr/{asset}", get(ocr_asset))
         .route("/xterm.css", get(xterm_stylesheet))
         .route("/xterm.min.js", get(xterm_script))
         .route("/xterm-addon-fit.min.js", get(xterm_fit_script))
@@ -510,6 +562,31 @@ async fn purify_script() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         PURIFY_JS,
     )
+}
+
+async fn ocr_asset(Path(asset): Path<String>) -> Response {
+    let bytes: &'static [u8] = match asset.as_str() {
+        "tesseract.min.js" => include_bytes!("../ui/vendor/ocr/tesseract.min.js"),
+        "worker.min.js" => include_bytes!("../ui/vendor/ocr/worker.min.js"),
+        "tesseract-core.wasm.js" => include_bytes!("../ui/vendor/ocr/tesseract-core.wasm.js"),
+        "tesseract-core-lstm.wasm.js" => {
+            include_bytes!("../ui/vendor/ocr/tesseract-core-lstm.wasm.js")
+        }
+        "tesseract-core-simd.wasm.js" => {
+            include_bytes!("../ui/vendor/ocr/tesseract-core-simd.wasm.js")
+        }
+        "tesseract-core-simd-lstm.wasm.js" => {
+            include_bytes!("../ui/vendor/ocr/tesseract-core-simd-lstm.wasm.js")
+        }
+        "eng.traineddata.gz" => include_bytes!("../ui/vendor/ocr/eng.traineddata.gz"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let content_type = if asset.ends_with(".js") {
+        "text/javascript"
+    } else {
+        "application/gzip"
+    };
+    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
 async fn optional_fonts_script() -> impl IntoResponse {
@@ -963,11 +1040,19 @@ struct TerminalResizeCtrl {
 }
 
 async fn terminal_ws(ws: WebSocketUpgrade, Path(id): Path<String>) -> Result<Response, ApiError> {
+    let lease = crate::session::lease().map_err(ApiError::bad_request)?;
     let id = validate_live_id(id)?;
     let io = agent::terminal::attach_session(&id)
         .await
         .ok_or_else(|| ApiError::not_found("Terminal session is not open"))?;
-    Ok(ws.on_upgrade(move |socket| terminal_socket(socket, io)))
+    Ok(ws.on_upgrade(move |socket| async move {
+        let mut lease = lease;
+        tokio::select! {
+            biased;
+            _ = lease.revoked() => {},
+            _ = terminal_socket(socket, io) => {},
+        }
+    }))
 }
 
 async fn terminal_socket(socket: WebSocket, io: agent::terminal::SessionIo) {
@@ -1447,46 +1532,96 @@ async fn enable_encryption(
     State(app): State<SharedApp>,
     Json(body): Json<PassphraseBody>,
 ) -> Result<Json<DataInfo>, ApiError> {
-    let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    // Do not trim passphrases — leading/trailing spaces are significant.
-    app.enable_disk_encryption(
-        &body.passphrase,
-        body.passphrase_confirm.as_deref().unwrap_or(""),
-    )
-    .map_err(ApiError::bad_request)?;
-    Ok(Json(data_info_from_app(&app)))
+    let _control = ENCRYPTION_CONTROL.lock().await;
+    let (result, info) = {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        // Do not trim passphrases — leading/trailing spaces are significant.
+        let result = app.enable_disk_encryption(
+            &body.passphrase,
+            body.passphrase_confirm.as_deref().unwrap_or(""),
+        );
+        (result, encryption_operation_info(&app))
+    };
+    finish_encryption_operation(result, info).await
 }
 
 async fn disable_encryption(
     State(app): State<SharedApp>,
     Json(body): Json<PassphraseBody>,
 ) -> Result<Json<DataInfo>, ApiError> {
-    let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    app.disable_disk_encryption(&body.passphrase)
-        .map_err(ApiError::bad_request)?;
-    Ok(Json(data_info_from_app(&app)))
+    let _control = ENCRYPTION_CONTROL.lock().await;
+    let (result, info) = {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        let result = app.disable_disk_encryption(&body.passphrase);
+        (result, encryption_operation_info(&app))
+    };
+    finish_encryption_operation(result, info).await
 }
 
 async fn unlock_encryption(
     State(app): State<SharedApp>,
     Json(body): Json<PassphraseBody>,
 ) -> Result<Json<DataInfo>, ApiError> {
-    let info = {
+    let _control = ENCRYPTION_CONTROL.lock().await;
+    let (result, info) = {
         let mut app = app.lock().map_err(|_| ApiError::lock())?;
-        app.unlock_disk_encryption(&body.passphrase)
-            .map_err(ApiError::bad_request)?;
-        data_info_from_app(&app)
+        let result = app.unlock_disk_encryption(&body.passphrase);
+        (result, encryption_operation_info(&app))
     };
+    let info = finish_encryption_operation(result, info).await?;
+    crate::session::set_locked(false);
     PROVIDER_CACHE_WARM_ALLOWED.store(true, Ordering::SeqCst);
     schedule_provider_cache_warm(Arc::clone(&app));
+    Ok(info)
+}
+
+static ENCRYPTION_CONTROL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn encryption_operation_info(app: &App) -> DataInfo {
+    let info = data_info_from_app(app);
+    if info.encryption_enabled && !info.encryption_unlocked {
+        crate::session::set_locked(true);
+    }
+    info
+}
+
+async fn clear_private_work() {
+    crate::live::hub().clear();
+    agent::terminal::close_all_sessions().await;
+    agent::browser::close_all_sessions().await;
+    pause_provider_cache_warm().await;
+}
+
+/// Stop detached work and discard temporary browser state before runtime teardown.
+pub async fn shutdown_private_work() {
+    crate::session::set_locked(true);
+    clear_private_work().await;
+}
+
+async fn finish_encryption_operation(
+    result: Result<(), String>,
+    info: DataInfo,
+) -> Result<Json<DataInfo>, ApiError> {
+    if info.encryption_enabled && !info.encryption_unlocked {
+        clear_private_work().await;
+    }
+    result.map_err(ApiError::bad_request)?;
     Ok(Json(info))
 }
 
 async fn lock_encryption(State(app): State<SharedApp>) -> Result<Json<DataInfo>, ApiError> {
-    pause_provider_cache_warm().await;
-    let mut app = app.lock().map_err(|_| ApiError::lock())?;
-    app.lock_disk_encryption();
-    Ok(Json(data_info_from_app(&app)))
+    let _control = ENCRYPTION_CONTROL.lock().await;
+    let info = {
+        let mut app = app.lock().map_err(|_| ApiError::lock())?;
+        if !app.encryption_enabled() {
+            return Err(ApiError::bad_request("Disk encryption is not enabled."));
+        }
+        crate::session::set_locked(true);
+        app.lock_disk_encryption();
+        data_info_from_app(&app)
+    };
+    clear_private_work().await;
+    Ok(Json(info))
 }
 
 async fn get_chat_store(State(app): State<SharedApp>) -> Result<Json<serde_json::Value>, ApiError> {
@@ -1910,10 +2045,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         harden_local_response(&mut headers, true);
         assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
-        assert_eq!(
-            headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
-            "frame-ancestors 'none'"
-        );
+        let csp = headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(csp.contains("base-uri 'none'"));
+        assert!(csp.contains("script-src-attr 'none'"));
         assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
 
         let mut page_headers = HeaderMap::new();
@@ -1953,6 +2092,29 @@ mod tests {
                 "{method} {path} must remain unavailable while locked"
             );
         }
+    }
+
+    #[test]
+    fn api_origin_rejects_other_local_ports_and_malformed_headers() {
+        let security = ApiSecurity::new("127.0.0.1:9876".parse().unwrap()).unwrap();
+        let mut headers = HeaderMap::new();
+        assert!(trusted_api_origin(&headers, &security));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://127.0.0.1:9876"),
+        );
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        assert!(trusted_api_origin(&headers, &security));
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-site"));
+        assert!(!trusted_api_origin(&headers, &security));
+        headers.remove("sec-fetch-site");
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://127.0.0.1:9877"),
+        );
+        assert!(!trusted_api_origin(&headers, &security));
+        headers.insert(header::ORIGIN, HeaderValue::from_bytes(&[0xff]).unwrap());
+        assert!(!trusted_api_origin(&headers, &security));
     }
 
     #[test]

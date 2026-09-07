@@ -218,6 +218,9 @@ impl App {
         token: &str,
         health: ProviderHealth,
     ) {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return;
+        }
         self.remote_health
             .put(style, base.trim(), token.trim(), health);
     }
@@ -229,6 +232,9 @@ impl App {
         token: &str,
         catalog: Vec<RemoteModelOption>,
     ) {
+        if self.encryption_enabled() && !self.encryption_unlocked() {
+            return;
+        }
         self.remote_catalog
             .put(style, base.trim(), token.trim(), catalog);
     }
@@ -677,6 +683,15 @@ impl App {
     }
 
     pub fn unlock_disk_encryption(&mut self, passphrase: &str) -> Result<(), String> {
+        let result = self.unlock_disk_encryption_inner(passphrase);
+        if result.is_err() {
+            // Unlock can restore provider secrets before a later file fails authentication.
+            self.lock_disk_encryption();
+        }
+        result
+    }
+
+    fn unlock_disk_encryption_inner(&mut self, passphrase: &str) -> Result<(), String> {
         let root = self.data_dir();
         if self.resume_pending_encryption_transition(passphrase, None)? {
             return Ok(());
@@ -1015,6 +1030,42 @@ mod tests {
         assert_eq!(restored.name, "Renamed");
         assert_eq!(restored.base, "https://example.com/v1");
         assert_eq!(restored.token, "secret-provider-token");
+    }
+
+    #[test]
+    fn failed_unlock_scrubs_credentials_restored_before_skill_validation() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = App::new(Config::default(), temp.path().join("config.toml")).unwrap();
+        app.create_provider(
+            "Private",
+            "https://example.com/v1",
+            "private-token",
+            ApiStyle::Openai,
+            false,
+            true,
+        )
+        .unwrap();
+        app.enable_disk_encryption("test passphrase", "test passphrase")
+            .unwrap();
+        app.lock_disk_encryption();
+        std::fs::write(
+            temp.path().join("chat-skills").join("skills.json"),
+            b"tampered",
+        )
+        .unwrap();
+        assert!(app.unlock_disk_encryption("test passphrase").is_err());
+        assert!(!app.encryption_unlocked());
+        assert!(app.config.providers.items.is_empty());
+        assert!(
+            app.remote_health
+                .peek(ApiStyle::Openai, "https://example.com/v1", "private-token")
+                .is_none()
+        );
+        assert!(
+            app.remote_catalog
+                .peek(ApiStyle::Openai, "https://example.com/v1", "private-token")
+                .is_none()
+        );
     }
 
     #[test]

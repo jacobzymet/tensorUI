@@ -1,5 +1,31 @@
 # Third-party notices
 
+## Local OCR runtime
+
+`src/ui/vendor/ocr` contains official npm distributions of Tesseract.js 6.0.1
+and Tesseract.js-core 6.1.2 (Apache-2.0), plus English trained data from
+`@tesseract.js-data/eng` 1.0.0. That package declares MIT for its packaging;
+the upstream trained-data repository supplies Apache-2.0. Both engine license
+files and the upstream data license are retained alongside the assets.
+Sources, exact versions, and verified npm SHA-512 integrity values are in
+`provenance.json`; asset SHA-256 values are in `sha256.json`.
+The `*.wasm.js` builds include their WASM payloads; no runtime CDN fetch is needed.
+
+## GLib security backport
+
+`vendor/glib` is glib 0.18.5, copyright the gtk-rs project developers, MIT.
+Its LICENSE and COPYRIGHT are retained. `SECURITY_PATCH.md` records the two-line
+upstream backport for RUSTSEC-2024-0429.
+
+## DOMPurify
+
+The vendored HTML sanitizer is [DOMPurify 3.4.15](https://github.com/cure53/DOMPurify/releases/tag/3.4.15),
+copyright Cure53 and other contributors, distributed under the
+[Apache-2.0 or MPL-2.0 license](https://github.com/cure53/DOMPurify/blob/3.4.15/LICENSE).
+The upstream license banner is retained in `src/ui/vendor/purify.min.js`.
+Source: the tagged upstream `dist/purify.min.js`, retrieved 2026-09-07.
+SHA-256 of the downloaded file: `f263b05369e050fa175d4ecb9c9358eb4253602d510297adfb31df48b2f1c4d5`.
+
 ## thinking-orbs
 
 The dotted thought-orb animations in

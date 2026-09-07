@@ -247,6 +247,16 @@ impl LiveHub {
         Some(turn.subscribe_stream())
     }
 
+    pub fn clear(&self) {
+        for (_, turn) in self.lock_turns().drain() {
+            turn.request_cancel();
+            turn.frames
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clear();
+        }
+    }
+
     pub fn info(&self, conversation_id: &str) -> Option<LiveTurnInfo> {
         self.lock_turns()
             .get(conversation_id)
@@ -272,9 +282,13 @@ impl LiveHub {
         info: LiveTurnInfo,
         source: ChatStream,
     ) -> Result<ChatStream, LiveTurnInfo> {
+        let lease = crate::session::lease().map_err(|_| info.clone())?;
         let conversation_id = info.conversation_id.clone();
         let turn = {
             let mut turns = self.lock_turns();
+            if !lease.valid() {
+                return Err(info);
+            }
             if let Some(existing) = turns.get(&conversation_id)
                 && !existing.finished.load(Ordering::SeqCst)
                 && !existing.is_cancelling()
@@ -285,7 +299,7 @@ impl LiveHub {
             turns.insert(conversation_id.clone(), Arc::clone(&turn));
             turn
         };
-        spawn_pump(self.clone(), Arc::clone(&turn), source);
+        spawn_pump(self.clone(), Arc::clone(&turn), source, lease);
         Ok(turn.subscribe_stream())
     }
 
@@ -298,7 +312,12 @@ impl LiveHub {
     }
 }
 
-fn spawn_pump(hub: LiveHub, turn: Arc<LiveTurn>, mut source: ChatStream) {
+fn spawn_pump(
+    hub: LiveHub,
+    turn: Arc<LiveTurn>,
+    mut source: ChatStream,
+    mut lease: crate::session::Lease,
+) {
     tokio::spawn(async move {
         let mut cancel_rx = turn.cancel.subscribe();
         let mut cancelled = false;
@@ -308,6 +327,11 @@ fn spawn_pump(hub: LiveHub, turn: Arc<LiveTurn>, mut source: ChatStream) {
                 break;
             }
             tokio::select! {
+                biased;
+                _ = lease.revoked() => {
+                    cancelled = true;
+                    break;
+                }
                 _ = cancel_rx.changed() => {
                     if *cancel_rx.borrow() {
                         cancelled = true;

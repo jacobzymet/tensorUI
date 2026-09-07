@@ -4,6 +4,7 @@ let terminalBoundWorkspace = '';
 let pickingWorkspace = false;
 let terminalHeightDrag = null;
 let openingTerminal = false;
+let terminalSessionEpoch = 0;
 let terminalFitTimer = 0;
 
 const TERMINAL_HEIGHT_VH_MIN = 0.16;
@@ -456,14 +457,20 @@ function showTerminalNotice(text) {
   }
 }
 
-async function closeAllTerminalSessions() {
-  const ids = terminalTabs.map((tab) => tab.id).filter(Boolean);
+function clearTerminalMemory() {
+  terminalSessionEpoch += 1;
+  openingTerminal = false;
   for (const tab of terminalTabs) disposeTab(tab);
   terminalTabs = [];
   activeTerminalId = '';
   terminalBoundWorkspace = '';
   renderTerminalRail();
   renderActiveTerminalBody();
+}
+
+async function closeAllTerminalSessions() {
+  const ids = terminalTabs.map((tab) => tab.id).filter(Boolean);
+  clearTerminalMemory();
   await Promise.all(ids.map((id) => fetch('/api/terminal/close', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -502,7 +509,7 @@ async function addTerminalSession() {
   const workspace = workspaceRootValue();
   paintWorkspaceField(workspace);
   if (!workspace) {
-    showTerminalNotice('Choose a folder for this chat. The model and terminal stay inside it.');
+    showTerminalNotice('Choose a starting folder. Terminal commands can access files permitted by your OS account.');
     return false;
   }
   if (terminalTabs.length >= MAX_LIVE_TERMINALS) {
@@ -510,6 +517,7 @@ async function addTerminalSession() {
     return false;
   }
   if (openingTerminal) return false;
+  const epoch = terminalSessionEpoch;
   openingTerminal = true;
   const tab = makeTerminalTab({ id: 'pending', title: 'shell', cwd: workspace });
   try {
@@ -531,6 +539,7 @@ async function addTerminalSession() {
       body: JSON.stringify({ workspace, cols: size.cols, rows: size.rows }),
     });
     const payload = await response.json().catch(() => null);
+    if (epoch !== terminalSessionEpoch) return false;
     if (!response.ok) {
       throw new Error((payload && payload.error) || 'Could not open terminal');
     }
@@ -546,6 +555,7 @@ async function addTerminalSession() {
     tab.term?.focus();
     return true;
   } catch (error) {
+    if (epoch !== terminalSessionEpoch) return false;
     const idx = terminalTabs.indexOf(tab);
     if (idx >= 0) terminalTabs.splice(idx, 1);
     disposeTab(tab);
@@ -555,7 +565,7 @@ async function addTerminalSession() {
     showTerminalNotice(error?.message || 'Could not open terminal');
     return false;
   } finally {
-    openingTerminal = false;
+    if (epoch === terminalSessionEpoch) openingTerminal = false;
   }
 }
 

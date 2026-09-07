@@ -10,6 +10,42 @@ use std::{
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
+#[cfg(windows)]
+mod windows;
+
+fn is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Includes junctions and other reparse points, not just symlinks.
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+#[cfg(windows)]
+fn reject_link_ancestors(path: &Path) -> Result<()> {
+    for ancestor in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if is_link(&metadata) => {
+                bail!("refusing linked data path {}", ancestor.display())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("could not inspect data path"),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn reject_link_ancestors(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -71,16 +107,19 @@ impl DataLock {
 }
 
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
+    reject_link_ancestors(path)?;
     let existed = path.exists();
     fs::create_dir_all(path).with_context(|| format!("could not create {}", path.display()))?;
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("could not inspect {}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if is_link(&metadata) || !metadata.is_dir() {
         bail!("refusing unsafe data directory {}", path.display());
     }
     #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .with_context(|| format!("could not secure {}", path.display()))?;
+    #[cfg(windows)]
+    windows::protect(path)?;
     sync_directory(path)?;
     if !existed
         && let Some(parent) = path.parent()
@@ -92,12 +131,13 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
 }
 
 fn ensure_write_dir(path: &Path) -> Result<()> {
+    reject_link_ancestors(path)?;
     if !path.exists() {
         return ensure_private_dir(path);
     }
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("could not inspect {}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if is_link(&metadata) || !metadata.is_dir() {
         bail!("refusing unsafe destination directory {}", path.display());
     }
     Ok(())
@@ -105,7 +145,7 @@ fn ensure_write_dir(path: &Path) -> Result<()> {
 
 fn reject_unsafe_destination(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+        Ok(metadata) if is_link(&metadata) || !metadata.is_file() => {
             bail!("refusing unsafe destination {}", path.display())
         }
         Ok(metadata) => {
@@ -142,9 +182,12 @@ fn open_private_new(path: &Path) -> Result<File> {
     options.create_new(true).write(true);
     #[cfg(unix)]
     options.mode(0o600);
-    options
+    let file = options
         .open(path)
-        .with_context(|| format!("could not create {}", path.display()))
+        .with_context(|| format!("could not create {}", path.display()))?;
+    #[cfg(windows)]
+    windows::protect(path)?;
+    Ok(file)
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -180,9 +223,10 @@ pub fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 }
 
 pub fn read(path: &Path) -> Result<Vec<u8>> {
+    reject_link_ancestors(path)?;
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("could not inspect {}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if is_link(&metadata) || !metadata.is_file() {
         bail!("refusing unsafe source {}", path.display());
     }
     #[cfg(unix)]
@@ -195,6 +239,8 @@ pub fn read(path: &Path) -> Result<Vec<u8>> {
                 .with_context(|| format!("could not secure {}", path.display()))?;
         }
     }
+    #[cfg(windows)]
+    windows::protect(path)?;
     fs::read(path).with_context(|| format!("could not read {}", path.display()))
 }
 

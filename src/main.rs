@@ -68,7 +68,7 @@ fn main() -> Result<()> {
     app.set_listen_addr(bind);
 
     let shared = Arc::new(Mutex::new(app));
-    let server = {
+    let mut server = {
         let shared = Arc::clone(&shared);
         runtime.spawn(async move { web::serve(shared, listener).await })
     };
@@ -77,11 +77,19 @@ fn main() -> Result<()> {
     println!("  Chat     {url}/");
     println!("  Settings {url}/settings");
 
-    let result = if cli.headless {
-        runtime.block_on(async { server.await? })
-    } else if open_browser {
-        let _ = system::open_in_browser(&url);
-        runtime.block_on(async { server.await? })
+    let result = if cli.headless || open_browser {
+        if open_browser {
+            let _ = system::open_in_browser(&url);
+        }
+        runtime.block_on(async {
+            tokio::select! {
+                result = &mut server => result?,
+                result = tokio::signal::ctrl_c() => {
+                    server.abort();
+                    result.map_err(Into::into)
+                }
+            }
+        })
     } else {
         // Native desktop window on the main thread; server keeps running on Tokio.
         let window_result = desktop::run_window(&url, bind, runtime.handle());
@@ -93,6 +101,7 @@ fn main() -> Result<()> {
         window_result
     };
 
+    runtime.block_on(web::shutdown_private_work());
     if let Ok(mut app) = shared.lock() {
         app.shutdown();
     }

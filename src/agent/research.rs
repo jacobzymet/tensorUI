@@ -66,13 +66,11 @@ impl ResearchProgress {
                 }
             } else if call.name == "fetch_url"
                 && !outcome.text.contains("but extracted no readable text.")
+                && let Some(url) = call.arguments.get("url").and_then(|value| value.as_str())
+                && let Ok(mut url) = reqwest::Url::parse(url)
             {
-                if let Some(url) = call.arguments.get("url").and_then(|value| value.as_str()) {
-                    if let Ok(mut url) = reqwest::Url::parse(url) {
-                        url.set_fragment(None);
-                        self.pages.insert(url.to_string());
-                    }
-                }
+                url.set_fragment(None);
+                self.pages.insert(url.to_string());
             }
         }
         if self.queries.len() + self.pages.len() > before {
