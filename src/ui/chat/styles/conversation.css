@@ -95,14 +95,14 @@
   min-width: 0;
   min-height: 0;
 }
-#chatThread > .msg.msg-role-user:not(.msg-queued) {
+#chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) {
   position: sticky;
   top: 0.45rem;
   z-index: 6;
   container-type: scroll-state;
   pointer-events: none;
 }
-#chatThread > .msg.msg-role-user:not(.msg-queued) > * {
+#chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) > * {
   pointer-events: auto;
 }
 @container scroll-state(stuck: top) {

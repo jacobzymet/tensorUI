@@ -3326,6 +3326,18 @@ let userScrollOverride = false;
 let resumeBottomIntent = false;
 let lastViewportScrollTop = 0;
 const STICK_BOTTOM_PX = 48;
+const PROMPT_PIN_TOP_PX = 8;
+
+function syncPinnedUserPrompt() {
+  const rows = chatThread.querySelectorAll('.msg.msg-role-user:not(.msg-queued)');
+  const pinLine = chatViewport.getBoundingClientRect().top + PROMPT_PIN_TOP_PX;
+  let active = null;
+  for (const row of rows) {
+    if (row.getBoundingClientRect().top <= pinLine) active = row;
+    else break;
+  }
+  rows.forEach((row) => row.classList.toggle('is-pinned-prompt', row === active));
+}
 
 function isNearBottom() {
   const gap = chatViewport.scrollHeight - chatViewport.scrollTop - chatViewport.clientHeight;
@@ -3341,6 +3353,7 @@ function scrollToBottom({ force = false } = {}) {
   }
   chatViewport.scrollTop = chatViewport.scrollHeight;
   lastViewportScrollTop = chatViewport.scrollTop;
+  syncPinnedUserPrompt();
 }
 
 function unpinFromBottom() {
@@ -3350,6 +3363,7 @@ function unpinFromBottom() {
 }
 
 chatViewport.addEventListener('scroll', () => {
+  syncPinnedUserPrompt();
   const currentTop = chatViewport.scrollTop;
   const movingDown = currentTop > lastViewportScrollTop + 0.5;
   const nearBottom = isNearBottom();

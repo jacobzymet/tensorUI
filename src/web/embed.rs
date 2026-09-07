@@ -66,6 +66,9 @@ mod tests {
         assert!(!CHAT_HTML.contains("id=\"userPromptPinBubble\""));
         assert!(!CHAT_JS.contains("function syncUserPromptPin("));
         assert!(!CHAT_JS.contains("function pinUserPrompt("));
+        assert!(CHAT_JS.contains("function syncPinnedUserPrompt("));
+        assert!(CHAT_JS.contains("row === active"));
+        assert!(CHAT_CSS.contains(".is-pinned-prompt"));
         assert!(CHAT_CSS.contains("position: sticky;"));
         assert!(CHAT_CSS.contains("container-type: scroll-state;"));
         assert!(CHAT_CSS.contains("@container scroll-state(stuck: top)"));
