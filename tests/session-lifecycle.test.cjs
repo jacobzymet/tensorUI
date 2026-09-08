@@ -42,6 +42,7 @@ function resumeHarness() {
     ensureStreamDom() {},
     scrollToBottom() {},
     reclaimUnappliedSteers() {},
+    maybeSendNextQueued() {},
     discardLiveStreamRow(stream) { stream.discarded = true; },
   });
   for (const name of ['resumeLiveTurns', 'attachLiveTurn', 'beginLiveStream', 'finishLiveStream']) {
@@ -83,6 +84,47 @@ test('a vanished live turn removes its Processing row and releases the composer'
   await state.attachLiveTurn(state.conversations[0], { turn_id: 'old-turn' });
   assert.equal(stream.discarded, true);
   assert.equal(state.activeStreams.size, 0);
+});
+
+test('state polling immediately retires a Processing row the server no longer owns', async () => {
+  const state = resumeHarness();
+  const stream = state.beginLiveStream(state.conversations[0], { turnId: 'lost-turn' });
+  await state.resumeLiveTurns([]);
+  assert.equal(stream.discarded, true);
+  assert.equal(stream.controller.signal.aborted, true);
+  assert.equal(state.activeStreams.size, 0);
+});
+
+test('state polling keeps a Processing row while the server still owns its turn', async () => {
+  const state = resumeHarness();
+  const stream = state.beginLiveStream(state.conversations[0], { turnId: 'live-turn' });
+  await state.resumeLiveTurns([{ conversation_id: 'chat-1', turn_id: 'live-turn' }]);
+  assert.equal(stream.discarded, undefined);
+  assert.equal(state.activeStreams.get('chat-1'), stream);
+});
+
+test('a finished server turn replaces a stuck browser stream with one replay', async () => {
+  const state = resumeHarness();
+  state.shouldSkipLiveTurnResume = () => true;
+  state.fetch = () => new Promise(() => {});
+  const old = state.beginLiveStream(state.conversations[0], { turnId: 'done-turn' });
+  const info = { conversation_id: 'chat-1', turn_id: 'done-turn', finished: true };
+  await state.resumeLiveTurns([info]);
+  const replay = state.activeStreams.get('chat-1');
+  assert.notEqual(replay, old);
+  assert.equal(old.controller.signal.aborted, true);
+  assert.equal(replay.catchingUp, true);
+
+  await state.resumeLiveTurns([info]);
+  assert.equal(state.activeStreams.get('chat-1'), replay);
+});
+
+test('parallel title generation starts only after the main response is accepted', () => {
+  const turn = runtimeDeclaration('runAssistantTurn');
+  const accepted = turn.indexOf('if (!response.ok)');
+  const title = turn.indexOf('generateConversationTitle(convo, firstUserText(convo))');
+  const stream = turn.indexOf('await driveAssistantSse(convo, stream, response)');
+  assert.ok(accepted >= 0 && title > accepted && stream > title);
 });
 
 test('Stop invalidates a pending start without clearing a newer attempt', () => {

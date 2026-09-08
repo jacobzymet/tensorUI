@@ -14,6 +14,10 @@ use crate::{
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub(crate) const CHANNEL_CAPACITY: usize = 32;
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+#[cfg(not(test))]
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+#[cfg(test)]
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_millis(40);
 
 /// SSE byte frames. Work runs as a child of this stream: client disconnect
 /// drops the body → drops the worker → drops the upstream HTTP response.
@@ -46,11 +50,21 @@ where
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
         let mut worker = std::pin::pin!(worker(tx));
         let mut worker_done = false;
+        let mut received_frame = false;
+        let first_frame_timeout = tokio::time::sleep(FIRST_FRAME_TIMEOUT);
+        tokio::pin!(first_frame_timeout);
         while !worker_done {
             tokio::select! {
+                _ = &mut first_frame_timeout, if !received_frame => {
+                    yield Ok(sse_error("The model did not start responding within 5 minutes"));
+                    worker_done = true;
+                }
                 item = rx.recv() => {
                     match item {
-                        Some(frame) => yield frame,
+                        Some(frame) => {
+                            received_frame = true;
+                            yield frame;
+                        }
                         None => worker_done = true,
                     }
                 }
@@ -542,7 +556,8 @@ fn title_looks_like_prompt_echo(title: &str) -> bool {
 
 #[cfg(test)]
 mod title_tests {
-    use super::{extract_openai_title_text, sanitize_chat_title};
+    use super::{extract_openai_title_text, sanitize_chat_title, stream_from_worker};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -610,5 +625,19 @@ mod title_tests {
             sanitize_chat_title(&extract_openai_title_text(&value)).as_deref(),
             Some("Morning greeting")
         );
+    }
+
+    #[tokio::test]
+    async fn silent_worker_ends_with_a_visible_timeout_error() {
+        let stream = stream_from_worker(|tx| async move {
+            futures_util::future::pending::<()>().await;
+            drop(tx);
+            Ok(())
+        });
+        let joined = stream
+            .map(|frame| String::from_utf8_lossy(&frame.expect("frame")).into_owned())
+            .collect::<String>()
+            .await;
+        assert!(joined.contains("did not start responding"));
     }
 }

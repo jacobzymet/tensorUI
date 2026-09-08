@@ -1994,6 +1994,12 @@ async function runAssistantTurn(convo, {
       const problem = await response.json().catch(() => null);
       throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
     }
+    // The main generation has reached the provider before its small title
+    // request starts. Both continue concurrently, but title generation can no
+    // longer take a single-request provider's only slot first.
+    if (needsGeneratedTitle(convo)) {
+      generateConversationTitle(convo, firstUserText(convo));
+    }
   } catch (error) {
     if (error.name === 'AbortError') {
       if (stream.replaced) {
@@ -2099,6 +2105,37 @@ async function syncConvoFromStore(convoId) {
 
 async function resumeLiveTurns(list) {
   if (!Array.isArray(list) || diskEncryptionLocked() || !storageReady) return;
+  const advertised = new Map();
+  for (const info of list) {
+    const convoId = String(info?.conversation_id || '').trim();
+    const turnId = String(info?.turn_id || '').trim();
+    if (convoId && turnId) advertised.set(convoId + '\0' + turnId, info);
+  }
+
+  // The server owns detached-turn lifetime. Reconcile the browser map to it
+  // before attaching anything new; a known turn cannot remain locally busy
+  // after the server has finished or forgotten it.
+  const released = new Set();
+  for (const [convoId, stream] of activeStreams) {
+    const turnId = String(stream?.turnId || '').trim();
+    if (!turnId) continue; // Incognito turns are intentionally browser-owned.
+    const info = advertised.get(convoId + '\0' + turnId);
+    if (info && (!info.finished || stream.catchingUp)) continue;
+    stream.replaced = true;
+    stream.skipQueue = true;
+    try { stream.controller.abort(); } catch { /* ignore */ }
+    discardLiveStreamRow(stream);
+    finishLiveStream(convoId, stream);
+    released.add(convoId);
+
+    // A finished turn retains its complete replay buffer briefly. Reattach
+    // once from that authoritative copy so a broken response body loses no data.
+    if (info?.finished) {
+      const convo = conversations.find((item) => item.id === convoId);
+      if (convo) void attachLiveTurn(convo, info, { force: true });
+    }
+  }
+
   for (const info of list) {
     const id = info && String(info.conversation_id || '').trim();
     if (!id || activeStreams.has(id) || outboundStarting.has(id)) continue;
@@ -2127,11 +2164,14 @@ async function resumeLiveTurns(list) {
     }
     void attachLiveTurn(convo, info);
   }
+  for (const convoId of released) {
+    if (!activeStreams.has(convoId)) maybeSendNextQueued(convoId);
+  }
 }
 
-async function attachLiveTurn(convo, info) {
+async function attachLiveTurn(convo, info, { force = false } = {}) {
   if (!convo || activeStreams.has(convo.id) || outboundStarting.has(convo.id) || !serverReady) return;
-  if (typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) return;
+  if (!force && typeof shouldSkipLiveTurnResume === 'function' && shouldSkipLiveTurnResume(info)) return;
   beginLiveStream(convo, {
     useAgent: !!info?.agent,
     deepResearch: !!info?.deep_research,
@@ -2859,11 +2899,6 @@ async function driveAssistantSse(convo, stream, response) {
     discardLiveStreamRow(stream);
   }
 
-  // After the first reply finishes — local servers often reject concurrent
-  // title + chat requests, so we wait until the stream is done.
-  if (needsGeneratedTitle(convo)) {
-    generateConversationTitle(convo, firstUserText(convo));
-  }
   if (activeId === convo.id) {
     // If we finished while away and came back to a thread without the row, re-render.
     if (!dom || !dom.row.isConnected) {
