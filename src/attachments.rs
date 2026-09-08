@@ -2,6 +2,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 const MAX_EXTRACT_BYTES: usize = 12 * 1024 * 1024;
+const MAX_BASE64_BYTES: usize = MAX_EXTRACT_BYTES.div_ceil(3) * 4;
 
 #[derive(Debug, Deserialize)]
 pub struct ExtractRequest {
@@ -67,10 +68,17 @@ fn decode_base64(raw: &str) -> Result<Vec<u8>, String> {
     let payload = trimmed
         .strip_prefix("data:")
         .and_then(|rest| rest.split_once(',').map(|(_, data)| data))
-        .unwrap_or(trimmed);
+        .unwrap_or(trimmed)
+        .trim();
+    if payload.len() > MAX_BASE64_BYTES + 4 {
+        return Err(format!(
+            "Attachment is too large to extract (max {} MB)",
+            MAX_EXTRACT_BYTES / (1024 * 1024)
+        ));
+    }
     base64::engine::general_purpose::STANDARD
-        .decode(payload.trim())
-        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload.trim()))
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload))
         .map_err(|error| format!("Invalid base64 attachment payload: {error}"))
 }
 

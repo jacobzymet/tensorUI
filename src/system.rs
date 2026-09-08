@@ -6,11 +6,12 @@ pub fn is_openable_external_url(url: &str) -> bool {
     if url.is_empty() || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return false;
     }
-    let scheme = url
-        .split_once(':')
-        .map(|(s, _)| s.to_ascii_lowercase())
-        .unwrap_or_default();
-    matches!(scheme.as_str(), "http" | "https" | "mailto")
+    let Some((scheme, _)) = url.split_once(':') else {
+        return false;
+    };
+    scheme.eq_ignore_ascii_case("http")
+        || scheme.eq_ignore_ascii_case("https")
+        || scheme.eq_ignore_ascii_case("mailto")
 }
 
 /// Keep local UI routes in the webview; everything else belongs in the OS browser.
@@ -20,10 +21,14 @@ pub fn url_stays_in_webview(app_origin: &str, url: &str) -> bool {
         return true;
     }
     let origin = app_origin.trim_end_matches('/');
-    url == origin
-        || url.starts_with(&(origin.to_owned() + "/"))
-        || url.starts_with(&(origin.to_owned() + "?"))
-        || url.starts_with(&(origin.to_owned() + "#"))
+    let Some(rest) = url.strip_prefix(origin) else {
+        return false;
+    };
+    rest.is_empty()
+        || matches!(
+            rest.as_bytes().first(),
+            Some(b'/') | Some(b'?') | Some(b'#')
+        )
 }
 
 pub fn open_in_browser(url: &str) -> io::Result<()> {
@@ -73,6 +78,7 @@ mod tests {
     #[test]
     fn openable_urls() {
         assert!(is_openable_external_url("https://x.ai/news"));
+        assert!(is_openable_external_url("HTTPS://x.ai/news"));
         assert!(is_openable_external_url("http://127.0.0.1:8787/"));
         assert!(is_openable_external_url("mailto:hi@example.com"));
         assert!(!is_openable_external_url("javascript:alert(1)"));

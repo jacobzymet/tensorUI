@@ -140,8 +140,8 @@ pub(crate) async fn open_llm_sse(
     payload: &serde_json::Value,
     allow_insecure_tls: bool,
 ) -> Result<reqwest::Response, StreamFail> {
-    let client = http::llm_client(REQUEST_TIMEOUT, allow_insecure_tls);
-    let mut request = client.post(url).json(payload);
+    let client = http::llm_client(allow_insecure_tls);
+    let mut request = client.post(url).timeout(REQUEST_TIMEOUT).json(payload);
     for (name, value) in providers::provider_auth_headers(style, token) {
         request = request.header(name, value);
     }
@@ -211,18 +211,20 @@ async fn proxy_anthropic_sse(
     )
     .await?;
     let mut byte_stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut translator = AnthropicSseTranslator::default();
 
     while let Some(next) = byte_stream.next().await {
         let chunk = next.map_err(|error| StreamFail::Other(error.to_string()))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(idx) = buffer.find('\n') {
-            let mut line = buffer[..idx].to_string();
-            buffer.drain(..=idx);
-            if line.ends_with('\r') {
-                line.pop();
+        buffer.extend_from_slice(&chunk);
+        let mut consumed = 0;
+        while let Some(relative) = buffer[consumed..].iter().position(|byte| *byte == b'\n') {
+            let end = consumed + relative;
+            let mut line = &buffer[consumed..end];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
             }
+            let line = String::from_utf8_lossy(line);
             for frame in translator.push_line(&line).map_err(StreamFail::Other)? {
                 send_sse(tx, frame).await?;
             }
@@ -230,6 +232,19 @@ async fn proxy_anthropic_sse(
                 send_sse(tx, translator.finish_frames()).await?;
                 return Ok(());
             }
+            consumed = end + 1;
+        }
+        if consumed != 0 {
+            buffer = buffer.split_off(consumed);
+        }
+    }
+    if !buffer.is_empty() {
+        let line = String::from_utf8_lossy(&buffer);
+        for frame in translator
+            .push_line(line.trim_end_matches('\r'))
+            .map_err(StreamFail::Other)?
+        {
+            send_sse(tx, frame).await?;
         }
     }
     send_sse(tx, translator.finish_frames()).await?;
@@ -337,7 +352,7 @@ async fn post_title_completion(
     payload: &serde_json::Value,
     allow_insecure_tls: bool,
 ) -> Result<serde_json::Value, String> {
-    let client = http::llm_client(TITLE_TIMEOUT, allow_insecure_tls);
+    let client = http::llm_client(allow_insecure_tls);
     let (url, body) = match style {
         ApiStyle::Openai => (format!("{api_base}/chat/completions"), payload.clone()),
         ApiStyle::Anthropic => (
@@ -351,7 +366,7 @@ async fn post_title_completion(
         let url = url.clone();
         let token = token.to_string();
         async move {
-            let mut request = client.post(&url).json(&body);
+            let mut request = client.post(&url).timeout(TITLE_TIMEOUT).json(&body);
             for (name, value) in providers::provider_auth_headers(style, &token) {
                 request = request.header(name, value);
             }
