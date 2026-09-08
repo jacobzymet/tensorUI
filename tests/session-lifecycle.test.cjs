@@ -103,6 +103,16 @@ test('state polling keeps a Processing row while the server still owns its turn'
   assert.equal(state.activeStreams.get('chat-1'), stream);
 });
 
+test('state polling leaves a stopped partial reply with its finalizer', async () => {
+  const state = resumeHarness();
+  const stream = state.beginLiveStream(state.conversations[0], { turnId: 'stopping-turn' });
+  stream.cancelled = true;
+  stream.hardStopped = false;
+  await state.resumeLiveTurns([]);
+  assert.equal(stream.discarded, undefined);
+  assert.equal(state.activeStreams.get('chat-1'), stream);
+});
+
 test('a finished server turn replaces a stuck browser stream with one replay', async () => {
   const state = resumeHarness();
   state.shouldSkipLiveTurnResume = () => true;
@@ -123,7 +133,7 @@ test('parallel title generation starts only after the main response is accepted'
   const turn = runtimeDeclaration('runAssistantTurn');
   const accepted = turn.indexOf('if (!response.ok)');
   const title = turn.indexOf('generateConversationTitle(convo, firstUserText(convo))');
-  const stream = turn.indexOf('await driveAssistantSse(convo, stream, response)');
+  const stream = turn.indexOf('await driveAssistantSse(convo, stream, response)', title);
   assert.ok(accepted >= 0 && title > accepted && stream > title);
 });
 
@@ -150,6 +160,37 @@ test('Stop invalidates a pending start without clearing a newer attempt', () => 
   assert.equal(state.outboundStarting.has('chat-1'), true);
   state.clearOutboundStarting('chat-1', current);
   assert.equal(state.outboundStarting.has('chat-1'), false);
+});
+
+test('Stop leaves a live stream with its finalizer so partial text can be saved', () => {
+  let discarded = false;
+  let aborted = false;
+  const stream = {
+    cancelled: false,
+    hardStopped: false,
+    turnId: 'turn-1',
+    controller: { abort() { aborted = true; } },
+  };
+  const state = vm.createContext({
+    activeStreams: new Map([['chat-1', stream]]),
+    invalidateOutboundStart() {},
+    markBotsOutboundStopped() {},
+    bumpBotsOutboundEpoch() {},
+    rememberHandledLiveTurn() {},
+    noteLiveTurnUserCancel() {},
+    discardLiveStreamRow() { discarded = true; },
+    scheduleCancel: () => Promise.resolve(),
+    syncComposerStreamUi() {},
+  });
+  vm.runInContext(declaration('abortStream'), state);
+
+  state.abortStream('chat-1', { preservePartial: true });
+
+  assert.equal(stream.cancelled, true);
+  assert.equal(stream.hardStopped, false);
+  assert.equal(aborted, true);
+  assert.equal(discarded, false);
+  assert.equal(state.activeStreams.get('chat-1'), stream);
 });
 
 test('a stopped Loop no longer keeps the composer busy during teardown', () => {

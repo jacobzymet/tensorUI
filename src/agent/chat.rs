@@ -292,7 +292,7 @@ pub async fn generate_chat_title(
         "model": model_name,
         "stream": false,
         "max_tokens": 24,
-        "temperature": 0.2,
+        "temperature": 0,
         "messages": [
             {
                 "role": "system",

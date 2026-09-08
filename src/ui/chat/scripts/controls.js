@@ -166,7 +166,11 @@ function waitForCancel(convoId) {
   return pending ? pending.catch(() => {}) : Promise.resolve();
 }
 
-function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
+function abortStream(convoId, {
+  cancelServer = true,
+  soft = false,
+  preservePartial = false,
+} = {}) {
   if (!soft) invalidateOutboundStart(convoId);
   if (cancelServer && !soft) markBotsOutboundStopped(convoId);
   if (cancelServer && !soft && typeof bumpBotsOutboundEpoch === 'function') {
@@ -175,11 +179,11 @@ function abortStream(convoId, { cancelServer = true, soft = false } = {}) {
   const stream = activeStreams.get(convoId);
   if (stream) {
     if (cancelServer) stream.cancelled = true;
-    if (cancelServer && !soft) stream.hardStopped = true;
+    if (cancelServer && !soft && !preservePartial) stream.hardStopped = true;
     rememberHandledLiveTurn(stream.turnId);
     if (cancelServer && !soft) noteLiveTurnUserCancel(convoId, stream.turnId);
     try { stream.controller.abort(); } catch { /* ignore */ }
-    if (cancelServer && !soft) {
+    if (cancelServer && !soft && !preservePartial) {
       if (typeof discardLiveStreamRow === 'function') discardLiveStreamRow(stream);
       else {
         try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }

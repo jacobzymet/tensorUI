@@ -1,3 +1,3 @@
-Title this chat:
+User message:
 
 {{snippet}}

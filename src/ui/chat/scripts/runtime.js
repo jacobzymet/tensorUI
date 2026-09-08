@@ -1970,7 +1970,11 @@ async function runAssistantTurn(convo, {
       body: JSON.stringify(requestBody),
       signal: stream.controller.signal,
     });
-    if (stream.cancelled || stream.replaced || activeStreams.get(convo.id) !== stream) return false;
+    if (stream.replaced || activeStreams.get(convo.id) !== stream) return false;
+    if (stream.cancelled) {
+      await driveAssistantSse(convo, stream, response);
+      return true;
+    }
     if (!response.ok) {
       if (response.status === 409) {
         dropLiveSubscriber(convo.id, stream);
@@ -2119,6 +2123,9 @@ async function resumeLiveTurns(list) {
   for (const [convoId, stream] of activeStreams) {
     const turnId = String(stream?.turnId || '').trim();
     if (!turnId) continue; // Incognito turns are intentionally browser-owned.
+    // Cancellation has already transferred ownership to driveAssistantSse,
+    // which flushes and persists any partial reply before releasing the stream.
+    if (stream.cancelled && !stream.hardStopped) continue;
     const info = advertised.get(convoId + '\0' + turnId);
     if (info && (!info.finished || stream.catchingUp)) continue;
     stream.replaced = true;
@@ -3123,16 +3130,11 @@ btnStop.addEventListener('click', () => {
   if (!activeId) return;
   const stoppedId = activeId;
   if (typeof pauseOutboundQueueAfterStop === 'function') pauseOutboundQueueAfterStop(stoppedId);
-  void abortStream(stoppedId);
+  // The stream finalizer owns its accumulated text. Keep it registered so the
+  // AbortError path can commit the partial assistant message before teardown.
+  void abortStream(stoppedId, { preservePartial: true });
   syncComposerStreamUi();
   renderSidebar();
-  const convo = conversations.find((item) => item.id === stoppedId);
-  // Drop any live "Processing…" / empty error bubble that finalize hasn't cleared yet.
-  if (convo && activeId === stoppedId) {
-    chatThread.querySelectorAll('.msg-role-assistant[data-stream-id]').forEach((row) => {
-      row.remove();
-    });
-  }
   updateComposerHint();
 });
 btnPlus?.addEventListener('click', (event) => {
