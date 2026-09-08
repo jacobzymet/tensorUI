@@ -22,6 +22,7 @@ use tokio::{
 };
 
 use super::fs::Workspace;
+use super::text::collapse_ws;
 
 #[cfg(test)]
 use std::time::Duration;
@@ -560,23 +561,6 @@ pub fn block_reason(command: &str) -> Option<&'static str> {
         }
     }
     None
-}
-
-fn collapse_ws(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_space = false;
-    for ch in s.chars() {
-        if ch.is_whitespace() {
-            if !prev_space {
-                out.push(' ');
-                prev_space = true;
-            }
-        } else {
-            prev_space = false;
-            out.push(ch);
-        }
-    }
-    out
 }
 
 const DANGEROUS: &[(&str, &str)] = &[

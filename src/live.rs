@@ -44,7 +44,7 @@ struct StoredFrame {
 }
 
 struct LiveTurn {
-    info: Mutex<LiveTurnInfo>,
+    info: LiveTurnInfo,
     frames: Mutex<Vec<StoredFrame>>,
     buffered_bytes: AtomicU64,
     seq: AtomicU64,
@@ -62,7 +62,7 @@ impl LiveTurn {
         let (cancel, _) = watch::channel(false);
         let (done, _) = watch::channel(false);
         Self {
-            info: Mutex::new(info),
+            info,
             frames: Mutex::new(Vec::new()),
             buffered_bytes: AtomicU64::new(0),
             seq: AtomicU64::new(0),
@@ -75,10 +75,9 @@ impl LiveTurn {
     }
 
     fn snapshot_info(&self) -> LiveTurnInfo {
-        self.info
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_else(|err| err.into_inner().clone())
+        let mut info = self.info.clone();
+        info.finished = self.finished.load(Ordering::SeqCst);
+        info
     }
 
     fn push_bytes(&self, bytes: Vec<u8>) -> bool {
@@ -125,9 +124,6 @@ impl LiveTurn {
 
     fn finish(&self) {
         self.finished.store(true, Ordering::SeqCst);
-        if let Ok(mut info) = self.info.lock() {
-            info.finished = true;
-        }
         let _ = self.done.send(true);
     }
 
@@ -167,18 +163,16 @@ impl LiveTurn {
         format!("event: meta\ndata: {payload}\n\n").into_bytes()
     }
 
-    fn replay_after(self: &Arc<Self>, last_seq: u64) -> (Vec<StoredFrame>, u64) {
-        let replay = self
+    fn replay_after(&self, last_seq: u64) -> (Vec<StoredFrame>, u64) {
+        let extra = self
             .frames
             .lock()
-            .map(|frames| frames.clone())
+            .map(|frames| {
+                let start = frames.partition_point(|frame| frame.seq <= last_seq);
+                frames[start..].to_vec()
+            })
             .unwrap_or_default();
-        let mut next = last_seq;
-        let extra = replay
-            .into_iter()
-            .filter(|frame| frame.seq > last_seq)
-            .inspect(|frame| next = frame.seq)
-            .collect();
+        let next = extra.last().map_or(last_seq, |frame| frame.seq);
         (extra, next)
     }
 
@@ -264,9 +258,7 @@ impl LiveHub {
         self.turns.lock().unwrap_or_else(|err| err.into_inner())
     }
 
-    fn lock_cancelled(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<(String, String), Instant>> {
+    fn lock_cancelled(&self) -> std::sync::MutexGuard<'_, HashMap<(String, String), Instant>> {
         self.cancelled_turns
             .lock()
             .unwrap_or_else(|err| err.into_inner())
@@ -274,9 +266,7 @@ impl LiveHub {
 
     fn prune_cancelled(cancelled: &mut HashMap<(String, String), Instant>) {
         let now = Instant::now();
-        cancelled.retain(|_, at| {
-            now.saturating_duration_since(*at) < CANCEL_TOMBSTONE_TTL
-        });
+        cancelled.retain(|_, at| now.saturating_duration_since(*at) < CANCEL_TOMBSTONE_TTL);
     }
 
     fn cancellation_target(
@@ -548,6 +538,32 @@ mod tests {
             .into_iter()
             .map(|item| item.expect("frame"))
             .collect()
+    }
+
+    #[test]
+    fn replay_after_clones_only_the_new_suffix() {
+        let turn = LiveTurn::new(info("replay"));
+        for index in 0..5 {
+            assert!(turn.push_bytes(format!("frame-{index}").into_bytes()));
+        }
+
+        let (frames, next) = turn.replay_after(3);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].seq, 4);
+        assert_eq!(frames[1].seq, 5);
+        assert_eq!(next, 5);
+
+        let (none, unchanged) = turn.replay_after(5);
+        assert!(none.is_empty());
+        assert_eq!(unchanged, 5);
+    }
+
+    #[test]
+    fn live_info_finished_state_comes_from_the_atomic() {
+        let turn = LiveTurn::new(info("meta"));
+        assert!(!turn.snapshot_info().finished);
+        turn.finish();
+        assert!(turn.snapshot_info().finished);
     }
 
     #[tokio::test]

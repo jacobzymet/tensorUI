@@ -8,6 +8,7 @@ use scraper::{Html, Selector};
 use serde_json::{Value, json};
 use tokio::time::timeout;
 
+use super::text::collapse_ws;
 use super::{AgentSkills, SearchHit, WebSearchProvider, WebSearchRecency, WebSearchSafeSearch};
 use crate::http;
 
@@ -1843,10 +1844,6 @@ fn strip_tags(s: &str) -> String {
         }
     }
     html_unescape(&out)
-}
-
-fn collapse_ws(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn html_unescape(s: &str) -> String {

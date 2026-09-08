@@ -12,6 +12,7 @@ mod research;
 pub mod search;
 pub mod skills;
 pub mod terminal;
+mod text;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -30,6 +31,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
+use self::text::collapse_ws;
 use crate::{
     anthropic::{self, AnthropicSseTranslator},
     chat::{ChatStream, StreamFail, open_llm_sse, send_sse, stream_from_worker},
@@ -3624,61 +3626,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn collapse_ws(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/* Redirect decoder used only by the retired direct parser.
-fn decode_ddg_href(href: &str) -> String {
-    let full = if let Some(rest) = href.strip_prefix("//") {
-        format!("https://{rest}")
-    } else {
-        href.to_string()
-    };
-    if let Some(idx) = full.find("uddg=") {
-        let start = idx + "uddg=".len();
-        let end = full[start..]
-            .find('&')
-            .map(|i| start + i)
-            .unwrap_or(full.len());
-        return percent_decode(&full[start..end]);
-    }
-    full
-}
-
-fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(h), Some(l)) = (from_hex(bytes[i + 1]), from_hex(bytes[i + 2]))
-        {
-            out.push((h << 4) | l);
-            i += 3;
-            continue;
-        }
-        if bytes[i] == b'+' {
-            out.push(b' ');
-        } else {
-            out.push(bytes[i]);
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn from_hex(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
-*/
 #[cfg(test)]
 mod tests {
     use super::*;
