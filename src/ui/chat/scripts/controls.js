@@ -133,13 +133,13 @@ function invalidateOutboundStart(convoId) {
 }
 
 function scheduleCancel(convoId, turnId) {
-  if (!convoId) return Promise.resolve();
-  const prev = cancelInFlight.get(convoId) || Promise.resolve();
-  const next = prev.catch(() => {}).then(async () => {
+  if (!convoId) return Promise.resolve(true);
+  const prev = cancelInFlight.get(convoId) || Promise.resolve(true);
+  const next = prev.catch(() => false).then(async () => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 6000);
     try {
-      await fetch('/api/chat/cancel', {
+      const response = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -148,8 +148,11 @@ function scheduleCancel(convoId, turnId) {
         }),
         signal: controller.signal,
       });
+      if (!response.ok) return false;
+      const result = await response.json().catch(() => null);
+      return result?.settled === true;
     } catch {
-      // Best effort: local teardown must never wait forever on cancellation.
+      return false;
     } finally {
       clearTimeout(timeout);
     }
@@ -163,7 +166,10 @@ function scheduleCancel(convoId, turnId) {
 
 function waitForCancel(convoId) {
   const pending = convoId ? cancelInFlight.get(convoId) : null;
-  return pending ? pending.catch(() => {}) : Promise.resolve();
+  if (!pending) return Promise.resolve();
+  return pending.then((settled) => {
+    if (!settled) throw new Error('Previous response did not stop cleanly.');
+  });
 }
 
 function abortStream(convoId, {

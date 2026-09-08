@@ -833,6 +833,13 @@ async fn chat_completions(
         .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
         .filter(|id| !id.is_empty());
     let conversation_id = conversation_id.map(validate_live_id).transpose()?;
+    let requested_turn_id = body
+        .as_object_mut()
+        .and_then(|obj| obj.remove("turn_id"))
+        .and_then(|value| value.as_str().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .map(validate_live_id)
+        .transpose()?;
     let key = (!token.trim().is_empty()).then_some(token.as_str());
     let wants_agent = body.get("agent").and_then(|v| v.as_bool()).unwrap_or(false)
         || body
@@ -900,7 +907,7 @@ async fn chat_completions(
     let stream = if let Some(conversation_id) = conversation_id {
         let info = crate::live::LiveTurnInfo {
             conversation_id,
-            turn_id: crate::live::new_turn_id(),
+            turn_id: requested_turn_id.unwrap_or_else(crate::live::new_turn_id),
             agent: wants_agent,
             deep_research,
             deep_research_output,
@@ -946,10 +953,14 @@ async fn chat_cancel(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let id = validate_live_id(body.conversation_id)?;
     let turn_id = body.turn_id.map(validate_live_id).transpose()?;
-    let cancelled = crate::live::hub().cancel(&id, turn_id.as_deref());
-    Ok(Json(
-        serde_json::json!({ "ok": true, "cancelled": cancelled }),
-    ))
+    let (cancelled, settled) = crate::live::hub()
+        .cancel_and_wait(&id, turn_id.as_deref())
+        .await;
+    Ok(Json(serde_json::json!({
+        "ok": settled,
+        "cancelled": cancelled,
+        "settled": settled,
+    })))
 }
 
 fn validate_live_id(raw: impl AsRef<str>) -> Result<String, ApiError> {

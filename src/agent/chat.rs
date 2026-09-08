@@ -140,8 +140,8 @@ pub(crate) async fn open_llm_sse(
     payload: &serde_json::Value,
     allow_insecure_tls: bool,
 ) -> Result<reqwest::Response, StreamFail> {
-    let client = http::llm_client(allow_insecure_tls);
-    let mut request = client.post(url).timeout(REQUEST_TIMEOUT).json(payload);
+    let client = http::llm_client(REQUEST_TIMEOUT, allow_insecure_tls);
+    let mut request = client.post(url).json(payload);
     for (name, value) in providers::provider_auth_headers(style, token) {
         request = request.header(name, value);
     }
@@ -352,7 +352,7 @@ async fn post_title_completion(
     payload: &serde_json::Value,
     allow_insecure_tls: bool,
 ) -> Result<serde_json::Value, String> {
-    let client = http::llm_client(allow_insecure_tls);
+    let client = http::llm_client(TITLE_TIMEOUT, allow_insecure_tls);
     let (url, body) = match style {
         ApiStyle::Openai => (format!("{api_base}/chat/completions"), payload.clone()),
         ApiStyle::Anthropic => (

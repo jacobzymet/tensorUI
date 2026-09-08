@@ -22,8 +22,6 @@ const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=
 const BROWSER_ACCEPT_LANG: &str = "en-US,en;q=0.9";
 
 static PUBLIC_CLIENT: OnceLock<Client> = OnceLock::new();
-static SECURE_LLM: OnceLock<Client> = OnceLock::new();
-static INSECURE_LLM: OnceLock<Client> = OnceLock::new();
 
 thread_local! {
     static INSECURE_PROVIDER_TLS: Cell<bool> = const { Cell::new(false) };
@@ -89,8 +87,8 @@ pub fn url_is_private_or_local(url: &str) -> bool {
         || host.parse::<IpAddr>().is_ok_and(ip_is_non_public)
 }
 
-fn build_llm_client(insecure: bool) -> Client {
-    let mut builder = Client::builder().user_agent(APP_UA);
+fn build_llm_client(timeout: Duration, insecure: bool) -> Client {
+    let mut builder = Client::builder().timeout(timeout).user_agent(APP_UA);
     if insecure {
         builder = builder.danger_accept_invalid_certs(true);
     }
@@ -116,15 +114,10 @@ fn build_blocking_client(
     builder.build().expect("reqwest blocking client")
 }
 
-/// Shared async client for LLM APIs. Invalid certificates require explicit opt-in.
-pub fn llm_client(allow_insecure_tls: bool) -> Client {
-    let slot = if allow_insecure_tls {
-        &INSECURE_LLM
-    } else {
-        &SECURE_LLM
-    };
-    slot.get_or_init(|| build_llm_client(allow_insecure_tls))
-        .clone()
+/// Async client for one LLM request. Generation streams are deliberately
+/// isolated so aborting one request cannot poison a process-lifetime pool.
+pub fn llm_client(timeout: Duration, allow_insecure_tls: bool) -> Client {
+    build_llm_client(timeout, allow_insecure_tls)
 }
 
 /// Blocking client for provider probes. Reused so TLS sessions stay warm.

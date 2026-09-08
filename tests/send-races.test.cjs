@@ -116,6 +116,7 @@ function conflictHarness() {
     activeStreams: new Map(), outboundStarting: new Set(), outboundStartEpochs: new Map(),
     latestState: {}, selectedChatModel: 'model', thinkingSupported: false,
     activeId: convo.id, selectedRemoteModel: () => ({ ready: true, model: 'model' }),
+    newId: (prefix) => prefix + '-test',
     syncComposerStreamUi() {}, renderSidebar() {}, resetTraceAutoOpenState() {}, syncStreamSpeakerChrome() {},
     beginLiveStream(c) {
       const stream = { controller: new AbortController() };

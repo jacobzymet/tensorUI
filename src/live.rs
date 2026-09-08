@@ -7,7 +7,7 @@ use std::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::StreamExt;
@@ -19,6 +19,8 @@ use crate::agent::chat::{ChatStream, sse_error};
 const BROADCAST_CAP: usize = 256;
 const MAX_BUFFERED_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_BUFFERED_FRAMES: usize = 100_000;
+const CANCEL_TOMBSTONE_TTL: Duration = Duration::from_secs(60);
+const CANCEL_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
 const LINGER: Duration = Duration::from_secs(90);
 #[cfg(test)]
@@ -50,6 +52,7 @@ struct LiveTurn {
     cancel: watch::Sender<bool>,
     done: watch::Sender<bool>,
     finished: AtomicBool,
+    pump: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LiveTurn {
@@ -67,6 +70,7 @@ impl LiveTurn {
             cancel,
             done,
             finished: AtomicBool::new(false),
+            pump: Mutex::new(None),
         }
     }
 
@@ -131,8 +135,31 @@ impl LiveTurn {
         self.cancel.send_replace(true);
     }
 
-    fn is_cancelling(&self) -> bool {
-        *self.cancel.borrow()
+    fn set_pump(&self, handle: tokio::task::JoinHandle<()>) {
+        match self.pump.lock() {
+            Ok(mut slot) => *slot = Some(handle),
+            Err(_) => handle.abort(),
+        }
+    }
+
+    fn take_pump(&self) -> Option<tokio::task::JoinHandle<()>> {
+        self.pump.lock().ok()?.take()
+    }
+
+    async fn wait_done(&self) -> bool {
+        if self.finished.load(Ordering::SeqCst) {
+            return true;
+        }
+        let mut done = self.done.subscribe();
+        if *done.borrow() {
+            return true;
+        }
+        while done.changed().await.is_ok() {
+            if *done.borrow() {
+                return true;
+            }
+        }
+        self.finished.load(Ordering::SeqCst)
     }
 
     fn meta_frame(&self) -> Vec<u8> {
@@ -222,17 +249,58 @@ fn within_replay_limit(current_bytes: u64, current_frames: usize, incoming_bytes
 #[derive(Clone)]
 pub struct LiveHub {
     turns: Arc<Mutex<HashMap<String, Arc<LiveTurn>>>>,
+    cancelled_turns: Arc<Mutex<HashMap<(String, String), Instant>>>,
 }
 
 impl LiveHub {
     fn new() -> Self {
         Self {
             turns: Arc::new(Mutex::new(HashMap::new())),
+            cancelled_turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     fn lock_turns(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<LiveTurn>>> {
         self.turns.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    fn lock_cancelled(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<(String, String), Instant>> {
+        self.cancelled_turns
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    fn prune_cancelled(cancelled: &mut HashMap<(String, String), Instant>) {
+        let now = Instant::now();
+        cancelled.retain(|_, at| {
+            now.saturating_duration_since(*at) < CANCEL_TOMBSTONE_TTL
+        });
+    }
+
+    fn cancellation_target(
+        &self,
+        conversation_id: &str,
+        turn_id: Option<&str>,
+    ) -> Option<Arc<LiveTurn>> {
+        // Always lock turns before cancelled_turns so registration and
+        // cancel-before-start are atomic with each other.
+        let turns = self.lock_turns();
+        if let Some(turn) = turns.get(conversation_id).cloned()
+            && turn_id.is_none_or(|expected| turn.snapshot_info().turn_id == expected)
+        {
+            return Some(turn);
+        }
+        if let Some(turn_id) = turn_id {
+            let mut cancelled = self.lock_cancelled();
+            Self::prune_cancelled(&mut cancelled);
+            cancelled.insert(
+                (conversation_id.to_string(), turn_id.to_string()),
+                Instant::now(),
+            );
+        }
+        None
     }
 
     pub fn list(&self) -> Vec<LiveTurnInfo> {
@@ -248,7 +316,9 @@ impl LiveHub {
     }
 
     pub fn clear(&self) {
-        for (_, turn) in self.lock_turns().drain() {
+        let turns: Vec<_> = self.lock_turns().drain().map(|(_, turn)| turn).collect();
+        self.lock_cancelled().clear();
+        for turn in turns {
             turn.request_cancel();
             turn.frames
                 .lock()
@@ -264,17 +334,50 @@ impl LiveHub {
     }
 
     pub fn cancel(&self, conversation_id: &str, turn_id: Option<&str>) -> bool {
-        let Some(turn) = self.lock_turns().get(conversation_id).cloned() else {
+        let Some(turn) = self.cancellation_target(conversation_id, turn_id) else {
             return false;
         };
-        if turn_id.is_some_and(|expected| turn.snapshot_info().turn_id != expected) {
-            return false;
-        }
         if turn.finished.load(Ordering::SeqCst) {
             return false;
         }
         turn.request_cancel();
         true
+    }
+
+    pub async fn cancel_and_wait(
+        &self,
+        conversation_id: &str,
+        turn_id: Option<&str>,
+    ) -> (bool, bool) {
+        let Some(turn) = self.cancellation_target(conversation_id, turn_id) else {
+            // An exact-id cancellation that arrived before registration is now
+            // tombstoned, so that late request can no longer start.
+            return (false, true);
+        };
+        if turn.finished.load(Ordering::SeqCst) {
+            return (false, true);
+        }
+
+        turn.request_cancel();
+        if tokio::time::timeout(CANCEL_SETTLE_TIMEOUT, turn.wait_done())
+            .await
+            .unwrap_or(false)
+        {
+            return (true, true);
+        }
+
+        // Graceful cancellation should be immediate. Hard-abort the pump only
+        // as a fail-safe, and await it so its upstream response is truly gone.
+        if let Some(mut pump) = turn.take_pump() {
+            pump.abort();
+            let _ = (&mut pump).await;
+            turn.push_terminal_bytes(b"data: [DONE]\n\n".to_vec());
+            turn.finish();
+            self.drop_if_same(&turn);
+            return (true, true);
+        }
+
+        (true, turn.finished.load(Ordering::SeqCst))
     }
 
     pub fn start(
@@ -284,14 +387,26 @@ impl LiveHub {
     ) -> Result<ChatStream, LiveTurnInfo> {
         let lease = crate::session::lease().map_err(|_| info.clone())?;
         let conversation_id = info.conversation_id.clone();
+        let turn_id = info.turn_id.clone();
         let turn = {
             let mut turns = self.lock_turns();
             if !lease.valid() {
                 return Err(info);
             }
+            {
+                let mut cancelled = self.lock_cancelled();
+                Self::prune_cancelled(&mut cancelled);
+                if cancelled
+                    .remove(&(conversation_id.clone(), turn_id))
+                    .is_some()
+                {
+                    return Err(info);
+                }
+            }
+            // Cancelling is not finished. Never overlap two upstream
+            // generations for one conversation.
             if let Some(existing) = turns.get(&conversation_id)
                 && !existing.finished.load(Ordering::SeqCst)
-                && !existing.is_cancelling()
             {
                 return Err(existing.snapshot_info());
             }
@@ -299,7 +414,8 @@ impl LiveHub {
             turns.insert(conversation_id.clone(), Arc::clone(&turn));
             turn
         };
-        spawn_pump(self.clone(), Arc::clone(&turn), source, lease);
+        let pump = spawn_pump(self.clone(), Arc::clone(&turn), source, lease);
+        turn.set_pump(pump);
         Ok(turn.subscribe_stream())
     }
 
@@ -317,7 +433,7 @@ fn spawn_pump(
     turn: Arc<LiveTurn>,
     mut source: ChatStream,
     mut lease: crate::session::Lease,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut cancel_rx = turn.cancel.subscribe();
         let mut cancelled = false;
@@ -364,7 +480,7 @@ fn spawn_pump(
         turn.finish();
         tokio::time::sleep(LINGER).await;
         hub.drop_if_same(&turn);
-    });
+    })
 }
 
 static HUB: OnceLock<LiveHub> = OnceLock::new();
@@ -505,23 +621,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_turn_can_be_replaced_before_its_source_settles() {
+    async fn replacement_starts_only_after_cancelled_turn_settles() {
         let hub = LiveHub::new();
         let first = hub
             .start(info("c4"), Box::pin(futures_util::stream::pending()))
             .expect("first start");
-        assert!(hub.cancel("c4", Some("turn_test")));
+
+        let (cancelled, settled) = hub.cancel_and_wait("c4", Some("turn_test")).await;
+        assert!(cancelled);
+        assert!(settled);
 
         let mut replacement_info = info("c4");
         replacement_info.turn_id = "turn_replacement".into();
         let replacement = hub
             .start(replacement_info, source(vec![b"data: replacement\n\n"]))
-            .expect("a cancelling turn must not block its replacement");
-
-        let replacement_frames = collect(replacement).await;
-        let replacement_text = replacement_frames
-            .iter()
-            .map(|frame| String::from_utf8_lossy(frame).into_owned())
+            .expect("settled cancellation must allow replacement");
+        let replacement_text = collect(replacement)
+            .await
+            .into_iter()
+            .map(|frame| String::from_utf8_lossy(&frame).into_owned())
             .collect::<String>();
         assert!(replacement_text.contains("replacement"));
 
@@ -531,6 +649,33 @@ mod tests {
             .map(|frame| String::from_utf8_lossy(&frame).into_owned())
             .collect::<String>();
         assert!(first_text.contains("[DONE]"));
+    }
+
+    #[tokio::test]
+    async fn cancel_before_registration_cannot_create_an_orphan_turn() {
+        let hub = LiveHub::new();
+        let (cancelled, settled) = hub.cancel_and_wait("race", Some("turn_old")).await;
+        assert!(!cancelled);
+        assert!(settled);
+
+        let mut late = info("race");
+        late.turn_id = "turn_old".into();
+        assert!(
+            hub.start(late, Box::pin(futures_util::stream::pending()))
+                .is_err()
+        );
+
+        let mut replacement = info("race");
+        replacement.turn_id = "turn_new".into();
+        let stream = hub
+            .start(replacement, source(vec![b"data: replacement\n\n"]))
+            .expect("new turn must not be blocked by old tombstone");
+        let text = collect(stream)
+            .await
+            .into_iter()
+            .map(|frame| String::from_utf8_lossy(&frame).into_owned())
+            .collect::<String>();
+        assert!(text.contains("replacement"));
     }
 
     #[tokio::test]

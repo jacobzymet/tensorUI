@@ -255,6 +255,22 @@ test('queued messages stay paused after Stop until explicitly resumed', () => {
   assert.equal(dispatched, 1);
 });
 
+test('server cancellation is complete only after teardown is settled', async () => {
+  const state = vm.createContext({
+    cancelInFlight: new Map(), AbortController, setTimeout, clearTimeout,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ ok: true, cancelled: true, settled: true }),
+    }),
+    Promise, JSON,
+  });
+  for (const name of ['scheduleCancel', 'waitForCancel']) {
+    vm.runInContext(declaration(name), state);
+  }
+  assert.equal(await state.scheduleCancel('chat-1', 'turn-1'), true);
+  await state.waitForCancel('chat-1');
+});
+
 test('server cancellation is bounded and carries an abort signal', async () => {
   let timeoutMs = 0;
   let requestSignal = null;
@@ -281,8 +297,9 @@ test('server cancellation is bounded and carries an abort signal', async () => {
   });
   vm.runInContext(declaration('scheduleCancel'), state);
 
-  await state.scheduleCancel('chat-1', 'turn-1');
-  assert.equal(timeoutMs, 4000);
+  const settled = await state.scheduleCancel('chat-1', 'turn-1');
+  assert.equal(timeoutMs, 6000);
   assert.equal(aborted, true);
   assert.ok(requestSignal);
+  assert.equal(settled, false);
 });

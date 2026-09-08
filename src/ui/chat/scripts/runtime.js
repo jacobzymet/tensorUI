@@ -1809,7 +1809,16 @@ async function runAssistantTurn(convo, {
   try {
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
-  if (typeof waitForCancel === 'function') await waitForCancel(convo.id);
+  if (typeof waitForCancel === 'function') {
+    try {
+      await waitForCancel(convo.id);
+    } catch {
+      if (typeof showComposerHint === 'function') {
+        showComposerHint('The previous response is still shutting down. Try again in a moment.');
+      }
+      return false;
+    }
+  }
   if (typeof outboundStartIsCurrent === 'function'
     && !outboundStartIsCurrent(convo.id, startEpoch)) {
     return false;
@@ -1892,6 +1901,7 @@ async function runAssistantTurn(convo, {
     if (turnForceTools.includes('fetch_url')) turnSkills.fetch_url = true;
   }
 
+  const clientTurnId = convo.incognito ? null : newId('turn');
   const stream = beginLiveStream(convo, {
     useAgent,
     deepResearch,
@@ -1901,6 +1911,7 @@ async function runAssistantTurn(convo, {
     turnModel: remote.model,
     speakerBotId: speakerBotId || null,
     loopPhase,
+    turnId: clientTurnId,
   });
   liveStarted = true;
   startedStream = stream;
@@ -1948,7 +1959,10 @@ async function runAssistantTurn(convo, {
     agent: useAgent,
     skills: turnSkills,
     force_tools: turnForceTools,
-    ...(convo.incognito ? {} : { conversation_id: convo.id }),
+    ...(convo.incognito ? {} : {
+      conversation_id: convo.id,
+      turn_id: clientTurnId,
+    }),
     ...(speakerEffort ? { thinking_effort: speakerEffort } : {}),
   };
   if (deepResearch) {
