@@ -111,29 +111,48 @@ function conflictHarness() {
   const convo = { id: 'chat-1', messages: [user] };
   const queue = [];
   const events = [];
-  let respond;
+  const fetchQueue = [];
   const state = vm.createContext({
     activeStreams: new Map(), outboundStarting: new Set(), outboundStartEpochs: new Map(),
     latestState: {}, selectedChatModel: 'model', thinkingSupported: false,
     activeId: convo.id, selectedRemoteModel: () => ({ ready: true, model: 'model' }),
+    settings: {},
+    DEFAULT_SETTINGS: {},
+    WEB_SEARCH_DEPTHS: [],
+    WEB_SEARCH_PROVIDERS: [],
+    WEB_SEARCH_PARALLEL_MODES: [],
+    WEB_SEARCH_SAFESEARCH: [],
+    WEB_SEARCH_RECENCIES: [],
+    APPROVAL_MODES: ['manual'],
+    sessionWorkspaceRoot: () => '',
+    Promise, AbortController,
     newId: (prefix) => prefix + '-test',
     syncComposerStreamUi() {}, renderSidebar() {}, resetTraceAutoOpenState() {}, syncStreamSpeakerChrome() {},
     beginLiveStream(c) {
-      const stream = { controller: new AbortController() };
+      const stream = { controller: new AbortController(), cancelled: false, replaced: false };
       state.activeStreams.set(c.id, stream);
       return stream;
     },
     userMessageApiContent: (message) => message.content, buildSystemPrompt: () => '',
-    fetch: () => new Promise((resolve) => { respond = resolve; }),
+    whenAborted(signal) {
+      if (signal?.aborted) return Promise.resolve();
+      return new Promise(() => {});
+    },
+    fetch: () => new Promise((resolve) => { fetchQueue.push(resolve); }),
+    scheduleCancel: async () => { events.push('cancel'); return true; },
     discardLiveStreamRow: () => events.push('discard'),
     getOutboundQueue: () => queue, saveConversations() {}, renderOutboundQueue() {}, updateComposerHint() {},
-    renderThread(_convo, options) {
-      assert.equal(options?.drainQueue, false, 'conflict recovery must not dispatch a queued turn');
-      events.push('render');
-    },
+    renderThread() { events.push('render'); },
     attachLiveTurn: async () => events.push('attach'),
-    driveAssistantSse: async () => assert.fail('conflict is not a completion stream'),
+    driveAssistantSse: async () => { events.push('sse'); },
+    needsGeneratedTitle: () => false,
+    generateConversationTitle() {},
     contextualModelError: (text) => text,
+    settleStoppedLiveStream(c, stream) {
+      stream.settled = true;
+      events.push('settle');
+      if (state.activeStreams.get(c.id) === stream) state.activeStreams.delete(c.id);
+    },
   });
   load(state, 'controls.js', ['markOutboundStarting', 'clearOutboundStarting', 'outboundStartIsCurrent']);
   load(state, 'runtime.js', ['runAssistantTurn', 'dropLiveSubscriber']);
@@ -141,17 +160,29 @@ function conflictHarness() {
     useAgent: false, skills: {}, text: 'queued prompt', dispatchedMessage: user,
     queueItem: { id: 'queued-1' }, previousTitle: 'title',
   });
-  return { state, queue, events, convo, run, respond: () => respond({ ok: false, status: 409 }) };
+  return {
+    state, queue, events, convo, run, fetchQueue,
+    respond(status, extra = {}) {
+      const resolve = fetchQueue.shift();
+      assert.ok(resolve, 'no pending completions request');
+      resolve({ ok: status === 200, status, ...extra });
+    },
+  };
 }
 
-test('conflict recovery requeues once and reconnects before any queue dispatch', async () => {
+test('conflict cancels the occupant and retries instead of attaching to it', async () => {
   const h = conflictHarness();
   const pending = h.run();
-  h.respond();
+  await new Promise((resolve) => setImmediate(resolve));
+  h.respond(409);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(h.events, ['cancel']);
+  h.respond(409);
   await pending;
-  assert.equal(h.queue.length, 1);
-  assert.equal(h.convo.messages.length, 0);
-  assert.deepEqual(h.events, ['discard', 'render', 'attach']);
+  assert.equal(h.queue.length, 0);
+  assert.equal(h.convo.messages.length, 1);
+  assert.ok(h.events.includes('sse'));
+  assert.ok(!h.events.includes('attach'));
 });
 
 test('a late conflict from a replaced request cannot mutate messages or reconnect', async () => {
@@ -159,12 +190,33 @@ test('a late conflict from a replaced request cannot mutate messages or reconnec
   const pending = h.run();
   const replacement = {};
   h.state.activeStreams.set('chat-1', replacement);
-  h.respond();
+  await new Promise((resolve) => setImmediate(resolve));
+  h.respond(409);
   await pending;
   assert.equal(h.queue.length, 0);
   assert.equal(h.convo.messages.length, 1);
   assert.deepEqual(h.events, []);
   assert.equal(h.state.activeStreams.get('chat-1'), replacement);
+});
+
+test('a leftover cancelled Processing row is settled before the next prompt starts', async () => {
+  const leftover = {
+    cancelled: true,
+    hardStopped: false,
+    settled: false,
+    partial: '',
+    controller: { abort() {}, signal: { aborted: false, addEventListener() {} } },
+    bodyReader: { cancel() {} },
+  };
+  const h = conflictHarness();
+  h.state.activeStreams.set('chat-1', leftover);
+  const pending = h.run();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(leftover.settled, true);
+  assert.ok(h.events.includes('settle'));
+  h.respond(200);
+  await pending;
+  assert.ok(h.events.includes('sse'));
 });
 
 test('editing a queued reply preserves its quoted context in the API payload', () => {

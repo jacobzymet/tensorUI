@@ -10,6 +10,14 @@ function parseSseEvent(raw) {
   return { event, data: dataLines.join('\n') };
 }
 
+function whenAborted(signal) {
+  if (!signal) return new Promise(() => {});
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    signal.addEventListener('abort', resolve, { once: true });
+  });
+}
+
 /**
  * Reveal streamed text a few code points per frame so chunks feel like a
  * typewriter. Catches up when backlog grows, and snap-flushes on end so
@@ -1795,13 +1803,22 @@ async function runAssistantTurn(convo, {
 }) {
   if (outboundStarting.has(convo.id) && !replaceLive) return false;
   if (activeStreams.has(convo.id)) {
-    if (!replaceLive) return false;
     const live = activeStreams.get(convo.id);
-    if (live) {
+    if (live && (live.cancelled || live.hardStopped || live.settled) && !replaceLive) {
+      // A previous Stop left this conversation busy. Free it so the next
+      // prompt can start instead of hanging on Processing.
       live.replaced = true;
       live.skipQueue = true;
+      if (typeof cancelLiveBodyReader === 'function') cancelLiveBodyReader(live);
+      try { live.controller.abort(); } catch { /* ignore */ }
+      settleStoppedLiveStream(convo, live, live.partial || '');
+    } else if (!replaceLive) {
+      return false;
+    } else if (live) {
+      live.replaced = true;
+      live.skipQueue = true;
+      abortStream(convo.id, { cancelServer: true });
     }
-    abortStream(convo.id, { cancelServer: true });
   }
   const startEpoch = markOutboundStarting(convo.id);
   let liveStarted = false;
@@ -1810,14 +1827,7 @@ async function runAssistantTurn(convo, {
   if (typeof clearBotsOutboundStopped === 'function') clearBotsOutboundStopped(convo.id);
   if (typeof clearLiveTurnUserCancel === 'function') clearLiveTurnUserCancel(convo.id);
   if (typeof waitForCancel === 'function') {
-    try {
-      await waitForCancel(convo.id);
-    } catch {
-      if (typeof showComposerHint === 'function') {
-        showComposerHint('The previous response is still shutting down. Try again in a moment.');
-      }
-      return false;
-    }
+    await waitForCancel(convo.id);
   }
   if (typeof outboundStartIsCurrent === 'function'
     && !outboundStartIsCurrent(convo.id, startEpoch)) {
@@ -1976,38 +1986,39 @@ async function runAssistantTurn(convo, {
 
   let response = null;
   try {
-    response = await fetch('/api/chat/completions', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal: stream.controller.signal,
-    });
-    if (stream.replaced || activeStreams.get(convo.id) !== stream) return false;
-    if (stream.cancelled) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (stream.controller.signal.aborted || stream.cancelled) break;
+      response = await Promise.race([
+        fetch('/api/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: stream.controller.signal,
+        }),
+        whenAborted(stream.controller.signal).then(() => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          throw error;
+        }),
+      ]);
+      if (stream.replaced || activeStreams.get(convo.id) !== stream) return false;
+      if (stream.cancelled) break;
+      if (response.ok || response.status !== 409 || attempt > 0) break;
+      if (typeof scheduleCancel !== 'function') break;
+      await scheduleCancel(convo.id, null);
+      if (stream.replaced || stream.cancelled || activeStreams.get(convo.id) !== stream) {
+        return false;
+      }
+    }
+    if (stream.cancelled || !response) {
       await driveAssistantSse(convo, stream, response);
       return true;
     }
     if (!response.ok) {
       if (response.status === 409) {
-        dropLiveSubscriber(convo.id, stream);
-        if (dispatchedMessage && queueItem) {
-          const index = convo.messages.indexOf(dispatchedMessage);
-          if (index >= 0) convo.messages.splice(index, 1);
-          if (!convo.messages.length && previousTitle) convo.title = previousTitle;
-          getOutboundQueue(convo.id).unshift(queueItem);
-          convo.updatedAt = Date.now();
-          saveConversations({ immediate: true });
-          if (activeId === convo.id) {
-            renderThread(convo, { drainQueue: false });
-            renderOutboundQueue(convo);
-          }
-          renderSidebar();
-          updateComposerHint();
-        }
-        await attachLiveTurn(convo, {});
-        return true;
+        throw new Error('Could not start a new response because another is still stopping. Try again.');
       }
       const problem = await response.json().catch(() => null);
       throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
@@ -2137,9 +2148,24 @@ async function resumeLiveTurns(list) {
   for (const [convoId, stream] of activeStreams) {
     const turnId = String(stream?.turnId || '').trim();
     if (!turnId) continue; // Incognito turns are intentionally browser-owned.
-    // Cancellation has already transferred ownership to driveAssistantSse,
-    // which flushes and persists any partial reply before releasing the stream.
-    if (stream.cancelled && !stream.hardStopped) continue;
+    // Stop already aborted the client fetch. If the server still owns this
+    // unfinished turn, leave it for the in-flight finalizer. If the server
+    // has forgotten it, the SSE is dead — settle now so Processing cannot
+    // occupy the composer until restart.
+    if (stream.cancelled && !stream.hardStopped) {
+      const info = advertised.get(convoId + '\0' + turnId);
+      if (info && !info.finished) continue;
+      if (typeof cancelLiveBodyReader === 'function') cancelLiveBodyReader(stream);
+      try { stream.controller.abort(); } catch { /* ignore */ }
+      const convo = conversations.find((item) => item.id === convoId);
+      if (convo && typeof settleStoppedLiveStream === 'function') {
+        settleStoppedLiveStream(convo, stream);
+      } else {
+        discardLiveStreamRow(stream);
+        finishLiveStream(convoId, stream);
+      }
+      continue;
+    }
     const info = advertised.get(convoId + '\0' + turnId);
     if (info && (!info.finished || stream.catchingUp)) continue;
     stream.replaced = true;
@@ -2206,9 +2232,16 @@ async function attachLiveTurn(convo, info, { force = false } = {}) {
   const stream = activeStreams.get(convo.id);
   if (!stream) return;
   try {
-    const response = await fetch('/api/chat/live/' + encodeURIComponent(convo.id), {
-      signal: stream.controller.signal,
-    });
+    const response = await Promise.race([
+      fetch('/api/chat/live/' + encodeURIComponent(convo.id), {
+        signal: stream.controller.signal,
+      }),
+      whenAborted(stream.controller.signal).then(() => {
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        throw error;
+      }),
+    ]);
     if (!response.ok) {
       if (response.status === 404) {
         discardLiveStreamRow(stream);
@@ -2267,6 +2300,7 @@ function beginLiveStream(convo, {
     convoId: convo.id,
     cancelled: false,
     hardStopped: false,
+    settled: false,
   };
   if (stream.turnId && typeof rememberHandledLiveTurn === 'function') {
     rememberHandledLiveTurn(stream.turnId);
@@ -2331,6 +2365,68 @@ function discardLiveStreamRow(stream) {
   try { stream.dom?.thinkingOrb?.stop(); } catch { /* ignore */ }
   if (row.isConnected) row.remove();
   stream.dom = null;
+}
+
+function settleStoppedLiveStream(convo, stream, rawText) {
+  if (!convo || !stream || stream.settled) return;
+  stream.settled = true;
+  stream.cancelled = true;
+  const cancelledExtracted = typeof collectTurnMemoryExtraction === 'function'
+    ? collectTurnMemoryExtraction(stream, rawText != null ? rawText : stream.partial)
+    : { cleaned: String(rawText != null ? rawText : (stream.partial || '')).trim() };
+  const cancelledText = String(cancelledExtracted.cleaned || '').trim();
+  const cancelledVisible = (typeof streamingAnswerText === 'function'
+    ? streamingAnswerText(cancelledText)
+    : cancelledText).trim();
+  const silentNoReply = typeof isSilentNoReply === 'function'
+    && (isSilentNoReply(cancelledVisible) || isSilentNoReply(cancelledText));
+  const speakerBotId = stream.speakerBotId || null;
+  const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
+  if (cancelledVisible && cancelledVisible !== 'No response.' && !silentNoReply) {
+    const message = {
+      role: 'assistant',
+      content: cancelledText,
+      model: stream.turnModel
+        || String(selectedChatModel || '').trim()
+        || 'model',
+    };
+    if (speakerBot) {
+      message.speakerId = speakerBot.id;
+      message.speakerHandle = speakerBot.handle;
+    }
+    if (stream.loopPhase) {
+      message.loopRunId = stream.loopPhase.runId || '';
+      message.loopPhaseId = stream.loopPhase.id || '';
+      message.loopPhaseLabel = stream.loopPhase.label || '';
+      message.loopPhaseIndex = stream.loopPhase.index || null;
+      message.loopPhaseTotal = stream.loopPhase.total || null;
+    }
+    const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
+    const msgIndex = convo.messages.indexOf(committedMessage);
+    const viewing = activeId === convo.id;
+    let dom = stream.dom && stream.dom.row && stream.dom.row.isConnected
+      ? stream.dom
+      : null;
+    if (!dom && viewing && !stream.hardStopped) {
+      dom = ensureStreamDom(convo, stream);
+    }
+    if (dom && dom.row.isConnected) {
+      try { dom.thinkingOrb?.stop(); } catch { /* ignore */ }
+      if (dom.statusEl) dom.statusEl.classList.add('is-hidden');
+      delete dom.row.dataset.streamId;
+      dom.row.dataset.msgIndex = String(msgIndex);
+      dom.row.dataset.raw = committedMessage.content || '';
+      if (typeof syncMessageSpeaker === 'function') syncMessageSpeaker(dom.row, committedMessage);
+      if (typeof settleAssistantRow === 'function') {
+        settleAssistantRow(dom.row, committedMessage, { animateCollapse: false });
+      }
+    }
+    convo.updatedAt = Date.now();
+    if (typeof saveConversations === 'function') saveConversations({ immediate: true });
+  } else {
+    discardLiveStreamRow(stream);
+  }
+  finishLiveStream(convo.id, stream);
 }
 
 async function driveAssistantSse(convo, stream, response) {
@@ -2553,10 +2649,18 @@ async function driveAssistantSse(convo, stream, response) {
   try {
     if (response && response.body) {
       const reader = response.body.getReader();
+      stream.bodyReader = reader;
       const decoder = new TextDecoder();
       let buffer = '';
+      try {
       for (;;) {
-        const { value, done } = await reader.read();
+        if (stream.cancelled || stream.replaced || stream.controller.signal.aborted) break;
+        const next = await Promise.race([
+          reader.read().then((chunk) => ({ chunk })),
+          whenAborted(stream.controller.signal).then(() => ({ aborted: true })),
+        ]);
+        if (next.aborted || stream.cancelled || stream.replaced) break;
+        const { value, done } = next.chunk;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const events = buffer.split(/\r?\n\r?\n/);
@@ -2636,6 +2740,10 @@ async function driveAssistantSse(convo, stream, response) {
           }
         }
       }
+      } finally {
+        stream.bodyReader = null;
+        try { await reader.cancel(); } catch { /* ignore */ }
+      }
     }
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -2658,7 +2766,7 @@ async function driveAssistantSse(convo, stream, response) {
 
   let queueAfter = !stream.skipQueue && !stream.replaced;
   try {
-  if (stream.replaced || activeStreams.get(convo.id) !== stream) {
+  if (stream.settled || stream.replaced || activeStreams.get(convo.id) !== stream) {
     queueAfter = false;
     return;
   }
@@ -2670,60 +2778,7 @@ async function driveAssistantSse(convo, stream, response) {
   // Stop mid-turn: keep any useful partial reply; never spam empty "No response." rows.
   if (stream.cancelled || (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id))) {
     queueAfter = false;
-    stream.cancelled = true;
-    const cancelledExtracted = collectTurnMemoryExtraction(stream, typer.target);
-    const cancelledText = String(cancelledExtracted.cleaned || '').trim();
-    const cancelledVisible = streamingAnswerText(cancelledText).trim();
-    const silentNoReply = typeof isSilentNoReply === 'function'
-      && (isSilentNoReply(cancelledVisible) || isSilentNoReply(cancelledText));
-    const speakerBotId = stream.speakerBotId || null;
-    const speakerBot = speakerBotId && typeof getBot === 'function' ? getBot(speakerBotId, convo) : null;
-    // Never persist the placeholder error as a real message.
-    if (cancelledVisible && cancelledVisible !== 'No response.' && !silentNoReply) {
-      const message = {
-        role: 'assistant',
-        content: cancelledText,
-        model: stream.turnModel
-          || fallbackTurnModel
-          || String(selectedChatModel || '').trim()
-          || 'model',
-      };
-      if (speakerBot) {
-        message.speakerId = speakerBot.id;
-        message.speakerHandle = speakerBot.handle;
-      }
-      if (stream.loopPhase) {
-        message.loopRunId = stream.loopPhase.runId || '';
-        message.loopPhaseId = stream.loopPhase.id || '';
-        message.loopPhaseLabel = stream.loopPhase.label || '';
-        message.loopPhaseIndex = stream.loopPhase.index || null;
-        message.loopPhaseTotal = stream.loopPhase.total || null;
-      }
-      const committedMessage = commitLiveAssistant(convo, message, stream.turnId);
-      const msgIndex = convo.messages.indexOf(committedMessage);
-      const viewing = activeId === convo.id;
-      // Do not recreate a discarded live row just to settle a cancel.
-      let dom = stream.dom && stream.dom.row && stream.dom.row.isConnected
-        ? stream.dom
-        : null;
-      if (!dom && viewing && !stream.hardStopped) {
-        // Partial text exists but UI was torn down — rebuild once to settle.
-        dom = ensureStreamDom(convo, stream);
-      }
-      if (dom && dom.row.isConnected) {
-        try { dom.thinkingOrb?.stop(); } catch { /* ignore */ }
-        dom.statusEl.classList.add('is-hidden');
-        delete dom.row.dataset.streamId;
-        dom.row.dataset.msgIndex = String(msgIndex);
-        dom.row.dataset.raw = committedMessage.content || '';
-        syncMessageSpeaker(dom.row, committedMessage);
-        settleAssistantRow(dom.row, committedMessage, { animateCollapse: false });
-      }
-      convo.updatedAt = Date.now();
-      saveConversations({ immediate: true });
-    } else {
-      discardLiveStreamRow(stream);
-    }
+    settleStoppedLiveStream(convo, stream, typer.target);
     return;
   }
 
@@ -2758,7 +2813,7 @@ async function driveAssistantSse(convo, stream, response) {
     || (typeof isBotsOutboundStopped === 'function' && isBotsOutboundStopped(convo.id))
   ) {
     queueAfter = false;
-    discardLiveStreamRow(stream);
+    settleStoppedLiveStream(convo, stream, typer.target);
     return;
   }
 

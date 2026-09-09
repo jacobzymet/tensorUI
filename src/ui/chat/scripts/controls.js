@@ -137,17 +137,27 @@ function scheduleCancel(convoId, turnId) {
   const prev = cancelInFlight.get(convoId) || Promise.resolve(true);
   const next = prev.catch(() => false).then(async () => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
+    let timeout;
+    const timedOut = new Promise((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, 6000);
+    });
     try {
-      const response = await fetch('/api/chat/cancel', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          conversation_id: convoId,
-          ...(turnId ? { turn_id: turnId } : {}),
+      const response = await Promise.race([
+        fetch('/api/chat/cancel', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: convoId,
+            ...(turnId ? { turn_id: turnId } : {}),
+          }),
+          signal: controller.signal,
         }),
-        signal: controller.signal,
-      });
+        timedOut,
+      ]);
+      if (!response) return false;
       if (!response.ok) return false;
       const result = await response.json().catch(() => null);
       return result?.settled === true;
@@ -167,9 +177,21 @@ function scheduleCancel(convoId, turnId) {
 function waitForCancel(convoId) {
   const pending = convoId ? cancelInFlight.get(convoId) : null;
   if (!pending) return Promise.resolve();
-  return pending.then((settled) => {
-    if (!settled) throw new Error('Previous response did not stop cleanly.');
-  });
+  // Always continue after the cancel HTTP finishes. A failed/unsettled
+  // cancel must not freeze every later prompt on Processing.
+  return pending.then(() => {}).catch(() => {});
+}
+
+function cancelLiveBodyReader(stream) {
+  const reader = stream?.bodyReader;
+  if (!reader || typeof reader.cancel !== 'function') return;
+  stream.bodyReader = null;
+  try {
+    const pending = reader.cancel();
+    // cancel() returns a promise. AbortError from an already-aborted
+    // BodyStreamBuffer is expected and must not become uncaught.
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch { /* ignore */ }
 }
 
 function abortStream(convoId, {
@@ -188,6 +210,7 @@ function abortStream(convoId, {
     if (cancelServer && !soft && !preservePartial) stream.hardStopped = true;
     rememberHandledLiveTurn(stream.turnId);
     if (cancelServer && !soft) noteLiveTurnUserCancel(convoId, stream.turnId);
+    cancelLiveBodyReader(stream);
     try { stream.controller.abort(); } catch { /* ignore */ }
     if (cancelServer && !soft && !preservePartial) {
       if (typeof discardLiveStreamRow === 'function') discardLiveStreamRow(stream);

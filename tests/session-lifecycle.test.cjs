@@ -35,17 +35,36 @@ function resumeHarness() {
     diskEncryptionLocked: () => false,
     conversations: [{ id: 'chat-1', messages: [] }],
     activeId: 'chat-1',
+    selectedChatModel: 'model',
     emptyState: null,
     AbortController,
+    Promise,
     renderSidebar() {},
     syncComposerStreamUi() {},
     ensureStreamDom() {},
     scrollToBottom() {},
     reclaimUnappliedSteers() {},
     maybeSendNextQueued() {},
+    commitLiveAssistant(convo, message) {
+      convo.messages.push(message);
+      return message;
+    },
     discardLiveStreamRow(stream) { stream.discarded = true; },
+    whenAborted(signal) {
+      if (!signal) return new Promise(() => {});
+      if (signal.aborted) return Promise.resolve();
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true });
+      });
+    },
   });
-  for (const name of ['resumeLiveTurns', 'attachLiveTurn', 'beginLiveStream', 'finishLiveStream']) {
+  for (const name of [
+    'resumeLiveTurns',
+    'attachLiveTurn',
+    'beginLiveStream',
+    'finishLiveStream',
+    'settleStoppedLiveStream',
+  ]) {
     vm.runInContext(runtimeDeclaration(name), state);
   }
   return state;
@@ -103,12 +122,24 @@ test('state polling keeps a Processing row while the server still owns its turn'
   assert.equal(state.activeStreams.get('chat-1'), stream);
 });
 
-test('state polling leaves a stopped partial reply with its finalizer', async () => {
+test('state polling settles a stopped reply the server no longer owns', async () => {
   const state = resumeHarness();
   const stream = state.beginLiveStream(state.conversations[0], { turnId: 'stopping-turn' });
   stream.cancelled = true;
   stream.hardStopped = false;
+  stream.partial = '';
   await state.resumeLiveTurns([]);
+  assert.equal(stream.discarded, true);
+  assert.equal(stream.settled, true);
+  assert.equal(state.activeStreams.size, 0);
+});
+
+test('state polling keeps a stopped partial while the server still owns its turn', async () => {
+  const state = resumeHarness();
+  const stream = state.beginLiveStream(state.conversations[0], { turnId: 'stopping-turn' });
+  stream.cancelled = true;
+  stream.hardStopped = false;
+  await state.resumeLiveTurns([{ conversation_id: 'chat-1', turn_id: 'stopping-turn' }]);
   assert.equal(stream.discarded, undefined);
   assert.equal(state.activeStreams.get('chat-1'), stream);
 });
@@ -162,6 +193,76 @@ test('Stop invalidates a pending start without clearing a newer attempt', () => 
   assert.equal(state.outboundStarting.has('chat-1'), false);
 });
 
+test('Stop cancels a wedged SSE reader so the finalizer can run', () => {
+  let readerCancelled = false;
+  const stream = {
+    cancelled: false,
+    hardStopped: false,
+    turnId: 'turn-1',
+    controller: { abort() {} },
+    bodyReader: { cancel() { readerCancelled = true; } },
+  };
+  const state = vm.createContext({
+    activeStreams: new Map([['chat-1', stream]]),
+    invalidateOutboundStart() {},
+    markBotsOutboundStopped() {},
+    bumpBotsOutboundEpoch() {},
+    rememberHandledLiveTurn() {},
+    noteLiveTurnUserCancel() {},
+    discardLiveStreamRow() {},
+    scheduleCancel: () => Promise.resolve(),
+    syncComposerStreamUi() {},
+  });
+  vm.runInContext(declaration('cancelLiveBodyReader'), state);
+  vm.runInContext(declaration('abortStream'), state);
+
+  state.abortStream('chat-1', { preservePartial: true });
+
+  assert.equal(stream.cancelled, true);
+  assert.equal(readerCancelled, true);
+  assert.equal(stream.bodyReader, null);
+  assert.equal(state.activeStreams.get('chat-1'), stream);
+});
+
+test('Stop swallows an already-aborted body reader instead of leaking AbortError', async () => {
+  const rejections = [];
+  const onUnhandled = (reason) => { rejections.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  const stream = {
+    cancelled: false,
+    hardStopped: false,
+    turnId: 'turn-1',
+    controller: { abort() {} },
+    bodyReader: {
+      cancel() {
+        return Promise.reject(Object.assign(new Error('BodyStreamBuffer was aborted'), {
+          name: 'AbortError',
+        }));
+      },
+    },
+  };
+  const state = vm.createContext({
+    activeStreams: new Map([['chat-1', stream]]),
+    invalidateOutboundStart() {},
+    markBotsOutboundStopped() {},
+    bumpBotsOutboundEpoch() {},
+    rememberHandledLiveTurn() {},
+    noteLiveTurnUserCancel() {},
+    discardLiveStreamRow() {},
+    scheduleCancel: () => Promise.resolve(),
+    syncComposerStreamUi() {},
+  });
+  vm.runInContext(declaration('cancelLiveBodyReader'), state);
+  vm.runInContext(declaration('abortStream'), state);
+
+  state.abortStream('chat-1', { preservePartial: true });
+  await Promise.resolve();
+  process.off('unhandledRejection', onUnhandled);
+
+  assert.equal(stream.cancelled, true);
+  assert.equal(rejections.length, 0);
+});
+
 test('Stop leaves a live stream with its finalizer so partial text can be saved', () => {
   let discarded = false;
   let aborted = false;
@@ -182,6 +283,7 @@ test('Stop leaves a live stream with its finalizer so partial text can be saved'
     scheduleCancel: () => Promise.resolve(),
     syncComposerStreamUi() {},
   });
+  vm.runInContext(declaration('cancelLiveBodyReader'), state);
   vm.runInContext(declaration('abortStream'), state);
 
   state.abortStream('chat-1', { preservePartial: true });
@@ -302,4 +404,49 @@ test('server cancellation is bounded and carries an abort signal', async () => {
   assert.equal(aborted, true);
   assert.ok(requestSignal);
   assert.equal(settled, false);
+});
+
+test('server cancellation settles when fetch ignores its abort signal', async () => {
+  let expire;
+  let aborted = false;
+  class FakeAbortController {
+    constructor() { this.signal = {}; }
+    abort() { aborted = true; }
+  }
+  const state = vm.createContext({
+    cancelInFlight: new Map(),
+    AbortController: FakeAbortController,
+    setTimeout(callback) {
+      expire = callback;
+      return 1;
+    },
+    clearTimeout() {},
+    fetch: () => new Promise(() => {}),
+    Promise, JSON,
+  });
+  vm.runInContext(declaration('scheduleCancel'), state);
+
+  const pending = state.scheduleCancel('chat-1', 'turn-1');
+  await new Promise((resolve) => setImmediate(resolve));
+  expire();
+
+  assert.equal(await pending, false);
+  assert.equal(aborted, true);
+  assert.equal(state.cancelInFlight.size, 0);
+});
+
+test('an unsettled cancel does not freeze later prompts', async () => {
+  const state = vm.createContext({
+    cancelInFlight: new Map(), AbortController, setTimeout, clearTimeout,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ ok: false, cancelled: false, settled: false }),
+    }),
+    Promise, JSON,
+  });
+  for (const name of ['scheduleCancel', 'waitForCancel']) {
+    vm.runInContext(declaration(name), state);
+  }
+  assert.equal(await state.scheduleCancel('chat-1', 'turn-1'), false);
+  await state.waitForCancel('chat-1');
 });

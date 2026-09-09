@@ -21,6 +21,7 @@ const MAX_BUFFERED_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_BUFFERED_FRAMES: usize = 100_000;
 const CANCEL_TOMBSTONE_TTL: Duration = Duration::from_secs(60);
 const CANCEL_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+const PUMP_ABORT_TIMEOUT: Duration = Duration::from_millis(500);
 #[cfg(not(test))]
 const LINGER: Duration = Duration::from_secs(90);
 #[cfg(test)]
@@ -129,6 +130,15 @@ impl LiveTurn {
 
     fn request_cancel(&self) {
         self.cancel.send_replace(true);
+    }
+
+    fn cancel_requested(&self) -> bool {
+        *self.cancel.borrow()
+    }
+
+    fn mark_cancelled_done(&self) {
+        self.push_terminal_bytes(b"data: [DONE]\n\n".to_vec());
+        self.finish();
     }
 
     fn set_pump(&self, handle: tokio::task::JoinHandle<()>) {
@@ -345,29 +355,30 @@ impl LiveHub {
             return (false, true);
         };
         if turn.finished.load(Ordering::SeqCst) {
+            self.drop_if_same(&turn);
             return (false, true);
         }
 
         turn.request_cancel();
-        if tokio::time::timeout(CANCEL_SETTLE_TIMEOUT, turn.wait_done())
+        let finished = tokio::time::timeout(CANCEL_SETTLE_TIMEOUT, turn.wait_done())
             .await
-            .unwrap_or(false)
-        {
-            return (true, true);
-        }
+            .unwrap_or(false);
 
-        // Graceful cancellation should be immediate. Hard-abort the pump only
-        // as a fail-safe, and await it so its upstream response is truly gone.
-        if let Some(mut pump) = turn.take_pump() {
-            pump.abort();
-            let _ = (&mut pump).await;
-            turn.push_terminal_bytes(b"data: [DONE]\n\n".to_vec());
-            turn.finish();
-            self.drop_if_same(&turn);
-            return (true, true);
+        if !finished {
+            // Graceful cancellation should be immediate. Hard-abort the pump
+            // as a fail-safe so a wedged upstream cannot occupy this slot.
+            if let Some(mut pump) = turn.take_pump() {
+                pump.abort();
+                let _ = tokio::time::timeout(PUMP_ABORT_TIMEOUT, &mut pump).await;
+            }
+            if !turn.finished.load(Ordering::SeqCst) {
+                turn.mark_cancelled_done();
+            }
         }
-
-        (true, turn.finished.load(Ordering::SeqCst))
+        // Always free the conversation. Linger is only for finished replay;
+        // a cancelled turn must never block the next prompt until restart.
+        self.drop_if_same(&turn);
+        (true, true)
     }
 
     pub fn start(
@@ -378,6 +389,8 @@ impl LiveHub {
         let lease = crate::session::lease().map_err(|_| info.clone())?;
         let conversation_id = info.conversation_id.clone();
         let turn_id = info.turn_id.clone();
+        let mut displaced = None;
+        let mut displaced_turn = None;
         let turn = {
             let mut turns = self.lock_turns();
             if !lease.valid() {
@@ -393,20 +406,53 @@ impl LiveHub {
                     return Err(info);
                 }
             }
-            // Cancelling is not finished. Never overlap two upstream
-            // generations for one conversation.
-            if let Some(existing) = turns.get(&conversation_id)
-                && !existing.finished.load(Ordering::SeqCst)
-            {
-                return Err(existing.snapshot_info());
+            if let Some(existing) = turns.get(&conversation_id).cloned() {
+                let finished = existing.finished.load(Ordering::SeqCst);
+                // An in-flight generation still owns the slot. A cancelled
+                // (or finished) one must not; Stop would otherwise 409 every
+                // later prompt onto the dead turn.
+                if !finished && !existing.cancel_requested() {
+                    return Err(existing.snapshot_info());
+                }
+                if !finished {
+                    existing.request_cancel();
+                    displaced = existing.take_pump();
+                    displaced_turn = Some(existing);
+                }
             }
             let turn = Arc::new(LiveTurn::new(info));
             turns.insert(conversation_id.clone(), Arc::clone(&turn));
             turn
         };
+        if let Some(old) = displaced_turn
+            && !old.finished.load(Ordering::SeqCst)
+        {
+            old.mark_cancelled_done();
+        }
+        if let Some(handle) = displaced {
+            handle.abort();
+        }
         let pump = spawn_pump(self.clone(), Arc::clone(&turn), source, lease);
         turn.set_pump(pump);
+        // Cancel can drop us from the hub after insert and before set_pump.
+        // Abort the worker so it cannot keep an upstream LLM slot occupied.
+        if turn.cancel_requested() || !self.holds(&turn) {
+            if let Some(handle) = turn.take_pump() {
+                handle.abort();
+            }
+            if !turn.finished.load(Ordering::SeqCst) {
+                turn.mark_cancelled_done();
+            }
+            self.drop_if_same(&turn);
+        }
         Ok(turn.subscribe_stream())
+    }
+
+    fn holds(&self, turn: &Arc<LiveTurn>) -> bool {
+        let id = &turn.info.conversation_id;
+        self.lock_turns()
+            .get(id)
+            .is_some_and(|held| Arc::ptr_eq(held, turn))
     }
 
     fn drop_if_same(&self, turn: &Arc<LiveTurn>) {
@@ -468,6 +514,10 @@ fn spawn_pump(
             turn.push_terminal_bytes(b"data: [DONE]\n\n".to_vec());
         }
         turn.finish();
+        if cancelled {
+            hub.drop_if_same(&turn);
+            return;
+        }
         tokio::time::sleep(LINGER).await;
         hub.drop_if_same(&turn);
     })
@@ -616,11 +666,12 @@ mod tests {
         assert!(hub.cancel("c3", Some("turn_test")));
         let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
         loop {
-            if hub
+            let gone = hub.info("c3").is_none();
+            let finished = hub
                 .list()
                 .iter()
-                .any(|item| item.conversation_id == "c3" && item.finished)
-            {
+                .any(|item| item.conversation_id == "c3" && item.finished);
+            if gone || finished {
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
@@ -634,6 +685,46 @@ mod tests {
             .map(|frame| String::from_utf8_lossy(&frame).into_owned())
             .collect::<String>();
         assert!(joined.contains("[DONE]"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_turn_is_dropped_without_waiting_for_linger() {
+        let hub = LiveHub::new();
+        let _first = hub
+            .start(info("c8"), Box::pin(futures_util::stream::pending()))
+            .expect("start");
+        let (cancelled, settled) = hub.cancel_and_wait("c8", Some("turn_test")).await;
+        assert!(cancelled);
+        assert!(settled);
+        assert!(hub.info("c8").is_none());
+    }
+
+    #[tokio::test]
+    async fn start_replaces_a_cancelled_unfinished_turn() {
+        let hub = LiveHub::new();
+        let first = hub
+            .start(info("c9"), Box::pin(futures_util::stream::pending()))
+            .expect("first start");
+        assert!(hub.cancel("c9", Some("turn_test")));
+
+        let mut next_info = info("c9");
+        next_info.turn_id = "turn_new".into();
+        let replacement = hub
+            .start(next_info, source(vec![b"data: next\n\n"]))
+            .expect("a cancelled turn must not 409 the next prompt");
+        let replacement_text = collect(replacement)
+            .await
+            .into_iter()
+            .map(|frame| String::from_utf8_lossy(&frame).into_owned())
+            .collect::<String>();
+        assert!(replacement_text.contains("next"));
+
+        let first_text = collect(first)
+            .await
+            .into_iter()
+            .map(|frame| String::from_utf8_lossy(&frame).into_owned())
+            .collect::<String>();
+        assert!(first_text.contains("[DONE]"));
     }
 
     #[tokio::test]
