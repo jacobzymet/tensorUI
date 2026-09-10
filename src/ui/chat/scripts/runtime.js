@@ -4078,9 +4078,9 @@ function syncEncryptionPassphraseWarning() {
   const length = Array.from(passphrase).length;
   const messages = [];
   if (length > 0 && length < 16) {
-    messages.push('This passphrase is short (' + length + ' characters). 16 or more is recommended, but you can continue.');
+    messages.push('This passphrase has ' + length + ' characters. Use at least 16 characters. You can continue with the current passphrase.');
   } else if (length > 1024) {
-    messages.push('This passphrase is unusually long (' + length + ' characters). It is allowed, but may be difficult to enter reliably.');
+    messages.push('This passphrase has ' + length + ' characters. You can use it, but a shorter passphrase can be easier to enter correctly.');
   }
   if (confirm && passphrase !== confirm) {
     messages.push('The confirmation does not match.');

@@ -42,6 +42,7 @@ test('only the prompt whose response is being scrolled stays pinned', () => {
   const prompts = [row(-300), row(8), row(500)];
   const context = vm.createContext({
     PROMPT_PIN_TOP_PX: 8,
+    chatShell: { dataset: { surface: 'chat' } },
     chatViewport: { getBoundingClientRect: () => ({ top: 0 }) },
     chatThread: { querySelectorAll: () => prompts },
   });
@@ -60,6 +61,7 @@ test('the outgoing prompt fades smoothly as the next prompt covers it', () => {
   const prompts = [row(8, 120), row(68, 40)];
   const context = vm.createContext({
     PROMPT_PIN_TOP_PX: 8,
+    chatShell: { dataset: { surface: 'chat' } },
     chatViewport: { getBoundingClientRect: () => ({ top: 0 }) },
     chatThread: { querySelectorAll: () => prompts },
   });
@@ -74,4 +76,30 @@ test('the outgoing prompt fades smoothly as the next prompt covers it', () => {
   context.syncPinnedUserPrompt();
   assert.equal(prompts[0].properties.has('--prompt-exit-progress'), false);
   assert.equal(prompts[1].classList.contains('is-pinned-prompt'), true);
+});
+
+test('Loop prompts use normal scrolling without pinning or handoff transitions', () => {
+  const prompts = [row(-200, 120), row(40, 60)];
+  prompts[0].classList.toggle('is-pinned-prompt', true);
+  prompts[0].style.setProperty('--prompt-exit-progress', '0.500');
+  prompts[0].style.setProperty('--prompt-exit-opacity', '0.500');
+  prompts[0].style.setProperty('--prompt-exit-shift', '-2.80px');
+  prompts[0].style.setProperty('--prompt-exit-scale', '0.9940');
+  const context = vm.createContext({
+    PROMPT_PIN_TOP_PX: 8,
+    chatShell: { dataset: { surface: 'bots' } },
+    chatViewport: {
+      getBoundingClientRect: () => {
+        assert.fail('Loop prompts must not calculate a pin line');
+      },
+    },
+    chatThread: { querySelectorAll: () => prompts },
+  });
+  vm.runInContext(declaration('syncPinnedUserPrompt'), context);
+
+  context.syncPinnedUserPrompt();
+
+  assert.deepEqual(prompts.map((item) => item.classList.contains('is-pinned-prompt')), [false, false]);
+  assert.equal(prompts[0].properties.size, 0);
+  assert.equal(prompts[1].properties.size, 0);
 });

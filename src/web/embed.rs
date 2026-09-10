@@ -74,6 +74,7 @@ mod tests {
         assert!(CHAT_CSS.contains("@container scroll-state(stuck: top)"));
         assert!(CHAT_CSS.contains("-webkit-line-clamp: 2"));
         assert!(CHAT_CSS.contains(".msg.msg-role-user:not(.is-pinned-prompt):not(.msg-queued)"));
+        assert!(CHAT_CSS.contains(":not([data-surface=\"bots\"]) #chatThread"));
         assert!(!CHAT_CSS.contains(".msg.msg-role-user.is-stuck"));
     }
 
@@ -89,6 +90,16 @@ mod tests {
         }
         assert!(CHAT_JS.contains("function bulkSetSelectedConversationsPinned("));
         assert!(CHAT_JS.contains("function bulkDeleteSelectedConversations("));
+    }
+
+    #[test]
+    fn settings_copy_does_not_use_em_dashes() {
+        let settings = CHAT_HTML
+            .split("id=\"settingsModal\"")
+            .nth(1)
+            .and_then(|html| html.split("id=\"unlockModal\"").next())
+            .expect("settings markup should be embedded");
+        assert!(!settings.contains('—'));
     }
 
     #[test]

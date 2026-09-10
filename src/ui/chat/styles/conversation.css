@@ -96,18 +96,18 @@
   min-height: 0;
 }
 /* Let the next prompt cover the sticky prompt before it takes over the pin. */
-#chatThread > .msg.msg-role-user:not(.is-pinned-prompt):not(.msg-queued) {
+.chat-shell:not([data-surface="bots"]) #chatThread > .msg.msg-role-user:not(.is-pinned-prompt):not(.msg-queued) {
   position: relative;
   z-index: 7;
 }
-#chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) {
+.chat-shell:not([data-surface="bots"]) #chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) {
   position: sticky;
   top: 0.45rem;
   z-index: 6;
   container-type: scroll-state;
   pointer-events: none;
 }
-#chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) > * {
+.chat-shell:not([data-surface="bots"]) #chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) > * {
   pointer-events: auto;
   opacity: var(--prompt-exit-opacity, 1);
   transform: translate3d(0, var(--prompt-exit-shift, 0), 0) scale(var(--prompt-exit-scale, 1));
@@ -115,7 +115,7 @@
   will-change: opacity, transform;
 }
 @media (prefers-reduced-motion: reduce) {
-  #chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) > * {
+  .chat-shell:not([data-surface="bots"]) #chatThread > .msg.msg-role-user.is-pinned-prompt:not(.msg-queued) > * {
     opacity: 1;
     transform: none;
   }

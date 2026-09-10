@@ -27,11 +27,10 @@ function refreshSettingsDataSummary() {
   const projectCount = projects.length;
   const chatLabel = chatCount === 1 ? '1 chat' : chatCount + ' chats';
   const projectLabel = projectCount === 1 ? '1 project' : projectCount + ' projects';
-  const where = 'on disk';
   const loopLabel = loopCount === 1 ? '1 loop' : loopCount + ' loops';
   const profileLabel = activeProfile()?.name || 'Personal';
-  el.textContent = profileLabel + ' profile · stored ' + where + ': '
-    + chatLabel + ' · ' + loopLabel + ' · ' + projectLabel + '.';
+  el.textContent = profileLabel + ' profile. Stored on disk: '
+    + chatLabel + ', ' + loopLabel + ', and ' + projectLabel + '.';
   const clearChats = document.getElementById('btnClearChats');
   const clearLoops = document.getElementById('btnClearLoops');
   const clearProjects = document.getElementById('btnClearProjects');

@@ -3435,6 +3435,16 @@ const PROMPT_PIN_TOP_PX = 8;
 
 function syncPinnedUserPrompt() {
   const rows = [...chatThread.querySelectorAll('.msg.msg-role-user:not(.msg-queued)')];
+  if (chatShell?.dataset?.surface === 'bots') {
+    rows.forEach((row) => {
+      row.classList.toggle('is-pinned-prompt', false);
+      row.style.removeProperty('--prompt-exit-progress');
+      row.style.removeProperty('--prompt-exit-opacity');
+      row.style.removeProperty('--prompt-exit-shift');
+      row.style.removeProperty('--prompt-exit-scale');
+    });
+    return;
+  }
   const pinLine = chatViewport.getBoundingClientRect().top + PROMPT_PIN_TOP_PX;
   let active = null;
   let activeIndex = -1;

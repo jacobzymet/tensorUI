@@ -67,7 +67,7 @@ function describeConnectionHealth(result) {
       return {
         state: 'ok',
         title: 'Connected',
-        detail: [styleBit, 'Host responded, but /models returned no models yet.']
+        detail: [styleBit, 'The provider responded, but /models returned no models.']
           .filter(Boolean)
           .join(' · '),
       };
@@ -127,17 +127,17 @@ function syncProviderStyleHints() {
   if (style === 'anthropic') {
     base.placeholder = 'https://api.anthropic.com/v1';
     if (!token.placeholder.startsWith('saved')) {
-      token.placeholder = 'sk-ant-… or leave blank';
+      token.placeholder = 'Anthropic token, or leave blank';
     }
   } else if (style === 'openai') {
     base.placeholder = 'https://api.openai.com/v1';
     if (!token.placeholder.startsWith('saved')) {
-      token.placeholder = 'sk-… or leave blank';
+      token.placeholder = 'OpenAI token, or leave blank';
     }
   } else {
     base.placeholder = 'https://api.openai.com/v1 or https://api.anthropic.com/v1';
     if (!token.placeholder.startsWith('saved')) {
-      token.placeholder = 'sk-… / sk-ant-… or leave blank';
+      token.placeholder = 'API token, or leave blank';
     }
   }
 }
@@ -192,8 +192,8 @@ function providerHealthLabel(provider) {
   if (kind === 'ready' || health.ok) return { text: 'Ready', chip: 'ready', kind: 'ready' };
   if (kind === 'checking') return { text: 'Checking…', chip: 'checking', kind };
   if (kind === 'waiting') return { text: 'No model running', chip: 'warn', kind, hint: 'Start a model on the host.' };
-  if (kind === 'empty') return { text: 'No models listed', chip: 'warn', kind, hint: 'Reachable, but the endpoint returned an empty model list.' };
-  if (kind === 'auth') return { text: 'Auth failed', chip: 'failed', kind, hint: 'Check the API token.' };
+  if (kind === 'empty') return { text: 'No models listed', chip: 'warn', kind, hint: 'The provider is available, but the endpoint returned an empty model list.' };
+  if (kind === 'auth') return { text: 'Authentication failed', chip: 'failed', kind, hint: 'Check the API token.' };
   return { text: 'Unreachable', chip: 'failed', kind: 'error', hint: health.error || 'Check the base URL.' };
 }
 
@@ -253,7 +253,7 @@ function renderProviderSettings() {
       </li>`;
   }).join('');
   if (hint && !hint.dataset.sticky) {
-    setProviderFormHint('Add runs a connection test automatically.');
+    setProviderFormHint('Select Add to test the connection automatically.');
   }
 }
 
@@ -269,7 +269,7 @@ function clearProviderForm() {
   document.getElementById('providerApiStyle').value = 'auto';
   document.getElementById('providerBase').value = '';
   document.getElementById('providerToken').value = '';
-  document.getElementById('providerToken').placeholder = 'sk-… / sk-ant-… or leave blank';
+  document.getElementById('providerToken').placeholder = 'API token, or leave blank';
   document.getElementById('providerAllowInsecureTls').checked = false;
   if (save) {
     delete save.dataset.editingId;
@@ -280,7 +280,7 @@ function clearProviderForm() {
   clearProviderError();
   hideProviderConnectionTest();
   syncProviderStyleHints();
-  setProviderFormHint('Base URL should end in /v1. Style is auto-detected unless you override it. Add runs a connection test automatically.');
+  setProviderFormHint('The base URL must end in /v1. The app detects the API style unless you select a style. Select Add to test the connection automatically.');
 }
 
 function beginProviderEdit(provider) {
@@ -291,7 +291,7 @@ function beginProviderEdit(provider) {
   document.getElementById('providerToken').value = '';
   document.getElementById('providerToken').placeholder = provider.token_set || provider.token_masked
     ? ('saved · ' + (provider.token_masked || '••••'))
-    : 'sk-… / sk-ant-… or leave blank';
+    : 'API token, or leave blank';
   document.getElementById('providerAllowInsecureTls').checked = !!provider.allow_insecure_tls;
   if (save) {
     save.dataset.editingId = provider.id;
@@ -304,8 +304,8 @@ function beginProviderEdit(provider) {
   syncProviderStyleHints();
   setProviderFormHint(
     provider.token_set || provider.token_masked
-      ? 'Update name, URL, or paste a new token. Leave the token blank to keep the saved one. Save retests and re-detects API style.'
-      : 'Paste a token if the host requires auth, then Save. Save retests and detects API style.',
+      ? 'Change the name or URL, or enter a new token. Leave the token blank to keep the saved token. Select Save to test the connection and detect the API style again.'
+      : 'Enter a token if the provider requires authentication. Select Save to test the connection and detect the API style.',
     true
   );
   document.getElementById('providerToken').focus();
@@ -382,7 +382,7 @@ function bindProviderSettings() {
           await mutateProvider('/api/providers/' + encodeURIComponent(id) + '/activate', {
             method: 'POST',
           });
-          setProviderFormHint('Chat now uses that provider.', true);
+          setProviderFormHint('Chat now uses the selected provider as the default provider.', true);
         } catch (error) {
           showProviderError(error.message);
         }
@@ -466,7 +466,7 @@ function bindProviderSettings() {
           });
           clearProviderForm();
           showProviderConnectionTest('ok', 'Provider updated', summary.detail);
-          setProviderFormHint('Provider updated · connection verified.', true);
+          setProviderFormHint('Provider updated. Connection verified.', true);
         } else {
           await mutateProvider('/api/providers', {
             method: 'POST',
@@ -481,7 +481,7 @@ function bindProviderSettings() {
           });
           clearProviderForm();
           showProviderConnectionTest('ok', 'Provider added', summary.detail);
-          setProviderFormHint('Provider added, activated for Chat, and connection verified.', true);
+          setProviderFormHint('Provider added. Chat now uses it as the default provider. Connection verified.', true);
         }
       } catch (error) {
         showProviderConnectionTest(

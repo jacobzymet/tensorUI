@@ -473,7 +473,7 @@
         </button>
         <button type="button" class="settings-nav-btn" data-settings-pane="agent-capabilities">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
-          <span>Agent Capabilities</span>
+          <span>Agent capabilities</span>
         </button>
         <button type="button" class="settings-nav-btn" data-settings-pane="skills">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"/></svg>
@@ -489,18 +489,18 @@
         </button>
         <button type="button" class="settings-nav-btn" data-settings-pane="data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-          <span>Local Data</span>
+          <span>Local data</span>
         </button>
       </aside>
       <div class="settings-main">
         <div class="settings-scroll" id="settingsScroll">
           <section class="settings-pane" data-settings-pane="providers" aria-labelledby="providersTitle">
             <h2 class="settings-pane-title" id="providersTitle">Providers</h2>
-            <p class="settings-pane-lede">Endpoints Chat can call. The model picker lists every model from every provider; the default handles a request that does not name one.</p>
+            <p class="settings-pane-lede">Providers that Chat can use. The model menu lists all available models. If a request does not specify a model, Chat uses the default provider.</p>
 
             <div class="settings-section">
               <h3 class="settings-section-title">Your providers</h3>
-              <p class="field-hint">Rename or change a URL with Edit. Make default only matters when a request does not name a model.</p>
+              <p class="field-hint">Select Edit to change a name or URL. Chat uses the default provider only when a request does not specify a model.</p>
               <ul id="providerList" class="provider-list" aria-live="polite"></ul>
               <p id="providerEmpty" class="field-hint">No providers yet. Add a base URL below.</p>
             </div>
@@ -510,8 +510,8 @@
               <div class="settings-row">
                 <label class="field-label" for="providerName">Name</label>
                 <div>
-                  <input class="field-input" id="providerName" type="text" maxlength="64" placeholder="OpenAI / Claude / home lab" autocomplete="off" spellcheck="false">
-                  <p class="field-hint">Shown in the model picker and this list.</p>
+                  <input class="field-input" id="providerName" type="text" maxlength="64" placeholder="OpenAI, Claude, or home lab" autocomplete="off" spellcheck="false">
+                  <p class="field-hint">Chat shows this name in the model menu and provider list.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -522,28 +522,28 @@
                     <option value="openai">OpenAI-compatible</option>
                     <option value="anthropic">Anthropic Messages</option>
                   </select>
-                  <p class="field-hint">Leave on auto-detect unless the host needs a specific style.</p>
+                  <p class="field-hint">Select Auto-detect unless the provider requires a specific API style.</p>
                 </div>
               </div>
               <div class="settings-row">
                 <label class="field-label" for="providerBase">Base URL</label>
                 <div>
                   <input class="field-input" id="providerBase" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false">
-                  <p class="field-hint">Should end in <code>/v1</code>.</p>
+                  <p class="field-hint">The URL must end in <code>/v1</code>.</p>
                 </div>
               </div>
               <div class="settings-row">
                 <label class="field-label" for="providerToken">API token</label>
                 <div>
                   <input class="field-input" id="providerToken" type="password" placeholder="sk-… or leave blank" autocomplete="off" spellcheck="false">
-                  <p class="field-hint">Optional. Leave blank when editing to keep the saved token.</p>
+                  <p class="field-hint">The token is optional. During an edit, leave this field blank to keep the saved token.</p>
                 </div>
               </div>
               <label class="field-check" for="providerAllowInsecureTls">
                 <input id="providerAllowInsecureTls" type="checkbox">
                 <span>Allow invalid HTTPS certificates <span style="color:var(--color-muted)">(unsafe)</span></span>
               </label>
-              <p id="providerFormHint" class="field-hint">Add runs a connection test automatically.</p>
+              <p id="providerFormHint" class="field-hint">Select Add to test the connection automatically.</p>
               <div class="skills-toolbar">
                 <button type="button" class="btn btn-primary" id="btnSaveProvider">Add</button>
                 <button type="button" class="btn btn-ghost is-hidden" id="btnCancelProviderEdit">Cancel</button>
@@ -559,20 +559,20 @@
 
           <section class="settings-pane is-active" data-settings-pane="personalization" aria-labelledby="settingsTitle">
             <h2 class="settings-pane-title" id="settingsTitle">Personalization</h2>
-            <p class="settings-pane-lede">Saved with your local data. Sent as a system prompt with each message.</p>
+            <p class="settings-pane-lede">The app stores this information with your local data. The app sends it as a system prompt with each message.</p>
             <div class="settings-section">
               <h3 class="settings-section-title" id="personalizationProfileTitle">Personal profile</h3>
               <div class="settings-row">
                 <label class="field-label" for="settingName">Your name</label>
                 <div>
                   <input class="field-input" id="settingName" type="text" autocomplete="name" placeholder="Optional">
-                  <p class="field-hint">Shared across profiles and used for the account avatar.</p>
+                  <p class="field-hint">All profiles use this name and the account avatar uses its initials.</p>
                 </div>
               </div>
               <div class="settings-row-stack">
                 <label class="field-label" for="settingAbout">About you</label>
                 <textarea class="field-textarea" id="settingAbout" placeholder="Interests, role, preferred tone…"></textarea>
-                <p class="field-hint">Stored only in the active profile. Helps the model tailor replies.</p>
+                <p class="field-hint">Only the active profile stores this information. The model uses it to customize replies.</p>
               </div>
             </div>
             <div class="settings-section">
@@ -580,7 +580,7 @@
               <div class="settings-row-stack">
                 <label class="field-label" for="settingInstructions">Custom instructions</label>
                 <textarea class="field-textarea" id="settingInstructions" placeholder="How should the assistant behave?"></textarea>
-                <p class="field-hint">Inside a project, project instructions override these when set.</p>
+                <p class="field-hint">Project instructions replace these instructions when both are set.</p>
               </div>
             </div>
             <div class="settings-section">
@@ -588,14 +588,14 @@
               <div class="settings-row-stack">
                 <label class="field-label" for="settingMemory">Shared memory</label>
                 <textarea class="field-textarea" id="settingMemory" style="min-height:9rem" placeholder="Durable facts the model should remember across all chats and projects…"></textarea>
-                <p class="field-hint">Shared across chats and projects in this profile (unless a project is set to project-only). The model may replace this via a &lt;global_memory_update&gt; block.</p>
+                <p class="field-hint">All chats and projects in this profile use this memory. A project with project-only memory does not use it. The model can replace this memory with a &lt;global_memory_update&gt; block.</p>
               </div>
             </div>
           </section>
 
           <section class="settings-pane" data-settings-pane="profiles">
             <h2 class="settings-pane-title">Profiles</h2>
-            <p class="settings-pane-lede">Keep personal, work, and other contexts separate while staying inside one local account.</p>
+            <p class="settings-pane-lede">Use profiles to keep personal, work, and other information separate in one local account.</p>
             <div class="profile-security-note">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg>
               <span>Profiles do not add another login. If encryption is enabled, the same passphrase unlocks every profile.</span>
@@ -604,7 +604,7 @@
               <div class="profiles-settings-head">
                 <div>
                   <h3 class="settings-section-title">Your profiles</h3>
-                  <p class="field-hint">Chats, projects, Loops, notifications, instructions, and memory stay inside the selected profile.</p>
+                  <p class="field-hint">The selected profile contains its chats, projects, loops, notifications, instructions, and memory.</p>
                 </div>
                 <button type="button" class="btn btn-primary" id="btnSettingsProfileCreate">New profile</button>
               </div>
@@ -614,7 +614,7 @@
 
           <section class="settings-pane" data-settings-pane="appearance">
             <h2 class="settings-pane-title">Appearance</h2>
-            <p class="settings-pane-lede">Dark theme and the built-in type stack are the defaults.</p>
+            <p class="settings-pane-lede">Set the theme, fonts, text size, and chat background.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Theme</h3>
               <div class="segmented" id="themeToggle" role="tablist" aria-label="Theme">
@@ -635,7 +635,7 @@
                     <option value="atkinson-hyperlegible">Atkinson Hyperlegible</option>
                     <option value="literata">Literata</option>
                   </select>
-                  <p class="field-hint">Body copy, composer, and most controls.</p>
+                  <p class="field-hint">This font applies to body text, the composer, and most controls.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -648,7 +648,7 @@
                     <option value="instrument-sans">Instrument Sans</option>
                     <option value="fraunces">Fraunces</option>
                   </select>
-                  <p class="field-hint">Titles and section labels. Sidebar wordmark stays Syne.</p>
+                  <p class="field-hint">This font applies to titles and section labels. The sidebar name always uses Syne.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -694,7 +694,7 @@
                     </div>
                     <span class="background-position-empty">Choose an image to preview</span>
                   </div>
-                  <p class="field-hint">Choose the part of the image that stays anchored when the chat resizes.</p>
+                  <p class="field-hint">Select the part of the image that stays fixed when the chat area changes size.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -702,20 +702,20 @@
                 <div class="background-opacity-control">
                   <input id="settingChatBackgroundOverlay" type="range" min="0" max="100" step="1" value="72">
                   <output id="settingChatBackgroundOverlayValue" for="settingChatBackgroundOverlay">72%</output>
-                  <p class="field-hint">A dark overlay is applied for readability; chat text automatically switches between black and white.</p>
+                  <p class="field-hint">A dark overlay makes text easier to read. Chat text changes to black or white automatically.</p>
                 </div>
               </div>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Reset</h3>
               <button type="button" class="btn btn-outline" id="btnAppearanceReset">Reset to defaults</button>
-              <p class="field-hint" style="margin-top:0.5rem">Restores theme, fonts, and text size throughout the app.</p>
+              <p class="field-hint" style="margin-top:0.5rem">Reset the theme, fonts, text size, and chat background to their default values.</p>
             </div>
           </section>
 
           <section class="settings-pane" data-settings-pane="thinking">
             <h2 class="settings-pane-title">Thinking</h2>
-            <p class="settings-pane-lede">How hard the model should think (when it supports reasoning), and how those thoughts appear in chat.</p>
+            <p class="settings-pane-lede">Set the reasoning effort and how Chat displays the reasoning.</p>
             <div class="settings-section">
               <div class="settings-row">
                 <label class="field-label" for="settingThinkingEffort">Intensity</label>
@@ -726,9 +726,9 @@
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
-                    <option value="max">Max</option>
+                    <option value="max">Maximum</option>
                   </select>
-                  <p class="field-hint">Only options explicitly supported by the selected model are available.</p>
+                  <p class="field-hint">Only the values that the selected model supports are available.</p>
                 </div>
               </div>
               <div class="settings-row">
@@ -739,23 +739,23 @@
                     <option value="hidden">Hide completely</option>
                     <option value="visible">Always show</option>
                   </select>
-                  <p class="field-hint">Collapsed mode shows a fixed-height ticker of live thinking under the status pill, then folds it up when done.</p>
+                  <p class="field-hint">Collapse when done shows live reasoning below the status. Chat hides the reasoning when the model finishes.</p>
                 </div>
               </div>
             </div>
           </section>
 
           <section class="settings-pane" data-settings-pane="agent-capabilities">
-            <h2 class="settings-pane-title">Agent Capabilities</h2>
-            <p class="settings-pane-lede">Tools the model can call in agent mode. Open the composer <strong>+</strong> menu for Agent, Deep research, web search, fetch URL, and file uploads — or type <code>@</code> to use a tool once.</p>
+            <h2 class="settings-pane-title">Agent capabilities</h2>
+            <p class="settings-pane-lede">The model can use these tools in Agent mode. Open the composer <strong>+</strong> menu to select a tool, or type <code>@</code> to use a tool one time.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Approvals</h3>
-              <p class="field-hint" style="margin:0 0 0.75rem">Applies to every capability below. File writes and terminal commands always need your OK, even when auto-approving safe actions.</p>
+              <p class="field-hint" style="margin:0 0 0.75rem">This setting applies to all capabilities below. File writes and terminal commands always require your approval.</p>
               <div class="segmented segmented-stack" id="approvalModeToggle" role="tablist" aria-label="Tool approval">
                 <button type="button" data-approval-mode="auto_safe" role="tab" aria-selected="false">Auto-approve safe actions</button>
                 <button type="button" data-approval-mode="manual" class="is-active" role="tab" aria-selected="true">Approve every request</button>
               </div>
-              <p class="field-hint" style="margin-top:0.65rem">Safe actions: web search, fetch URL, and reading files. Default is to ask every time.</p>
+              <p class="field-hint" style="margin-top:0.65rem">Safe actions are web search, URL retrieval, and file reads. By default, the app asks for approval for each action.</p>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Web search</h3>
@@ -788,7 +788,7 @@
                     <label class="field-label" for="settingWebSearchParallelApiKey">API key</label>
                     <div>
                       <input class="field-input" id="settingWebSearchParallelApiKey" type="password" placeholder="Optional" spellcheck="false" autocomplete="off">
-                      <p class="field-hint">Optional — blank uses free MCP (default basic mode). Key unlocks Turbo / Fast / Basic / Advanced.</p>
+                      <p class="field-hint">The key is optional. Without a key, the provider uses the free MCP service in Basic mode. A key enables all modes.</p>
                     </div>
                   </div>
                   <div class="settings-row" data-web-search-provider="parallel" data-web-search-when="parallel-keyed">
@@ -812,7 +812,7 @@
                     <div>
                       <input class="field-input" id="settingWebSearchSearxng" type="url" placeholder="https://searx.example.com" spellcheck="false" autocomplete="off">
                       <p class="field-hint" data-web-search-provider="searxng">Required for SearXNG.</p>
-                      <p class="field-hint" data-web-search-provider="auto">Optional — tried first, then DuckDuckGo.</p>
+                      <p class="field-hint" data-web-search-provider="auto">The URL is optional. The app tries SearXNG first and then tries DuckDuckGo.</p>
                     </div>
                   </div>
                   <div class="settings-row">
@@ -866,17 +866,17 @@
                         <label class="field-label" for="settingWebSearchDepth">Page depth</label>
                         <select class="field-select" id="settingWebSearchDepth">
                           <option value="off">Snippets only</option>
-                          <option value="auto">Auto — 3 pages</option>
-                          <option value="light">Light — 2 pages</option>
-                          <option value="standard">Standard — 4 pages</option>
-                          <option value="deep">Deep — 6 pages</option>
+                          <option value="auto">Auto: 3 pages</option>
+                          <option value="light">Light: 2 pages</option>
+                          <option value="standard">Standard: 4 pages</option>
+                          <option value="deep">Deep: 6 pages</option>
                         </select>
                       </div>
                       <div class="settings-row" data-web-search-when="page-chars">
-                        <label class="field-label" for="settingWebSearchPageMaxChars">Page max chars</label>
+                        <label class="field-label" for="settingWebSearchPageMaxChars">Maximum page characters</label>
                         <div>
                           <input class="field-input" id="settingWebSearchPageMaxChars" type="number" min="0" max="200000" step="500" value="0">
-                          <p class="field-hint">0 = depth default. Only used when page depth is on.</p>
+                          <p class="field-hint">Enter 0 to use the default value for the selected page depth. This setting applies only when page depth is on.</p>
                         </div>
                       </div>
                     </div>
@@ -891,7 +891,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable fetch URL</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Open one specific page the user (or a prior result) names and extract readable text with offset pagination.
+                    Open a specified page and extract its readable text. The model can use offsets to retrieve more text.
                   </span>
                 </span>
               </label>
@@ -902,10 +902,10 @@
                 </button>
                 <div id="fetchUrlOptions" class="capability-advanced-panel is-collapsed" hidden>
                   <div class="settings-row">
-                    <label class="field-label" for="settingFetchUrlMaxChars">Chunk size (max chars)</label>
+                    <label class="field-label" for="settingFetchUrlMaxChars">Maximum result characters</label>
                     <div>
                       <input class="field-input" id="settingFetchUrlMaxChars" type="number" min="1000" max="200000" step="500" value="8000">
-                      <p class="field-hint">Max characters returned per chunk (~8,000 recommended). The model uses pagination offsets to read longer pages.</p>
+                      <p class="field-hint">Set the maximum number of characters in each result. The recommended value is 8,000. The model uses offsets to read longer pages.</p>
                     </div>
                   </div>
                 </div>
@@ -918,7 +918,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable deep research</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Investigate across multiple search rounds, read sources, and cross-check evidence. Comprehensive and concise use the same research depth; choose the final answer length from the composer <strong>+</strong> menu.
+                    Search in multiple rounds, read sources, and compare evidence. The Comprehensive and Concise options use the same research depth. Select the answer length from the composer <strong>+</strong> menu.
                   </span>
                 </span>
               </label>
@@ -930,7 +930,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable browser</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Let the model open a real Chrome or Edge window and click, type, and read the page (Playwright-style, driven from Rust). Requires Agent mode. Always needs approval in Auto-safe. Chrome or Edge must be installed.
+                    Let the model open and control Chrome or Edge. This capability requires Agent mode and your approval. Chrome or Edge must be installed.
                   </span>
                 </span>
               </label>
@@ -942,7 +942,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable file system</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Let the model read and edit files in this chat’s workspace folder using dedicated tools (not shell). Pick the folder with the folder button next to the terminal. Requires Agent mode.
+                    Let the model read and edit files in the workspace for this chat. These file tools do not use a shell. Select the folder with the folder button next to the terminal. This capability requires Agent mode.
                   </span>
                 </span>
               </label>
@@ -954,7 +954,7 @@
                 <span>
                   <strong style="color:var(--color-ink);font-weight:600">Enable terminal</strong>
                   <span style="display:block;color:var(--color-muted);font-size:var(--text-xs);margin-top:0.2rem">
-                    Let the model run one command at a time in this chat’s workspace. Always requires approval. Destructive and privilege-escalating commands are blocked.
+                    Let the model run one command at a time in the workspace for this chat. Each command requires your approval. The app blocks commands that can destroy data or increase privileges.
                   </span>
                 </span>
               </label>
@@ -968,7 +968,7 @@
                     <label class="field-label" for="settingTerminalTimeout">Initial wait (seconds)</label>
                     <div>
                       <input class="field-input" id="settingTerminalTimeout" type="number" min="5" max="30" step="1" value="30">
-                      <p class="field-hint">Agent commands yield within this many seconds (5–30), then continue in a session the agent can poll or stop. Sessions expire after 30 minutes without a poll. The composer terminal button opens a separate interactive panel.</p>
+                      <p class="field-hint">Set the initial wait from 5 to 30 seconds. After this wait, the command continues in a session that the agent can check or stop. The session expires if the agent does not check it for 30 minutes. The terminal button in the composer opens a separate interactive panel.</p>
                     </div>
                   </div>
                 </div>
@@ -978,7 +978,7 @@
 
           <section class="settings-pane" data-settings-pane="skills">
             <h2 class="settings-pane-title">Skills</h2>
-            <p class="settings-pane-lede">Markdown skill files (<code>SKILL.md</code>). In agent mode the model can <code>activate_skill</code> to load the full markdown when relevant. Optional frontmatter: <code>name</code>, <code>description</code>.</p>
+            <p class="settings-pane-lede">Skills are Markdown files named <code>SKILL.md</code>. In Agent mode, the model can use <code>activate_skill</code> to load a relevant skill. The <code>name</code> and <code>description</code> frontmatter fields are optional.</p>
             <div class="settings-section">
               <div class="skills-toolbar">
                 <button type="button" class="btn btn-primary" id="btnSkillCreate">New skill</button>
@@ -997,7 +997,7 @@
                 <div class="settings-row-stack">
                   <label class="field-label" for="skillEditDescription">Description</label>
                   <input class="field-input" id="skillEditDescription" type="text" maxlength="280" placeholder="When should the model use this?">
-                  <p class="field-hint">Short trigger blurb — shown in the list and to the model.</p>
+                  <p class="field-hint">Write a short description of when to use this skill. The app shows the description in the list and to the model.</p>
                 </div>
                 <div class="settings-row-stack">
                   <label class="field-label" for="skillEditContent">Markdown</label>
@@ -1018,7 +1018,7 @@
 
           <section class="settings-pane" data-settings-pane="composer">
             <h2 class="settings-pane-title">Composer</h2>
-            <p class="settings-pane-lede">Default model and keyboard behavior when writing a message.</p>
+            <p class="settings-pane-lede">Set the default model and the keyboard behavior for the composer.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Default model</h3>
               <div class="settings-row">
@@ -1027,7 +1027,7 @@
                   <option value="">No models available</option>
                 </select>
               </div>
-              <p class="field-hint" id="settingDefaultModelHint">Saved as your default for new turns. You can also change it from the model menu under the composer.</p>
+              <p class="field-hint" id="settingDefaultModelHint">The app uses this model for new turns. You can also select a model from the menu below the composer.</p>
             </div>
             <div class="settings-section">
               <label class="field-check">
@@ -1039,55 +1039,55 @@
 
           <section class="settings-pane" data-settings-pane="attachments">
             <h2 class="settings-pane-title">Attachments</h2>
-            <p class="settings-pane-lede">File uploads in chat. By default the paperclip follows whether the selected model reports vision / multimodal support.</p>
+            <p class="settings-pane-lede">Control file uploads in Chat. By default, the paperclip is available when the selected model reports support for files.</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Availability</h3>
               <div class="settings-row">
                 <label class="field-label" for="settingAttachmentsMode">Attachments</label>
                 <select class="field-input" id="settingAttachmentsMode">
-                  <option value="auto">Auto — enable when the model supports files</option>
+                  <option value="auto">Auto: enable for supported models</option>
                   <option value="on">Always enable paperclip</option>
                   <option value="off">Disable attachments</option>
                 </select>
               </div>
-              <p class="field-hint">Auto grays out the paperclip when the model has no vision metadata. Open this pane to force-enable or turn on text extraction.</p>
+              <p class="field-hint">Auto disables the paperclip when the model does not report file support. Select Always enable paperclip to override this behavior.</p>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Text extraction fallback</h3>
-              <p class="field-hint" style="margin:0 0 0.65rem">Off by default. When on, PDFs and text files are parsed into markdown-ish text and sent in an <code>Attachment:</code> block. Useful for models without native file support, when the context window is large enough.</p>
+              <p class="field-hint" style="margin:0 0 0.65rem">This option is off by default. When it is on, the app converts PDF and text files to Markdown text. The app sends the text in an <code>Attachment:</code> block. Use this option for models that do not support files directly.</p>
               <label class="field-check">
                 <input type="checkbox" id="settingAttachmentTextFallback">
-                <span>Extract PDFs / text files into the prompt</span>
+                <span>Extract PDF and text files into the prompt</span>
               </label>
               <label class="field-check" style="margin-top:0.55rem">
                 <input type="checkbox" id="settingAttachmentOcr">
                 <span>OCR images when the model lacks vision <span style="color:var(--color-muted)">(loads Tesseract.js on demand)</span></span>
               </label>
               <div class="settings-row" style="margin-top:0.75rem">
-                <label class="field-label" for="settingAttachmentMaxChars">Max extracted characters</label>
+                <label class="field-label" for="settingAttachmentMaxChars">Maximum extracted characters</label>
                 <input class="field-input" id="settingAttachmentMaxChars" type="number" min="2000" max="500000" step="1000" value="48000">
               </div>
-              <p class="field-hint">Text fallback stays off unless the model’s reported context is at least 16k tokens (or unknown). Oversized extracts are truncated.</p>
+              <p class="field-hint">Text extraction stays off if the reported context limit is less than 16,000 tokens. If the context limit is unknown, text extraction can stay on. The app truncates text that exceeds the character limit.</p>
             </div>
           </section>
 
           <section class="settings-pane" data-settings-pane="data">
-            <h2 class="settings-pane-title">Local Data</h2>
+            <h2 class="settings-pane-title">Local data</h2>
             <p class="settings-pane-lede" id="settingsDataLede">Chats, projects, and settings are stored on disk by default.</p>
-            <p class="field-hint" id="settingsDataSummary" style="margin:0 0 0.85rem">—</p>
+            <p class="field-hint" id="settingsDataSummary" style="margin:0 0 0.85rem">Not available</p>
             <div class="settings-section">
               <h3 class="settings-section-title">Storage location</h3>
               <div class="settings-data-path">
                 <strong>Data folder</strong>
                 <code id="settingsDataPath">Loading…</code>
                 <button type="button" class="btn btn-outline" id="btnOpenDataDir">Open folder</button>
-                <p class="settings-data-meta" id="settingsDataFiles">—</p>
+                <p class="settings-data-meta" id="settingsDataFiles">Not available</p>
               </div>
             </div>
             <div class="settings-section" id="settingsEncryptionSection">
               <h3 class="settings-section-title">Encryption at rest</h3>
-              <p class="field-hint" id="settingsEncryptionStatus" style="margin:0 0 0.65rem">Off — chats and settings are stored as plain JSON on disk.</p>
-              <p class="field-hint">Encryption covers app records. Workspace files, downloads, terminal history, OS caches, and browser profiles created by older versions are outside its scope. Agent browsing now uses temporary private sessions; signing in again may be necessary after locking or restarting.</p>
+              <p class="field-hint" id="settingsEncryptionStatus" style="margin:0 0 0.65rem">Off. The app stores chats and settings as unencrypted JSON files.</p>
+              <p class="field-hint">Encryption applies only to app records. It does not apply to workspace files, downloads, terminal history, operating system caches, or browser profiles from older versions. Agent browsing uses temporary private sessions. The app can require you to sign in again after you lock or restart it.</p>
               <div id="settingsEncryptionEnable" class="settings-encryption-form">
                 <label class="field">
                   <span class="field-label">Passphrase</span>
@@ -1099,7 +1099,7 @@
                 </label>
                 <p class="field-hint encryption-passphrase-warning is-hidden" id="encryptionPassphraseWarning" role="status" aria-live="polite"></p>
                 <button type="button" class="btn" id="btnEnableEncryption">Enable encryption</button>
-                <p class="field-hint" id="encryptionPassphraseGuidance" style="margin:0.45rem 0 0">Encrypts chats, settings, provider tokens, and skill contents with Argon2id + AES-256-GCM. A passphrase of at least 16 characters is recommended, but not required. You must unlock after each restart; forgotten passphrases cannot be recovered.</p>
+                <p class="field-hint" id="encryptionPassphraseGuidance" style="margin:0.45rem 0 0">The app encrypts chats, settings, provider tokens, and skill contents with Argon2id and AES-256-GCM. Use a passphrase with at least 16 characters. You must unlock the data after each restart. You cannot recover a forgotten passphrase.</p>
               </div>
               <div id="settingsEncryptionUnlock" class="settings-encryption-form is-hidden">
                 <label class="field">
@@ -1142,7 +1142,7 @@
                 </div>
                 <div class="settings-data-card">
                   <strong>Clear chats, loops, and projects</strong>
-                  <p>Wipes chats, Loops, and projects from the active profile. Other profiles stay intact.</p>
+                  <p>Deletes all chats, loops, and projects from the active profile. It does not change other profiles.</p>
                   <button type="button" class="btn btn-danger-ghost" id="btnClearAllData">Clear everything</button>
                 </div>
               </div>

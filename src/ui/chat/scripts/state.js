@@ -1906,21 +1906,21 @@ function refreshLocalDataPane() {
   );
 
   if (lede) {
-    lede.textContent = 'Profiles, chats, projects, and settings are stored on disk in your OS data folder.';
+    lede.textContent = 'The app stores profiles, chats, projects, and settings in the operating system data folder.';
   }
   if (personalizationLede) {
-    personalizationLede.textContent = 'Saved on disk with your local data. Sent as a system prompt with each message.';
+    personalizationLede.textContent = 'The app stores this information with your local data. The app sends it as a system prompt with each message.';
   }
   if (pathEl) {
-    pathEl.textContent = dataInfo?.data_dir || '—';
+    pathEl.textContent = dataInfo?.data_dir || 'Not available';
   }
   if (filesEl) {
     if (dataInfo) {
       filesEl.textContent = dataInfo.encryption_enabled
-        ? 'Every profile, preference, provider credential, and skill is covered by the same encryption passphrase. Only non-sensitive boot configuration remains in config.toml.'
-        : 'Includes config.toml, chats.json, preferences.json, and chat-skills/. Profile data is kept together in chats.json.';
+        ? 'One passphrase encrypts all profiles, preferences, provider credentials, and skills. The config.toml file contains only startup configuration that is not sensitive.'
+        : 'This folder contains config.toml, chats.json, preferences.json, and chat-skills/. The chats.json file contains the profile data.';
     } else {
-      filesEl.textContent = '—';
+      filesEl.textContent = 'Not available';
     }
   }
   if (openBtn) {
@@ -1964,7 +1964,7 @@ function refreshEncryptionIndicator() {
   encryptionIndicatorLabel.textContent = label;
   encryptionIndicatorDetail.textContent = shortDetail;
   encryptionIndicator.setAttribute('aria-label', detail + '. Open encryption settings');
-  encryptionIndicator.title = detail + ' — open encryption settings';
+  encryptionIndicator.title = detail + '. Open encryption settings';
   if (sidebarEncryptionBadge) sidebarEncryptionBadge.title = detail;
   if (expandSidebar) expandSidebar.dataset.encryptionDetail = detail;
   if (typeof syncSidebarToggleUi === 'function') syncSidebarToggleUi();
@@ -1987,18 +1987,18 @@ function refreshEncryptionPane() {
   if (disableForm) disableForm.classList.add('is-hidden');
 
   if (!enabled) {
-    statusEl.textContent = 'Off — chats, settings, provider configuration and credentials, and skills are stored unencrypted on disk.';
+    statusEl.textContent = 'Off. The app stores chats, settings, provider configuration, provider credentials, and skills without encryption.';
     enableEl.classList.remove('is-hidden');
     return;
   }
 
   if (!unlocked) {
-    statusEl.textContent = 'Locked — enter your passphrase to read and write encrypted data.';
+    statusEl.textContent = 'Locked. Enter your passphrase to read and write encrypted data.';
     unlockEl.classList.remove('is-hidden');
     return;
   }
 
-  statusEl.textContent = 'Unlocked — chats, settings, provider configuration and credentials, and skill contents are encrypted on disk.';
+  statusEl.textContent = 'Unlocked. The app encrypts chats, settings, provider configuration, provider credentials, and skill contents on disk.';
   activeEl.classList.remove('is-hidden');
 }
 
