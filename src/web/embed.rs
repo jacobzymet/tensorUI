@@ -73,6 +73,9 @@ mod tests {
         assert!(CHAT_CSS.contains("container-type: scroll-state;"));
         assert!(CHAT_CSS.contains("@container scroll-state(stuck: top)"));
         assert!(CHAT_CSS.contains("-webkit-line-clamp: 2"));
+        assert!(CHAT_CSS.contains(
+            ".msg.msg-role-user:not(.is-pinned-prompt):not(.msg-queued)"
+        ));
         assert!(!CHAT_CSS.contains(".msg.msg-role-user.is-stuck"));
     }
 

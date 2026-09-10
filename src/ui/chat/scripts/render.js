@@ -3332,14 +3332,34 @@ const STICK_BOTTOM_PX = 48;
 const PROMPT_PIN_TOP_PX = 8;
 
 function syncPinnedUserPrompt() {
-  const rows = chatThread.querySelectorAll('.msg.msg-role-user:not(.msg-queued)');
+  const rows = [...chatThread.querySelectorAll('.msg.msg-role-user:not(.msg-queued)')];
   const pinLine = chatViewport.getBoundingClientRect().top + PROMPT_PIN_TOP_PX;
   let active = null;
-  for (const row of rows) {
+  let activeIndex = -1;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
     if (row.getBoundingClientRect().top <= pinLine) active = row;
     else break;
+    activeIndex = index;
   }
-  rows.forEach((row) => row.classList.toggle('is-pinned-prompt', row === active));
+  rows.forEach((row) => {
+    row.classList.toggle('is-pinned-prompt', row === active);
+    row.style.removeProperty('--prompt-exit-progress');
+    row.style.removeProperty('--prompt-exit-opacity');
+    row.style.removeProperty('--prompt-exit-shift');
+    row.style.removeProperty('--prompt-exit-scale');
+  });
+
+  const next = activeIndex >= 0 ? rows[activeIndex + 1] : null;
+  if (!active || !next) return;
+  const activeHeight = active.getBoundingClientRect().height || 0;
+  const exitDistance = Math.max(72, Math.min(activeHeight, 180));
+  const distance = next.getBoundingClientRect().top - pinLine;
+  const progress = Math.max(0, Math.min(1, 1 - (distance / exitDistance)));
+  active.style.setProperty('--prompt-exit-progress', progress.toFixed(3));
+  active.style.setProperty('--prompt-exit-opacity', (1 - progress).toFixed(3));
+  active.style.setProperty('--prompt-exit-shift', (-5.6 * progress).toFixed(2) + 'px');
+  active.style.setProperty('--prompt-exit-scale', (1 - (0.012 * progress)).toFixed(4));
 }
 
 function isNearBottom() {
