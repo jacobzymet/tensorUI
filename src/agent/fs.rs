@@ -730,7 +730,7 @@ pub(super) fn atomic_write_with_permissions(
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     let tmp = parent.join(format!(
-        ".{file_name}.{}.{}.tensorui-tmp",
+        ".{file_name}.{}.{}.tensor-tmp",
         std::process::id(),
         suffix
     ));

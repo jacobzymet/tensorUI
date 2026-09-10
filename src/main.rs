@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use tensorui::{
+use tensor::{
     app::App,
     config::{self, Config},
     desktop, system, web,
@@ -16,16 +16,16 @@ use tokio::net::TcpListener;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "tensorui",
+    name = "tensor",
     version,
-    about = "TensorMI Harness — a local, lightweight, open source LLM harness for humanity"
+    about = "Tensor — a local, lightweight, open source LLM harness for humanity"
 )]
 struct Cli {
     /// Use a specific TOML configuration file
     #[arg(long, value_name = "PATH")]
     config: Option<std::path::PathBuf>,
 
-    /// Loopback address for the TensorMI Harness web server (overrides config/env). Non-loopback addresses are refused.
+    /// Loopback address for the Tensor web server (overrides config/env). Non-loopback addresses are refused.
     #[arg(long, value_name = "ADDR")]
     bind: Option<SocketAddr>,
 
@@ -78,7 +78,7 @@ fn main() -> Result<()> {
         runtime.spawn(async move { web::serve(shared, listener).await })
     };
 
-    println!("TensorMI Harness listening on {url}");
+    println!("Tensor listening on {url}");
     println!("  Chat     {url}/");
     println!("  Settings {url}/settings");
 
@@ -117,7 +117,7 @@ const FOCUS_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn greet_running_instance(bind: SocketAddr) -> Result<()> {
     match focus_running_instance(bind) {
-        Some(_) => println!("TensorMI Harness is already running — focusing the open window."),
+        Some(_) => println!("Tensor is already running — focusing the open window."),
         None => bail!(
             "{bind} is already in use by another program — pass --bind to choose a different address"
         ),
@@ -127,7 +127,7 @@ fn greet_running_instance(bind: SocketAddr) -> Result<()> {
 
 fn focus_running_instance(bind: SocketAddr) -> Option<()> {
     let url = config::loopback_ui_url(bind);
-    let client = tensorui::http::app_blocking_client(FOCUS_TIMEOUT);
+    let client = tensor::http::app_blocking_client(FOCUS_TIMEOUT);
     // Bootstrap the per-process HttpOnly session cookie exactly as a browser
     // navigation does before calling the authenticated local API.
     // Probe via the bind address — Chrome maps *.localhost itself; reqwest uses OS DNS.
@@ -136,9 +136,12 @@ fn focus_running_instance(bind: SocketAddr) -> Option<()> {
     if response.status().as_u16() != 200 {
         return None;
     }
-    let body = tensorui::http::blocking_response_bytes_limited(response, 64 * 1024).ok()?;
+    let body = tensor::http::blocking_response_bytes_limited(response, 64 * 1024).ok()?;
     let info: serde_json::Value = serde_json::from_slice(&body).ok()?;
-    if info.get("app").and_then(|app| app.as_str()) != Some(web::INSTANCE_MARKER) {
+    if !matches!(
+        info.get("app").and_then(|app| app.as_str()),
+        Some(web::INSTANCE_MARKER | "tensorui")
+    ) {
         return None;
     }
     Some(())

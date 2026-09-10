@@ -54,9 +54,10 @@ const _: () = assert!(CHAT_STORE_LIMIT > CHAT_REQUEST_LIMIT);
 
 pub type SharedApp = Arc<Mutex<App>>;
 
-pub const INSTANCE_MARKER: &str = "tensorui";
+pub const INSTANCE_MARKER: &str = "tensor";
 
-const SESSION_COOKIE: &str = "tensorui_session";
+const SESSION_COOKIE: &str = "tensor_session";
+const LEGACY_SESSION_COOKIE: &str = "tensorui_session";
 
 #[derive(Clone)]
 struct ApiSecurity {
@@ -100,7 +101,8 @@ fn secret_eq(left: &str, right: &str) -> bool {
 fn request_token<B>(request: &Request<B>) -> Option<&str> {
     if let Some(value) = request
         .headers()
-        .get("x-tensorui-token")
+        .get("x-tensor-token")
+        .or_else(|| request.headers().get("x-tensorui-token"))
         .and_then(|value| value.to_str().ok())
     {
         return Some(value);
@@ -111,7 +113,11 @@ fn request_token<B>(request: &Request<B>) -> Option<&str> {
         .and_then(|value| value.to_str().ok())?
         .split(';')
         .map(str::trim)
-        .find_map(|cookie| cookie.strip_prefix(&format!("{SESSION_COOKIE}=")))
+        .find_map(|cookie| {
+            cookie
+                .strip_prefix(&format!("{SESSION_COOKIE}="))
+                .or_else(|| cookie.strip_prefix(&format!("{LEGACY_SESSION_COOKIE}=")))
+        })
 }
 
 fn trusted_api_origin(headers: &HeaderMap, security: &ApiSecurity) -> bool {
@@ -1644,11 +1650,10 @@ async fn get_chat_store(State(app): State<SharedApp>) -> Result<Json<serde_json:
 async fn put_chat_store(
     State(app): State<SharedApp>,
     Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let app = app.lock().map_err(|_| ApiError::lock())?;
     app.save_chat_store(body).map_err(store_api_error)?;
-    let value = app.load_chat_store().map_err(store_api_error)?;
-    Ok(Json(value))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_chat_preferences(

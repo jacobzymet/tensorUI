@@ -32,7 +32,7 @@ The dotted thought-orb animations in
 [`src/ui/orb.js`](src/ui/orb.js) are adapted from
 [thinking-orbs](https://github.com/Jakubantalik/thinking-orbs)
 ([demo](https://orbs.jakubantalik.com)), ported to plain canvas for the
-TensorMI Harness chat UI.
+Tensor chat UI.
 
 ```
 MIT License

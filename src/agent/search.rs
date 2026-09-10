@@ -351,7 +351,7 @@ async fn parallel_mcp_initialize(client: &reqwest::Client) -> Result<String, Str
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
                 "clientInfo": {
-                    "name": "tensorui",
+                    "name": "tensor",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }

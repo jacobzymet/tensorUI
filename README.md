@@ -1,4 +1,4 @@
-# <img src="assets/browser-favicon.png" alt="" width="36" height="36"> TensorMI Harness
+# <img src="assets/browser-favicon.png" alt="" width="36" height="36"> Tensor
 
 A local, lightweight, open source LLM harness for humanity.
 
@@ -9,11 +9,11 @@ A more permissive alternative to [Open WebUI](https://github.com/open-webui/open
 - Agent mode with approvals, web search, URL fetching, deep research, browser control, filesystem access, terminal access, and custom skills
 - Passphrase-based encryption at rest for chats, preferences, provider credentials, and skills
 
-TensorMI does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anthropic, or another compatible endpoint.
+Tensor does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anthropic, or another compatible endpoint.
 
 ## Install and run
 
-Download a platform archive from [GitHub Releases](https://github.com/jacobzymet/tensorUI/releases). Releases include a standalone `tensorui` executable for Windows x64, Linux x64/ARM64, and macOS Apple Silicon/Intel.
+Download a platform archive from [GitHub Releases](https://github.com/jacobzymet/tensorUI/releases). Releases include a standalone `tensor` executable for Windows x64, Linux x64/ARM64, and macOS Apple Silicon/Intel.
 
 To run from source:
 
@@ -21,7 +21,7 @@ To run from source:
 cargo run
 ```
 
-This starts a loopback-only control plane and, by default, opens TensorMI Harness in a native desktop window.
+This starts a loopback-only control plane and, by default, opens Tensor in a native desktop window.
 
 | Option | Behavior |
 | --- | --- |
@@ -30,7 +30,7 @@ This starts a loopback-only control plane and, by default, opens TensorMI Harnes
 | `--bind ADDR` | Override the loopback listen address |
 | `--config PATH` | Use another `config.toml`; other data is stored beside it |
 
-Default URL: `http://tensormi.localhost:3930`. `/settings` redirects to **Settings → Providers**.
+Default URL: `http://tensor.localhost:3930`. `/settings` redirects to **Settings → Providers**.
 
 ### Platform requirements
 
@@ -102,7 +102,7 @@ token = ""           # optional for local endpoints
 
 Provider API style is detected when a provider is added or saved. Existing entries without `api_style` default to `openai`.
 
-Bind precedence is `--bind`, then `TENSORUI_BIND`, then `[ui]`. Network-reachable addresses are refused because the local UI has no authentication.
+Bind precedence is `--bind`, then `TENSOR_BIND` (or legacy `TENSORUI_BIND`), then `[ui]`. Network-reachable addresses are refused because the local UI has no authentication.
 
 LLM system and tool prompts live under [`prompts/`](prompts/) and are embedded at compile time.
 
@@ -110,11 +110,11 @@ Agent file reads run concurrently in groups of up to eight. Writes, commands, br
 
 `run_terminal` returns a session ID when a command continues beyond the initial wait. `wait_terminal` polls that same process or terminates it explicitly. **Settings → Initial wait** controls the first wait (5–30 seconds), not a kill timeout. Sessions are scoped to the conversation and workspace, limited to eight running commands per conversation and 64 sessions overall, and expire after 30 minutes without polling. Captured output stays bounded at 32 KB and retains the beginning and end; larger output is explicitly marked as omitted. The interactive terminal remains separate.
 
-Agent runs budget their context before each model request. Older complete assistant/tool exchanges move into an encrypted temporary archive retrievable through `read_tool_history` during that run; user, system, and developer messages remain intact. The archive uses a per-run key held only in memory and is deleted on close; its limits are 64 MB and 8192 records. If protected input alone is too large, the run reports an error instead of truncating instructions. Text token counts and image costs are estimates, not a provider tokenizer. The context window comes from the selected model's reported metadata when available. Override it with `TENSORUI_AGENT_CONTEXT_TOKENS`, or pass `context_window_tokens` in the agent request (highest priority). When none is available, defaults are 8192 tokens without an API key and 32768 with one. Tool schemas and a response reserve are deducted, and individual tool output budgets shrink with the available context.
+Agent runs budget their context before each model request. Older complete assistant/tool exchanges move into an encrypted temporary archive retrievable through `read_tool_history` during that run; user, system, and developer messages remain intact. The archive uses a per-run key held only in memory and is deleted on close; its limits are 64 MB and 8192 records. If protected input alone is too large, the run reports an error instead of truncating instructions. Text token counts and image costs are estimates, not a provider tokenizer. The context window comes from the selected model's reported metadata when available. Override it with `TENSOR_AGENT_CONTEXT_TOKENS` (or legacy `TENSORUI_AGENT_CONTEXT_TOKENS`), or pass `context_window_tokens` in the agent request (highest priority). When none is available, defaults are 8192 tokens without an API key and 32768 with one. Tool schemas and a response reserve are deducted, and individual tool output budgets shrink with the available context.
 
 ## Encryption at rest
 
-Enable encryption under **Settings → Local Data**. TensorMI derives a 256-bit key with Argon2id (64 MiB, three iterations, one lane) and encrypts protected data with AES-256-GCM using random 96-bit nonces and purpose-bound authenticated data. The passphrase and raw key are never stored; the session key remains in memory until **Lock session** or exit and is then zeroized. Writes use private permissions, atomic replacement, and an exclusive data-directory lock.
+Enable encryption under **Settings → Local Data**. Tensor derives a 256-bit key with Argon2id (64 MiB, three iterations, one lane) and encrypts protected data with AES-256-GCM using random 96-bit nonces and purpose-bound authenticated data. The passphrase and raw key are never stored; the session key remains in memory until **Lock session** or exit and is then zeroized. Writes use private permissions, atomic replacement, and an exclusive data-directory lock.
 
 The protection covers offline confidentiality and integrity of chats, preferences, provider definitions and credentials, and skills. It does not protect plaintext copies or backups made before encryption, filesystem snapshots, malware or another process in the logged-in session, rollback to an older complete encrypted data set, memory forensics while unlocked, forgotten passphrases, or hardware failure. Secure deletion cannot be guaranteed on SSDs or copy-on-write filesystems. **Forgotten passphrases cannot be recovered.**
 

@@ -1868,8 +1868,8 @@ function syncUrlFromState({ replace = false } = {}) {
   if (suppressUrlSync) return;
   const path = currentRoutePath();
   if (window.location.pathname === path) return;
-  if (replace) history.replaceState({ tensorui: 1 }, '', path);
-  else history.pushState({ tensorui: 1 }, '', path);
+  if (replace) history.replaceState({ tensor: 1 }, '', path);
+  else history.pushState({ tensor: 1 }, '', path);
 }
 
 function parseLocationRoute() {

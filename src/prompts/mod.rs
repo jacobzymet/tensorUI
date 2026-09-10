@@ -139,7 +139,7 @@ pub mod tools {
     pub const SHOW_IMAGE: &str = include_str!("../../prompts/tools/show-image.md");
 }
 
-/// Chat UI templates served as `/prompts.js` (`window.TENSORUI_PROMPTS`).
+/// Chat UI templates served as `/prompts.js` (`window.TENSOR_PROMPTS` (with a legacy `window.TENSORUI_PROMPTS` alias)).
 pub fn frontend_js() -> &'static str {
     static JS: OnceLock<String> = OnceLock::new();
     JS.get_or_init(|| {
@@ -187,7 +187,7 @@ window.fillPrompt = function (template, vars) {
   });
 };
 "#;
-        format!("window.TENSORUI_PROMPTS = {json};\n{FILL_HELPER}")
+        format!("window.TENSOR_PROMPTS = {json}; window.TENSORUI_PROMPTS = window.TENSOR_PROMPTS;\n{FILL_HELPER}")
     })
     .as_str()
 }
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn frontend_js_exposes_chat_prompts() {
         let js = frontend_js();
-        assert!(js.contains("window.TENSORUI_PROMPTS"));
+        assert!(js.contains("window.TENSOR_PROMPTS"));
         assert!(js.contains("chat.today"));
         assert!(js.contains("chat.projectMemory"));
         assert!(js.contains("chat.botIdentity"));

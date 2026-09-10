@@ -334,7 +334,7 @@ function persistGroupMemory(convo, memoryText) {
 }
 
 function botSystemPromptParts(convo, speakerBot) {
-  const P = window.TENSORUI_PROMPTS || {};
+  const P = window.TENSOR_PROMPTS || {};
   const fill = window.fillPrompt || ((t) => t);
   if (!speakerBot) return [];
   const description = String(speakerBot.description || '').trim() || '(No description provided.)';
@@ -484,7 +484,7 @@ async function maybeCompactBotsConvo(convo, speakerBot) {
       : ('@' + (message.speakerHandle || getBot(message.speakerId)?.handle || 'bot'));
     return who + ': ' + String(message.content || '');
   }).join('\n\n');
-  const P = window.TENSORUI_PROMPTS || {};
+  const P = window.TENSOR_PROMPTS || {};
   const fill = window.fillPrompt || ((t) => t);
   const group = isBotGroup(convo);
   const template = group

@@ -12,7 +12,7 @@ use crate::{providers::ProvidersConfig, secure_fs, store::StorageMode};
 pub const DEFAULT_UI_HOST: &str = "127.0.0.1";
 pub const DEFAULT_UI_PORT: u16 = 3930;
 /// Friendly loopback hostname for printed / opened URLs (`*.localhost` → 127.0.0.1 in browsers).
-pub const PUBLIC_UI_HOST: &str = "tensormi.localhost";
+pub const PUBLIC_UI_HOST: &str = "tensor.localhost";
 
 /// Browser-facing URL for a bound loopback listener (hostname only; bind IP stays 127.0.0.1/::1).
 pub fn public_ui_url(bind: SocketAddr) -> String {
@@ -188,7 +188,10 @@ impl Config {
     }
 
     pub fn resolve_ui_bind(cli_bind: Option<SocketAddr>, config: &Self) -> Result<SocketAddr> {
-        Self::resolve_ui_bind_with_env(cli_bind, std::env::var("TENSORUI_BIND").ok(), config)
+        let env_bind = std::env::var("TENSOR_BIND")
+            .ok()
+            .or_else(|| std::env::var("TENSORUI_BIND").ok());
+        Self::resolve_ui_bind_with_env(cli_bind, env_bind, config)
     }
 
     fn resolve_ui_bind_with_env(
@@ -202,7 +205,7 @@ impl Config {
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 SocketAddr::from_str(trimmed)
-                    .with_context(|| format!("invalid TENSORUI_BIND value: {raw}"))?
+                    .with_context(|| format!("invalid TENSOR_BIND value: {raw}"))?
             } else {
                 config.desired_ui_bind()?
             }
@@ -224,7 +227,7 @@ impl Config {
     }
 }
 
-/// Reject non-loopback binds. TensorMI Harness has no auth and must not be LAN/WAN-exposed.
+/// Reject non-loopback binds. Tensor has no auth and must not be LAN/WAN-exposed.
 pub fn require_loopback_bind(addr: SocketAddr) -> Result<SocketAddr> {
     if addr.ip().is_loopback() {
         return Ok(addr);
@@ -232,9 +235,9 @@ pub fn require_loopback_bind(addr: SocketAddr) -> Result<SocketAddr> {
     eprintln!();
     eprintln!("WARNING: Refusing to start — bind address {addr} is reachable on the network.");
     eprintln!(
-        "WARNING: TensorMI Harness is loopback-only. It has no authentication and can read/write local data."
+        "WARNING: Tensor is loopback-only. It has no authentication and can read/write local data."
     );
-    eprintln!("WARNING: Use 127.0.0.1 or ::1 (config ui.host, --bind, or TENSORUI_BIND).");
+    eprintln!("WARNING: Use 127.0.0.1 or ::1 (config ui.host, --bind, or TENSOR_BIND).");
     eprintln!();
     bail!("refusing to bind {addr}: not a loopback address")
 }
@@ -289,9 +292,9 @@ mod tests {
     #[test]
     fn public_ui_url_uses_friendly_localhost_host() {
         let bind: SocketAddr = "127.0.0.1:3930".parse().unwrap();
-        assert_eq!(public_ui_url(bind), "http://tensormi.localhost:3930");
+        assert_eq!(public_ui_url(bind), "http://tensor.localhost:3930");
         let custom: SocketAddr = "127.0.0.1:4000".parse().unwrap();
-        assert_eq!(public_ui_url(custom), "http://tensormi.localhost:4000");
+        assert_eq!(public_ui_url(custom), "http://tensor.localhost:4000");
     }
 
     #[test]

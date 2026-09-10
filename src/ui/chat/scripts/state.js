@@ -1166,19 +1166,29 @@ function reportPersistenceFailure(path, error) {
  * far past the browser's 64 KiB keepalive quota, and over-quota requests are
  * rejected before they ever reach the server.
  */
-async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => true } = {}) {
+async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => true, timeoutMs = 15000 } = {}) {
   const body = JSON.stringify(payload);
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (!valid()) return false;
     if (attempt) await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     if (!valid()) return false;
+    const controller = new AbortController();
+    let timer;
     try {
-      const response = await fetch(path, {
+      const response = await Promise.race([fetch(path, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body,
-      });
+        signal: controller.signal,
+      }), new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Saving local changes timed out'));
+        }, timeoutMs);
+      })]);
+      // Older servers echo the archive. Release it before the next request.
+      if (response.body) void response.body.cancel().catch(() => {});
       if (response.ok) return true;
       // Most client errors are deterministic; only timeout and throttling merit a retry.
       if (
@@ -1193,6 +1203,8 @@ async function putJsonWithRetry(path, payload, { attempts = 3, valid = () => tru
       lastError = new Error(path + ' responded ' + response.status);
     } catch (error) {
       lastError = error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   reportPersistenceFailure(path, lastError);
@@ -2320,7 +2332,7 @@ function buildSystemPrompt(projectIdOverride, opts = {}) {
   const excludeConvoId = opts.excludeConvoId || opts.excludeConvoId || null;
   const convo = opts.convo || null;
   const speakerBot = opts.speakerBot || opts.speakerBot || null;
-  const P = window.TENSORUI_PROMPTS || {};
+  const P = window.TENSOR_PROMPTS || {};
   const fill = window.fillPrompt || ((t) => t);
   const parts = [];
   const name = settings.name.trim();
@@ -2448,7 +2460,7 @@ function buildProjectContinuityDigest(projectId, excludeConvoId) {
     remaining -= block.length + 2;
   }
   if (!blocks.length) return null;
-  const P = window.TENSORUI_PROMPTS || {};
+  const P = window.TENSOR_PROMPTS || {};
   const fill = window.fillPrompt || ((t) => t);
   return fill(P['chat.projectContinuity'] || (
     'Other chats in this project (for multi-chat continuity — prior context from sibling chats, not the current conversation):\n' +

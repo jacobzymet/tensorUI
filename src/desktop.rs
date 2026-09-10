@@ -20,7 +20,7 @@ use tao::{
 };
 use wry::WebViewBuilder;
 
-const WINDOW_TITLE: &str = "TensorMI Harness";
+const WINDOW_TITLE: &str = "Tensor";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
 const READY_POLL: Duration = Duration::from_millis(40);
 const QUIT_POLL: Duration = Duration::from_millis(200);
@@ -89,7 +89,7 @@ fn wait_until_ready(url: &str) -> Result<()> {
         }
         thread::sleep(READY_POLL);
     }
-    anyhow::bail!("TensorMI Harness UI did not become ready at {url}: {last_error}")
+    anyhow::bail!("Tensor UI did not become ready at {url}: {last_error}")
 }
 
 fn exit_desktop_loop(

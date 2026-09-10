@@ -11,7 +11,7 @@ use std::{
 use futures_util::StreamExt;
 use reqwest::{Client, Url};
 
-const APP_UA: &str = concat!("tensorui/", env!("CARGO_PKG_VERSION"));
+const APP_UA: &str = concat!("tensor/", env!("CARGO_PKG_VERSION"));
 
 /// Desktop Chrome identity for public fetches (search / page scrape).
 /// Keep the major version in sync across UA + Sec-CH-UA.

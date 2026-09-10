@@ -13,7 +13,7 @@ test('built app supports offline OCR and revokes terminal sockets on encryption 
   timeout: 120000,
 }, async () => {
   const { chromium } = require('playwright');
-  const dir = mkdtempSync(join(tmpdir(), 'tensorui-security-'));
+  const dir = mkdtempSync(join(tmpdir(), 'tensor-security-'));
   const config = join(dir, 'config.toml');
   writeFileSync(config, '');
   const reservation = net.createServer();

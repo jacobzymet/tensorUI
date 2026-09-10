@@ -87,4 +87,4 @@ jobs:
           components: rustfmt
 
       - name: rustfmt
-        run: cargo fmt --package tensorui -- --check
+        run: cargo fmt --package tensor -- --check

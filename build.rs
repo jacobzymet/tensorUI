@@ -51,7 +51,7 @@ fn main() {
     if target_os == "windows" {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/app.ico");
-        res.set("ProductName", "TensorMI Harness");
+        res.set("ProductName", "Tensor");
         res.set(
             "FileDescription",
             "A local, lightweight, open source LLM harness for humanity",

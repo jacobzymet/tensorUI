@@ -791,7 +791,8 @@ async fn run_agent_loop(
     let context_window = request
         .context_window_tokens
         .or_else(|| {
-            std::env::var("TENSORUI_AGENT_CONTEXT_TOKENS")
+            std::env::var("TENSOR_AGENT_CONTEXT_TOKENS")
+                .or_else(|_| std::env::var("TENSORUI_AGENT_CONTEXT_TOKENS"))
                 .ok()
                 .and_then(|value| value.parse().ok())
         })

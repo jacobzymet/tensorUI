@@ -403,7 +403,7 @@ function bindProviderSettings() {
       const isDefault = activeProvider()?.id === id;
       const ok = await confirmDanger({
         title: 'Remove provider?',
-        body: 'Remove “' + (provider?.name || 'this provider') + '” from TensorMI Harness? The API host is unchanged.'
+        body: 'Remove “' + (provider?.name || 'this provider') + '” from Tensor? The API host is unchanged.'
           + (isDefault ? ' Its models leave Chat’s picker, and another provider becomes the default.' : ''),
         confirmLabel: 'Remove',
       });

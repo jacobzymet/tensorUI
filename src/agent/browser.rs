@@ -456,7 +456,7 @@ async fn launch_session(_session_id: &str) -> Result<Session, String> {
         builder = builder.chrome_executable(exe);
     }
     let profile = tempfile::Builder::new()
-        .prefix("tensormi-browser-")
+        .prefix("tensor-browser-")
         .tempdir()
         .map_err(|err| format!("Could not create private browser profile: {err}"))?;
     secure_fs::ensure_private_dir(profile.path()).map_err(|err| err.to_string())?;

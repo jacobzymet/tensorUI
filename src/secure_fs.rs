@@ -96,9 +96,8 @@ impl DataLock {
                 .with_context(|| format!("could not secure data lock {}", path.display()))?;
             let result = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
             if result != 0 {
-                return Err(std::io::Error::last_os_error()).context(
-                    "This data folder is already in use by another TensorMI Harness process.",
-                );
+                return Err(std::io::Error::last_os_error())
+                    .context("This data folder is already in use by another Tensor process.");
             }
         }
 

@@ -3333,7 +3333,7 @@ function paintWordmarkSurface(id) {
   const changed = appSurface !== next;
   appSurface = next;
   document.getElementById('chatShell')?.setAttribute('data-surface', next);
-  document.title = 'TensorMI Harness | ' + label;
+  document.title = 'Tensor | ' + label;
   if (btn) btn.setAttribute('aria-label', 'Surface: ' + label + '. Switch surface');
   menu?.querySelectorAll('[data-surface]').forEach((item) => {
     const on = item.dataset.surface === next;
@@ -4590,7 +4590,7 @@ function showUpdateToast(status) {
   if (updateToastTitle) {
     updateToastTitle.textContent = status.release_name
       ? String(status.release_name)
-      : ('TensorMI Harness ' + latestLabel);
+      : ('Tensor ' + latestLabel);
   }
   if (updateToastBody) {
     updateToastBody.textContent =
@@ -4642,7 +4642,7 @@ btnUpdateDismiss?.addEventListener('click', () => {
     openSettings('providers');
     startupUrl.searchParams.delete('settings');
     history.replaceState(
-      { tensorui: 1 },
+      { tensor: 1 },
       '',
       startupUrl.pathname + startupUrl.search + startupUrl.hash
     );

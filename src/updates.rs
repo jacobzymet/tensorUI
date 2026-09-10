@@ -1,4 +1,4 @@
-//! Check GitHub Releases for a newer TensorMI Harness version.
+//! Check GitHub Releases for a newer Tensor version.
 
 use std::cmp::Ordering;
 use std::sync::{Mutex, OnceLock};
@@ -160,10 +160,7 @@ async fn fetch_latest_release() -> Result<UpdateStatus, String> {
         .timeout(REQUEST_TIMEOUT)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
-        .header(
-            "User-Agent",
-            concat!("tensorui/", env!("CARGO_PKG_VERSION")),
-        )
+        .header("User-Agent", concat!("tensor/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|error| format!("could not reach GitHub: {error}"))?;
