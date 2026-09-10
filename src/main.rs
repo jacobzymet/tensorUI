@@ -43,6 +43,11 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| anyhow::anyhow!("could not install the rustls Ring crypto provider"))?;
+
     let cli = Cli::parse();
     let open_browser = cli.browser || cli.open;
     let config_path = cli.config.unwrap_or_else(Config::default_path);
