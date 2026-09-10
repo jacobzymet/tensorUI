@@ -719,7 +719,10 @@ function openModelMenu(opts) {
   // trigger keeps focus and its own arrow-key handler stays in charge.
   if (searchable) chatModelSearch.focus();
   void chatModelMenu.offsetWidth;
-  requestAnimationFrame(() => {
+  afterNextPaint(() => {
+    if (chatModelMenu.classList.contains('is-hidden')) return;
+    const currentTrigger = modelMenuTriggerEl();
+    if (!currentTrigger || currentTrigger.getAttribute('aria-expanded') !== 'true') return;
     if (!positionModelMenu()) return;
     chatModelMenu.classList.add('is-open');
   });
@@ -3298,7 +3301,9 @@ function setWordmarkMenuOpen(open) {
     menu.classList.remove('is-hidden');
     btn.setAttribute('aria-expanded', 'true');
     void menu.offsetWidth;
-    requestAnimationFrame(() => wrap.classList.add('is-open'));
+    afterNextPaint(() => {
+      if (btn.getAttribute('aria-expanded') === 'true') wrap.classList.add('is-open');
+    });
     return;
   }
   wrap.classList.remove('is-open');
@@ -4585,7 +4590,8 @@ function showUpdateToast(status) {
   updateToast.dataset.latest = String(status.latest);
   updateToast.hidden = false;
   updateToast.classList.remove('is-hidden');
-  requestAnimationFrame(() => updateToast.classList.add('is-visible'));
+  void updateToast.offsetWidth;
+  afterNextPaint(() => updateToast.classList.add('is-visible'));
 }
 
 async function checkForAppUpdate({ force = false } = {}) {

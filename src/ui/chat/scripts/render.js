@@ -677,7 +677,7 @@ function refreshTraceSidebar({ animate = false } = {}) {
   window.clearTimeout(traceSidebarSwapTimer);
   traceSidebarSwapTimer = window.setTimeout(() => {
     paint();
-    requestAnimationFrame(() => {
+    afterNextPaint(() => {
       traceSidebarBody.classList.remove('is-swap');
     });
   }, 140);
@@ -2533,7 +2533,10 @@ function openConversationMenu(anchor, convo, row) {
   menu.style.top = Math.max(8, top) + 'px';
   menu.style.left = Math.max(8, left) + 'px';
   menu.classList.toggle('opens-above', top < rect.top);
-  menu.classList.add('is-open');
+  void menu.offsetWidth;
+  afterNextPaint(() => {
+    if (menu === openConvoMenu && menu.isConnected) menu.classList.add('is-open');
+  });
 }
 
 function moveConversation(convoId, projectId) {

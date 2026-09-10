@@ -150,12 +150,14 @@ test('profile menu remains rendered while its close transition finishes', () => 
     requestAnimationFrame: (callback) => callback(),
     clearTimeout() {},
     window: {
+      requestAnimationFrame: (callback) => callback(),
       setTimeout: (callback) => {
         finishClose = callback;
         return 1;
       },
     },
   });
+  vm.runInContext(declaration('afterNextPaint'), state);
   vm.runInContext(declaration('setProfileMenuOpen'), state);
   state.setProfileMenuOpen(true);
   assert.equal(classes.has('is-hidden'), false);
@@ -166,6 +168,29 @@ test('profile menu remains rendered while its close transition finishes', () => 
   assert.equal(classes.has('is-hidden'), false);
   finishClose();
   assert.equal(classes.has('is-hidden'), true);
+});
+
+test('entry transitions wait until the initial style has crossed a paint boundary', () => {
+  const frames = [];
+  const state = vm.createContext({
+    requestAnimationFrame: (callback) => {
+      frames.push(callback);
+      return frames.length;
+    },
+  });
+  vm.runInContext(declaration('afterNextPaint'), state);
+
+  let entered = false;
+  state.afterNextPaint(() => { entered = true; });
+  assert.equal(entered, false);
+  assert.equal(frames.length, 1);
+
+  frames.shift()();
+  assert.equal(entered, false);
+  assert.equal(frames.length, 1);
+
+  frames.shift()();
+  assert.equal(entered, true);
 });
 
 test('profile switching waits until active work is finished', () => {

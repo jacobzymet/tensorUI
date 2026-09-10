@@ -412,6 +412,15 @@ function prefersReducedMotion() {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
+/**
+ * Run a visual state change after the browser has presented the current one.
+ * This keeps entry transitions reliable when an engine coalesces style and
+ * visibility changes into the same paint.
+ */
+function afterNextPaint(callback) {
+  requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
 function motionEnter(el, { y = 14, duration = 220, delay = 0 } = {}) {
   if (!el || prefersReducedMotion() || typeof el.animate !== 'function') return null;
   el.classList.add('motion-enter');
@@ -438,13 +447,19 @@ function motionEnter(el, { y = 14, duration = 220, delay = 0 } = {}) {
 function openBackdrop(el) {
   if (!el) return;
   el.classList.remove('is-hidden');
-  // Force layout so the enter transition runs from opacity 0.
+  el.dataset.opening = 'true';
+  // Establish the closed style before scheduling the visible state.
   void el.offsetWidth;
-  requestAnimationFrame(() => el.classList.add('is-open'));
+  afterNextPaint(() => {
+    if (el.dataset.opening !== 'true') return;
+    delete el.dataset.opening;
+    el.classList.add('is-open');
+  });
 }
 
 function closeBackdrop(el) {
   if (!el) return;
+  delete el.dataset.opening;
   el.classList.remove('is-open');
   if (prefersReducedMotion() || el.classList.contains('is-hidden')) {
     el.classList.add('is-hidden');
@@ -1306,7 +1321,7 @@ function setProfileMenuOpen(open, { restoreFocus = false } = {}) {
   if (next) {
     sidebarProfileMenu.classList.remove('is-hidden');
     void sidebarProfileMenu.offsetWidth;
-    requestAnimationFrame(() => {
+    afterNextPaint(() => {
       if (btnProfileMenu.getAttribute('aria-expanded') === 'true') {
         sidebarProfileMenu.classList.add('is-open');
       }

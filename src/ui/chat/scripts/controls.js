@@ -1785,7 +1785,9 @@ function setThinkMenuOpen(open) {
     menu.classList.remove('is-hidden');
     btn.setAttribute('aria-expanded', 'true');
     void menu.offsetWidth;
-    requestAnimationFrame(() => menu.classList.add('is-open'));
+    afterNextPaint(() => {
+      if (btn.getAttribute('aria-expanded') === 'true') menu.classList.add('is-open');
+    });
     return;
   }
   menu.classList.remove('is-open');
@@ -2025,7 +2027,9 @@ function setPlusMenuOpen(open) {
     btnPlus.title = 'Close';
     btnPlus.setAttribute('aria-label', 'Close');
     void plusMenu.offsetWidth;
-    requestAnimationFrame(() => plusMenu.classList.add('is-open'));
+    afterNextPaint(() => {
+      if (btnPlus.getAttribute('aria-expanded') === 'true') plusMenu.classList.add('is-open');
+    });
     return;
   }
   plusMenu.classList.remove('is-open');
