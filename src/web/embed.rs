@@ -78,6 +78,20 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_exposes_bulk_conversation_actions() {
+        for id in [
+            "btnManageConvos",
+            "sidebarBulkActions",
+            "btnBulkPinConvos",
+            "btnBulkDeleteConvos",
+        ] {
+            assert!(CHAT_HTML.contains(&format!("id=\"{id}\"")));
+        }
+        assert!(CHAT_JS.contains("function bulkSetSelectedConversationsPinned("));
+        assert!(CHAT_JS.contains("function bulkDeleteSelectedConversations("));
+    }
+
+    #[test]
     fn live_loading_animation_survives_thread_navigation() {
         assert!(CHAT_JS.contains("const priorMounts = Number(stream.domMountCount) || 0;"));
         assert!(CHAT_JS.contains("thinkingLabel.style.animationDelay"));

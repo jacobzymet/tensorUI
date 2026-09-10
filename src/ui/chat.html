@@ -95,7 +95,15 @@
           <nav class="convo-list" id="pinnedConvoList" aria-label="Pinned conversations"></nav>
         </div>
         <div id="sidebarProjectContext" class="sidebar-project-context is-hidden"></div>
-        <p class="sidebar-label" id="sidebarConvoLabel">Recents</p>
+        <div class="sidebar-convo-heading">
+          <p class="sidebar-label" id="sidebarConvoLabel">Recents</p>
+          <button type="button" class="sidebar-manage-convos" id="btnManageConvos" aria-pressed="false">Select</button>
+        </div>
+        <div class="sidebar-bulk-actions is-hidden" id="sidebarBulkActions" role="toolbar" aria-label="Selected conversation actions">
+          <span id="sidebarBulkCount">0 selected</span>
+          <button type="button" id="btnBulkPinConvos" disabled>Pin</button>
+          <button type="button" class="is-danger" id="btnBulkDeleteConvos" disabled>Delete</button>
+        </div>
         <nav class="convo-list" id="convoList" aria-label="Conversations"></nav>
       </div>
       <div class="sidebar-footer">

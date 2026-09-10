@@ -16,6 +16,7 @@ use crate::{anthropic, http};
 /// How long a probe result is considered fresh. Expired entries are still served
 /// (stale-while-revalidate) so Chat polling never briefly sees an empty catalog.
 const HEALTH_CACHE: Duration = Duration::from_secs(30);
+const EMPTY_CATALOG_CACHE: Duration = Duration::from_secs(5);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 const MAX_PROBE_BODY_BYTES: u64 = 8 * 1024 * 1024;
@@ -623,7 +624,14 @@ impl CatalogCache {
         let Ok(guard) = self.last.lock() else {
             return false;
         };
-        matches!(guard.get(&key), Some((at, _)) if at.elapsed() < HEALTH_CACHE)
+        matches!(guard.get(&key), Some((at, catalog)) if {
+            let ttl = if catalog.is_empty() {
+                EMPTY_CATALOG_CACHE
+            } else {
+                HEALTH_CACHE
+            };
+            at.elapsed() < ttl
+        })
     }
 
     pub fn put(&self, style: ApiStyle, base: &str, token: &str, catalog: Vec<RemoteModelOption>) {
@@ -1909,6 +1917,27 @@ mod tests {
     fn masks_unicode_tokens_without_byte_slicing() {
         assert_eq!(mask_token("🔑🔑🔑🔑abcdef🔒🔒🔒🔒"), "🔑🔑🔑🔑…🔒🔒🔒🔒");
         assert_eq!(mask_token("éééé"), "••••••••");
+    }
+
+    #[test]
+    fn empty_catalogs_retry_before_healthy_catalogs_expire() {
+        let cache = CatalogCache::default();
+        let base = "https://example.com/v1";
+        cache.put(ApiStyle::Openai, base, "token", Vec::new());
+        assert!(cache.is_fresh(ApiStyle::Openai, base, "token"));
+
+        let key = cache.keys.key(ApiStyle::Openai, base, "token");
+        cache.last.lock().unwrap().get_mut(&key).unwrap().0 = Instant::now() - EMPTY_CATALOG_CACHE;
+        assert!(!cache.is_fresh(ApiStyle::Openai, base, "token"));
+
+        cache.put(
+            ApiStyle::Openai,
+            base,
+            "token",
+            vec![reasoning_model(None, &[], false)],
+        );
+        cache.last.lock().unwrap().get_mut(&key).unwrap().0 = Instant::now() - EMPTY_CATALOG_CACHE;
+        assert!(cache.is_fresh(ApiStyle::Openai, base, "token"));
     }
 
     fn reasoning_model(

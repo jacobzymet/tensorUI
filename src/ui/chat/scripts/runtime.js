@@ -1050,12 +1050,17 @@ function updateInferenceState(data) {
     modelMenuOptions.length ? modelMenuOptions : (network.remote_models || []).map(catalogOptionFromRemote)
   );
   const selectionPending = !!network.remote_saved && !remoteSelected && !catalogComplete;
-  const selectionUnavailable = !!selectedChatModel && !remoteSelected && catalogComplete;
+  const selectionMissing = !!selectedChatModel && !remoteSelected && catalogComplete;
+  selectedModelMissingPolls = selectionMissing ? selectedModelMissingPolls + 1 : 0;
+  const selectionRecovering = selectionMissing && selectedModelMissingPolls < 4;
+  const selectionUnavailable = selectionMissing && !selectionRecovering;
   serverReady = !!remoteSelected?.ready;
 
-  if (selectionPending || remoteChecking) {
+  if (selectionPending || selectionRecovering || remoteChecking) {
     const label = modelIdLabel(selectedChatModel);
-    const pendingText = label ? ('Connecting to ' + label + '…') : 'Loading models…';
+    const pendingText = label
+      ? ((selectionRecovering ? 'Refreshing ' : 'Connecting to ') + label + '…')
+      : 'Loading models…';
     modelHintEl.textContent = pendingText;
     modelHintEl.classList.remove('is-hidden');
     showComposerHint(pendingText);
@@ -3461,6 +3466,13 @@ btnNotificationsMarkRead.addEventListener('click', () => {
   if (changed) saveConversations({ immediate: true });
   refreshNotificationsUi();
   renderSidebar();
+});
+btnManageConvos?.addEventListener('click', () => {
+  setConversationSelectionMode(!conversationSelectionMode);
+});
+btnBulkPinConvos?.addEventListener('click', bulkSetSelectedConversationsPinned);
+btnBulkDeleteConvos?.addEventListener('click', () => {
+  void bulkDeleteSelectedConversations();
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || mainView !== 'chat' || !activeId) return;

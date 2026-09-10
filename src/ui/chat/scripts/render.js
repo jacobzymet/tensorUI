@@ -2224,6 +2224,95 @@ function closeConvoMenu() {
 
 let draggingConvoId = null;
 let convoDragMoved = false;
+let conversationSelectionMode = false;
+const selectedConversationIds = new Set();
+
+function syncConversationBulkToolbar() {
+  const selected = conversations.filter((convo) => selectedConversationIds.has(convo.id));
+  const count = selected.length;
+  sidebarBulkActions?.classList.toggle('is-hidden', !conversationSelectionMode);
+  if (btnManageConvos) {
+    btnManageConvos.textContent = conversationSelectionMode ? 'Done' : 'Select';
+    btnManageConvos.setAttribute('aria-pressed', conversationSelectionMode ? 'true' : 'false');
+  }
+  if (sidebarBulkCount) sidebarBulkCount.textContent = count + ' selected';
+  if (btnBulkDeleteConvos) btnBulkDeleteConvos.disabled = count === 0;
+  if (btnBulkPinConvos) {
+    const pinnable = selected.filter((convo) => !convo.incognito);
+    const unpin = pinnable.length > 0 && pinnable.every((convo) => convo.pinned);
+    btnBulkPinConvos.textContent = unpin ? 'Unpin' : 'Pin';
+    btnBulkPinConvos.disabled = pinnable.length === 0;
+  }
+}
+
+function setConversationSelectionMode(enabled) {
+  conversationSelectionMode = !!enabled;
+  if (!conversationSelectionMode) selectedConversationIds.clear();
+  renderSidebar();
+}
+
+function toggleConversationSelection(convoId) {
+  if (!conversationSelectionMode || !convoId) return;
+  if (selectedConversationIds.has(convoId)) selectedConversationIds.delete(convoId);
+  else selectedConversationIds.add(convoId);
+  renderSidebar();
+}
+
+function bulkSetSelectedConversationsPinned() {
+  const selected = conversations.filter((convo) => (
+    selectedConversationIds.has(convo.id) && !convo.incognito
+  ));
+  if (!selected.length) return;
+  const pin = !selected.every((convo) => convo.pinned);
+  const now = Date.now();
+  selected.forEach((convo, index) => {
+    convo.pinned = pin;
+    convo.pinnedAt = pin ? now - index : null;
+  });
+  saveConversations();
+  setConversationSelectionMode(false);
+}
+
+async function bulkDeleteSelectedConversations() {
+  const ids = [...selectedConversationIds].filter((id) => (
+    conversations.some((convo) => convo.id === id)
+  ));
+  if (!ids.length) return;
+  const ok = await confirmDanger({
+    title: 'Delete ' + ids.length + (ids.length === 1 ? ' conversation?' : ' conversations?'),
+    body: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+  });
+  if (!ok) return;
+
+  const deleting = new Set(ids);
+  const deletingEdit = editingQueueId
+    && ids.some((id) => getOutboundQueue(id).some((item) => item.id === editingQueueId));
+  ids.forEach((id) => {
+    abortStream(id);
+    activeStreams.delete(id);
+    outboundQueues.delete(id);
+    stickByConvo.delete(id);
+  });
+  if (deletingEdit) {
+    editingQueueId = null;
+    if (editingRow?.classList.contains('msg-queued')) {
+      editingRow = null;
+      mentionInput = composerInput;
+      closeMentionMenu();
+    }
+  }
+  const deletedActive = !!activeId && deleting.has(activeId);
+  conversations = conversations.filter((convo) => !deleting.has(convo.id));
+  saveConversations();
+  conversationSelectionMode = false;
+  selectedConversationIds.clear();
+  if (deletedActive) startDraft();
+  else {
+    renderSidebar();
+    syncComposerStreamUi();
+  }
+}
 
 function clearConvoDragMarkers(root) {
   if (!root) return;
@@ -2234,6 +2323,7 @@ function clearConvoDragMarkers(root) {
 }
 
 function bindConvoListReorder(listEl) {
+  if (conversationSelectionMode) return;
   const items = [...listEl.querySelectorAll('.convo-item[data-convo-id]')];
   if (items.length < 2) return;
 
@@ -2341,6 +2431,17 @@ function createConvoItem(convo, { nested = false } = {}) {
   if (convo.pinned) item.classList.add('is-pinned');
   if (notificationIsUnread(convo)) item.classList.add('has-unread');
   item.dataset.convoId = convo.id;
+  if (conversationSelectionMode) {
+    const selected = selectedConversationIds.has(convo.id);
+    item.classList.toggle('is-bulk-selected', selected);
+    item.setAttribute('role', 'checkbox');
+    item.setAttribute('aria-checked', selected ? 'true' : 'false');
+    const check = document.createElement('span');
+    check.className = 'convo-select-check';
+    check.setAttribute('aria-hidden', 'true');
+    check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg>';
+    item.appendChild(check);
+  }
   if (nested) item.classList.add('is-nested');
   const busy = isConvoBusy(convo.id);
   if (busy) item.classList.add('is-streaming');
@@ -2425,13 +2526,14 @@ function createConvoItem(convo, { nested = false } = {}) {
     item.appendChild(pinnedMark);
   }
   item.appendChild(title);
-  item.appendChild(more);
+  if (!conversationSelectionMode) item.appendChild(more);
   item.addEventListener('click', () => {
     if (convoDragMoved) {
       convoDragMoved = false;
       return;
     }
-    selectConversation(convo.id);
+    if (conversationSelectionMode) toggleConversationSelection(convo.id);
+    else selectConversation(convo.id);
   });
   return item;
 }
@@ -4147,6 +4249,10 @@ function renderThread(convo, { drainQueue = true } = {}) {
 
 function renderSidebar() {
   closeConvoMenu();
+  for (const id of selectedConversationIds) {
+    if (!conversations.some((convo) => convo.id === id)) selectedConversationIds.delete(id);
+  }
+  syncConversationBulkToolbar();
   const list = document.getElementById('convoList');
   list.innerHTML = '';
   sidebarProjectContext.innerHTML = '';
