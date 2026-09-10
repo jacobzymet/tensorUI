@@ -12,6 +12,7 @@ const GITHUB_OWNER: &str = "jacobzymet";
 const GITHUB_REPO: &str = "tensorUI";
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
+const MAX_GITHUB_RESPONSE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateStatus {
@@ -173,7 +174,10 @@ async fn fetch_latest_release() -> Result<UpdateStatus, String> {
         return Ok(status_up_to_date());
     }
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
+        let body = http::response_bytes_limited(response, MAX_GITHUB_RESPONSE_BYTES)
+            .await
+            .unwrap_or_default();
+        let body = String::from_utf8_lossy(&body);
         let detail = body.trim();
         if detail.is_empty() {
             return Err(format!("GitHub returned HTTP {status}"));
@@ -181,9 +185,10 @@ async fn fetch_latest_release() -> Result<UpdateStatus, String> {
         return Err(format!("GitHub returned HTTP {status}: {detail}"));
     }
 
-    let payload: serde_json::Value = response
-        .json()
+    let bytes = http::response_bytes_limited(response, MAX_GITHUB_RESPONSE_BYTES)
         .await
+        .map_err(|error| format!("invalid GitHub response: {error}"))?;
+    let payload: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid GitHub response: {error}"))?;
 
     if payload

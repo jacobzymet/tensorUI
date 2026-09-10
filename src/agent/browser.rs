@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Arc, Mutex as StdMutex, OnceLock, Weak},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -56,9 +56,24 @@ pub const TOOL_NAMES: &[&str] = &[
 ];
 
 static SESSIONS: OnceLock<Mutex<HashMap<String, Session>>> = OnceLock::new();
+static SESSION_GATES: OnceLock<StdMutex<HashMap<String, Weak<Mutex<()>>>>> = OnceLock::new();
 
 fn sessions() -> &'static Mutex<HashMap<String, Session>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn session_gate(key: &str) -> Arc<Mutex<()>> {
+    let mut gates = SESSION_GATES
+        .get_or_init(|| StdMutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = gates.get(key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(Mutex::new(()));
+    gates.insert(key.to_string(), Arc::downgrade(&gate));
+    gate
 }
 
 struct Session {
@@ -337,8 +352,10 @@ pub async fn execute(
 
 pub async fn close_session(session_id: &str) -> Result<String, String> {
     let key = session_key(session_id);
-    let mut map = sessions().lock().await;
-    if let Some(mut session) = map.remove(&key) {
+    let gate = session_gate(&key);
+    let _guard = gate.lock().await;
+    let session = sessions().lock().await.remove(&key);
+    if let Some(mut session) = session {
         let _ = session.browser.close().await;
         Ok("Browser closed.".into())
     } else {
@@ -360,16 +377,23 @@ where
 async fn ensure_session(session_id: &str) -> Result<Page, String> {
     let lease = crate::session::lease()?;
     let key = session_key(session_id);
-    let mut map = sessions().lock().await;
+    let gate = session_gate(&key);
+    let _guard = gate.lock().await;
     if !lease.valid() {
         return Err("Encrypted local data is locked.".into());
     }
-    if let Some(session) = map.get(&key)
-        && page_alive(&session.page).await
+    let existing = sessions()
+        .lock()
+        .await
+        .get(&key)
+        .map(|session| session.page.clone());
+    if let Some(page) = existing
+        && page_alive(&page).await
     {
-        return Ok(session.page.clone());
+        return Ok(page);
     }
-    if let Some(mut stale) = map.remove(&key) {
+    let stale = sessions().lock().await.remove(&key);
+    if let Some(mut stale) = stale {
         let _ = stale.browser.kill().await;
     }
     let mut session = launch_session(&key).await?;
@@ -378,7 +402,7 @@ async fn ensure_session(session_id: &str) -> Result<Page, String> {
         return Err("Encrypted local data is locked.".into());
     }
     let page = session.page.clone();
-    map.insert(key, session);
+    sessions().lock().await.insert(key, session);
     Ok(page)
 }
 
@@ -757,6 +781,15 @@ const SNAPSHOT_JS: &str = r#"() => {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_gates_are_per_key() {
+        let first = session_gate("gate-test-a");
+        let same = session_gate("gate-test-a");
+        let other = session_gate("gate-test-b");
+        assert!(Arc::ptr_eq(&first, &same));
+        assert!(!Arc::ptr_eq(&first, &other));
+    }
 
     #[tokio::test]
     #[ignore = "requires an installed Chromium browser"]

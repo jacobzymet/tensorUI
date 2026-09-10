@@ -131,7 +131,8 @@ fn focus_running_instance(bind: SocketAddr) -> Option<()> {
     if response.status().as_u16() != 200 {
         return None;
     }
-    let info: serde_json::Value = response.json().ok()?;
+    let body = tensorui::http::blocking_response_bytes_limited(response, 64 * 1024).ok()?;
+    let info: serde_json::Value = serde_json::from_slice(&body).ok()?;
     if info.get("app").and_then(|app| app.as_str()) != Some(web::INSTANCE_MARKER) {
         return None;
     }

@@ -2,11 +2,13 @@
 
 use std::{
     cell::Cell,
+    io::Read,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::OnceLock,
     time::Duration,
 };
 
+use futures_util::StreamExt;
 use reqwest::{Client, Url};
 
 const APP_UA: &str = concat!("tensorui/", env!("CARGO_PKG_VERSION"));
@@ -141,8 +143,6 @@ pub fn public_client() -> Client {
             Client::builder()
                 .timeout(Duration::from_secs(60))
                 .user_agent(BROWSER_UA)
-                // Cookie jar helps sites that set a device/geo cookie before serving HTML.
-                .cookie_store(true)
                 // Prefer HTTP/1.1 — some news CDNs fingerprint HTTP/2 stacks and answer 406.
                 .http1_only()
                 .build()
@@ -188,6 +188,72 @@ pub fn app_blocking_client(timeout: Duration) -> reqwest::blocking::Client {
         .cookie_store(true)
         .build()
         .expect("reqwest blocking client")
+}
+
+fn append_bounded(output: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) -> Result<(), String> {
+    if output
+        .len()
+        .checked_add(chunk.len())
+        .is_none_or(|len| len > max_bytes)
+    {
+        return Err(format!("response exceeded the {max_bytes}-byte limit"));
+    }
+    output.extend_from_slice(chunk);
+    Ok(())
+}
+
+/// Read a response incrementally and reject it once the decoded body exceeds
+/// the supplied limit. This also covers absent or compressed Content-Length.
+pub async fn response_bytes_limited(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(format!("response exceeded the {max_bytes}-byte limit"));
+    }
+    let mut output = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(max_bytes as u64) as usize,
+    );
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| error.to_string())?;
+        append_bounded(&mut output, &chunk, max_bytes)?;
+    }
+    Ok(output)
+}
+
+/// Blocking counterpart to response_bytes_limited for startup handshakes and
+/// provider probes.
+pub fn blocking_response_bytes_limited(
+    response: reqwest::blocking::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(format!("response exceeded the {max_bytes}-byte limit"));
+    }
+    let mut output = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(max_bytes as u64) as usize,
+    );
+    response
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut output)
+        .map_err(|error| error.to_string())?;
+    if output.len() > max_bytes {
+        return Err(format!("response exceeded the {max_bytes}-byte limit"));
+    }
+    Ok(output)
 }
 
 fn ipv4_is_non_public(ip: Ipv4Addr) -> bool {
@@ -307,5 +373,14 @@ mod tests {
             assert!(ip_is_non_public(ip.parse().unwrap()), "{ip}");
         }
         assert!(!ip_is_non_public("93.184.216.34".parse().unwrap()));
+    }
+
+    #[test]
+    fn bounded_body_rejects_overflow_before_appending() {
+        let mut body = b"abcd".to_vec();
+        append_bounded(&mut body, b"ef", 5).unwrap_err();
+        assert_eq!(body, b"abcd");
+        append_bounded(&mut body, b"e", 5).unwrap();
+        assert_eq!(body, b"abcde");
     }
 }

@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::RandomState},
     hash::BuildHasher,
-    io::Read,
     sync::{
         Mutex,
         atomic::{AtomicU64, Ordering},
@@ -20,6 +19,12 @@ const HEALTH_CACHE: Duration = Duration::from_secs(30);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 const MAX_PROBE_BODY_BYTES: u64 = 8 * 1024 * 1024;
+
+fn read_probe_json(response: reqwest::blocking::Response) -> Option<serde_json::Value> {
+    let bytes =
+        http::blocking_response_bytes_limited(response, MAX_PROBE_BODY_BYTES as usize).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -1301,7 +1306,7 @@ fn fetch_ollama_show_body(
     if response.status().as_u16() != 200 {
         return None;
     }
-    response.json::<serde_json::Value>().ok()
+    read_probe_json(response)
 }
 
 /// Resolve whether each model accepts native image / multimodal attachments.
@@ -1537,7 +1542,7 @@ fn fetch_lmstudio_vision_map(
     if response.status().as_u16() != 200 {
         return None;
     }
-    let body = response.json::<serde_json::Value>().ok()?;
+    let body = read_probe_json(response)?;
     let models = body
         .get("models")
         .and_then(|v| v.as_array())
@@ -1578,7 +1583,7 @@ fn fetch_lmstudio_thinking_map(
     if response.status().as_u16() != 200 {
         return None;
     }
-    let body = response.json::<serde_json::Value>().ok()?;
+    let body = read_probe_json(response)?;
     let models = body
         .get("models")
         .and_then(|v| v.as_array())
@@ -1638,19 +1643,12 @@ fn fetch_remote_props_body(
     if !token.trim().is_empty() {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
-    let mut response = request.send().ok()?;
+    let response = request.send().ok()?;
     if response.status().as_u16() != 200 {
         return None;
     }
-    let mut bytes = Vec::new();
-    response
-        .by_ref()
-        .take(MAX_PROBE_BODY_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    if bytes.len() as u64 > MAX_PROBE_BODY_BYTES {
-        return None;
-    }
+    let bytes =
+        http::blocking_response_bytes_limited(response, MAX_PROBE_BODY_BYTES as usize).ok()?;
     String::from_utf8(bytes).ok()
 }
 
@@ -1684,19 +1682,12 @@ fn fetch_models_payload(
     for (name, value) in provider_auth_headers(style, token) {
         request = request.header(&name, &value);
     }
-    let mut response = request.send().map_err(probe_http_error)?;
+    let response = request.send().map_err(probe_http_error)?;
     if response.status().as_u16() != 200 {
         return Err(format!("Remote responded with {}", response.status()));
     }
-    let mut bytes = Vec::new();
-    response
-        .by_ref()
-        .take(MAX_PROBE_BODY_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_PROBE_BODY_BYTES {
-        return Err("Remote model catalog is too large.".into());
-    }
+    let bytes = http::blocking_response_bytes_limited(response, MAX_PROBE_BODY_BYTES as usize)
+        .map_err(|_| "Remote model catalog is too large or unreadable.".to_string())?;
     serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 

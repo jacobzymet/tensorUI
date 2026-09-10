@@ -1,8 +1,10 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-const MAX_EXTRACT_BYTES: usize = 12 * 1024 * 1024;
+const MAX_EXTRACT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BASE64_BYTES: usize = MAX_EXTRACT_BYTES.div_ceil(3) * 4;
+const MAX_METADATA_CHARS: usize = 255;
+const MAX_EXTRACTED_TEXT_CHARS: usize = 500_000;
 
 #[derive(Debug, Deserialize)]
 pub struct ExtractRequest {
@@ -26,7 +28,18 @@ pub fn extract_attachment(req: ExtractRequest) -> Result<ExtractResponse, String
         .filter(|s| !s.is_empty())
         .unwrap_or("attachment")
         .to_string();
-    let mime = req.mime.as_deref().unwrap_or("").to_ascii_lowercase();
+    if filename.chars().count() > MAX_METADATA_CHARS {
+        return Err(format!(
+            "Attachment filename is too long (max {MAX_METADATA_CHARS} characters)"
+        ));
+    }
+    let mime_raw = req.mime.as_deref().unwrap_or("").trim();
+    if mime_raw.chars().count() > MAX_METADATA_CHARS {
+        return Err(format!(
+            "Attachment MIME type is too long (max {MAX_METADATA_CHARS} characters)"
+        ));
+    }
+    let mime = mime_raw.to_ascii_lowercase();
     let bytes = decode_base64(&req.content_base64)?;
     if bytes.len() > MAX_EXTRACT_BYTES {
         return Err(format!(
@@ -125,24 +138,81 @@ fn looks_like_text_filename(name: &str) -> bool {
     EXTS.iter().any(|ext| name.ends_with(ext))
 }
 
-fn normalize_extracted_text(text: &str) -> String {
-    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-    let mut out = String::with_capacity(normalized.len());
-    let mut blank_run = 0usize;
-    for line in normalized.lines() {
-        let trimmed_end = line.trim_end();
-        if trimmed_end.is_empty() {
-            blank_run += 1;
-            if blank_run <= 2 {
-                out.push('\n');
-            }
-            continue;
+fn push_chars_limited(output: &mut String, text: &str, remaining: &mut usize) -> bool {
+    for ch in text.chars() {
+        if *remaining == 0 {
+            return false;
         }
-        blank_run = 0;
-        out.push_str(trimmed_end);
-        out.push('\n');
+        output.push(ch);
+        *remaining -= 1;
     }
-    out.trim().to_string()
+    true
+}
+
+fn push_normalized_line(
+    output: &mut String,
+    line: &str,
+    blank_run: &mut usize,
+    remaining: &mut usize,
+) -> bool {
+    let trimmed_end = line.trim_end();
+    if trimmed_end.is_empty() {
+        *blank_run += 1;
+        return *blank_run > 2 || push_chars_limited(output, "\n", remaining);
+    }
+    *blank_run = 0;
+    push_chars_limited(output, trimmed_end, remaining)
+        && push_chars_limited(output, "\n", remaining)
+}
+
+fn normalize_extracted_text(text: &str) -> String {
+    let mut output = String::with_capacity(text.len().min(MAX_EXTRACTED_TEXT_CHARS));
+    let mut blank_run = 0usize;
+    let mut remaining = MAX_EXTRACTED_TEXT_CHARS;
+    let mut truncated = false;
+    let bytes = text.as_bytes();
+    let mut line_start = 0usize;
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\n' | b'\r') {
+            if !push_normalized_line(
+                &mut output,
+                &text[line_start..index],
+                &mut blank_run,
+                &mut remaining,
+            ) {
+                truncated = true;
+                break;
+            }
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            line_start = index + 1;
+        }
+        index += 1;
+    }
+    if !truncated
+        && line_start < text.len()
+        && !push_normalized_line(
+            &mut output,
+            &text[line_start..],
+            &mut blank_run,
+            &mut remaining,
+        )
+    {
+        truncated = true;
+    }
+
+    let trimmed = output.trim();
+    if !truncated {
+        return trimmed.to_string();
+    }
+    const SUFFIX: &str = "\n\n…[extracted text truncated by safety limit]";
+    let keep = MAX_EXTRACTED_TEXT_CHARS.saturating_sub(SUFFIX.chars().count());
+    let mut clipped: String = trimmed.chars().take(keep).collect();
+    clipped.push_str(SUFFIX);
+    clipped
 }
 
 #[cfg(test)]
@@ -160,5 +230,22 @@ mod tests {
         .unwrap();
         assert_eq!(out.kind, "text");
         assert_eq!(out.text, "hello attachment");
+    }
+
+    #[test]
+    fn rejects_oversized_attachment_metadata() {
+        let out = extract_attachment(ExtractRequest {
+            filename: Some("x".repeat(MAX_METADATA_CHARS + 1)),
+            mime: Some("text/plain".into()),
+            content_base64: String::new(),
+        });
+        assert!(out.unwrap_err().contains("filename is too long"));
+    }
+
+    #[test]
+    fn extracted_text_is_capped() {
+        let normalized = normalize_extracted_text(&"x".repeat(MAX_EXTRACTED_TEXT_CHARS + 50));
+        assert_eq!(normalized.chars().count(), MAX_EXTRACTED_TEXT_CHARS);
+        assert!(normalized.ends_with("[extracted text truncated by safety limit]"));
     }
 }

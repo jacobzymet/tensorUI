@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u64 = 8192;
+const MAX_TRANSLATED_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn openai_to_anthropic_messages(payload: &Value) -> Result<Value, String> {
     let model = payload
@@ -522,6 +523,15 @@ impl AnthropicSseTranslator {
                         if text.is_empty() {
                             return Ok(Vec::new());
                         }
+                        if self
+                            .content
+                            .len()
+                            .saturating_add(self.reasoning.len())
+                            .saturating_add(text.len())
+                            > MAX_TRANSLATED_TEXT_BYTES
+                        {
+                            return Err("Model output exceeded the safety limit.".into());
+                        }
                         self.content.push_str(text);
                         return Ok(vec![openai_content_delta(text)]);
                     }
@@ -530,6 +540,15 @@ impl AnthropicSseTranslator {
                 {
                     if text.is_empty() {
                         return Ok(Vec::new());
+                    }
+                    if self
+                        .content
+                        .len()
+                        .saturating_add(self.reasoning.len())
+                        .saturating_add(text.len())
+                        > MAX_TRANSLATED_TEXT_BYTES
+                    {
+                        return Err("Model output exceeded the safety limit.".into());
                     }
                     self.reasoning.push_str(text);
                     return Ok(vec![openai_reasoning_delta(text)]);

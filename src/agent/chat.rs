@@ -14,6 +14,7 @@ use crate::{
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub(crate) const CHANNEL_CAPACITY: usize = 32;
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
 #[cfg(not(test))]
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 #[cfg(test)]
@@ -219,6 +220,11 @@ async fn proxy_anthropic_sse(
         buffer.extend_from_slice(&chunk);
         let mut consumed = 0;
         while let Some(relative) = buffer[consumed..].iter().position(|byte| *byte == b'\n') {
+            if relative > MAX_SSE_LINE_BYTES {
+                return Err(StreamFail::Other(
+                    "Model SSE line exceeded the safety limit.".into(),
+                ));
+            }
             let end = consumed + relative;
             let mut line = &buffer[consumed..end];
             if line.last() == Some(&b'\r') {
@@ -236,6 +242,11 @@ async fn proxy_anthropic_sse(
         }
         if consumed != 0 {
             buffer = buffer.split_off(consumed);
+        }
+        if buffer.len() > MAX_SSE_LINE_BYTES {
+            return Err(StreamFail::Other(
+                "Model SSE line exceeded the safety limit.".into(),
+            ));
         }
     }
     if !buffer.is_empty() {

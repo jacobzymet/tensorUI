@@ -54,6 +54,9 @@ const MAX_ANSWER_RETRIES: usize = 4;
 const CLARIFY_WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// Prefix for mid-turn user guidance injected between tool rounds.
 const STEER_MARKER: &str = "[USER STEER]";
+const MAX_STEER_BYTES: usize = 64 * 1024;
+const MAX_STEER_CLIENT_ID_BYTES: usize = 256;
+const STEER_QUEUE_CAPACITY: usize = 32;
 
 fn clarify_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<Value>>> {
     static WAITERS: OnceLock<Mutex<HashMap<String, oneshot::Sender<Value>>>> = OnceLock::new();
@@ -65,9 +68,8 @@ fn approval_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> 
     WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn steer_sessions() -> &'static Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::UnboundedSender<SteerPayload>>>> =
-        OnceLock::new();
+fn steer_sessions() -> &'static Mutex<HashMap<String, mpsc::Sender<SteerPayload>>> {
+    static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::Sender<SteerPayload>>>> = OnceLock::new();
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -118,6 +120,11 @@ pub fn submit_steer(id: &str, text: &str, client_id: Option<&str>) -> Result<(),
     if text.is_empty() {
         return Err("steer text is required".into());
     }
+    if text.len() > MAX_STEER_BYTES {
+        return Err(format!(
+            "steer text is too long (max {MAX_STEER_BYTES} bytes)"
+        ));
+    }
     let sender = steer_sessions()
         .lock()
         .map_err(|_| "steer sessions lock poisoned".to_string())?
@@ -128,12 +135,27 @@ pub fn submit_steer(id: &str, text: &str, client_id: Option<&str>) -> Result<(),
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    if client_id
+        .as_ref()
+        .is_some_and(|value| value.len() > MAX_STEER_CLIENT_ID_BYTES)
+    {
+        return Err(format!(
+            "steer client id is too long (max {MAX_STEER_CLIENT_ID_BYTES} bytes)"
+        ));
+    }
     sender
-        .send(SteerPayload {
+        .try_send(SteerPayload {
             text: text.to_string(),
             client_id,
         })
-        .map_err(|_| "Agent turn is no longer accepting steering.".to_string())
+        .map_err(|error| match error {
+            mpsc::error::TrySendError::Full(_) => {
+                "Too many steering messages are already queued.".to_string()
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                "Agent turn is no longer accepting steering.".to_string()
+            }
+        })
 }
 
 struct ApprovalWaitGuard {
@@ -190,7 +212,7 @@ fn new_steer_id() -> String {
     new_runtime_id("steer")
 }
 
-fn drain_steers(rx: &mut mpsc::UnboundedReceiver<SteerPayload>) -> Vec<SteerPayload> {
+fn drain_steers(rx: &mut mpsc::Receiver<SteerPayload>) -> Vec<SteerPayload> {
     let mut out = Vec::new();
     while let Ok(payload) = rx.try_recv() {
         let trimmed = payload.text.trim().to_string();
@@ -223,6 +245,11 @@ const DEFAULT_FETCH_URL_MAX_CHARS: usize = 8_000;
 const MIN_PAGE_FETCH_CHARS: usize = 1_000;
 const MAX_PAGE_FETCH_CHARS: usize = 200_000;
 const PAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+const MAX_AGENT_TEXT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TOOL_CALLS: usize = MAX_CONCURRENT_TOOL_CALLS;
+const MAX_TOOL_ARGUMENT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TOOL_METADATA_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentRequest {
@@ -805,7 +832,7 @@ async fn run_agent_loop(
     .await?;
 
     let steer_id = new_steer_id();
-    let (steer_tx, mut steer_rx) = mpsc::unbounded_channel();
+    let (steer_tx, mut steer_rx) = mpsc::channel(STEER_QUEUE_CAPACITY);
     {
         let mut map = steer_sessions()
             .lock()
@@ -1689,17 +1716,33 @@ where
     S: StreamExt<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
 {
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     while let Some(next) = stream.next().await {
         let chunk = next.map_err(|error| StreamFail::Other(error.to_string()))?;
-        buffer.push_str(&String::from_utf8_lossy(chunk.as_ref()));
-        while let Some(idx) = buffer.find('\n') {
-            let mut line = buffer[..idx].to_string();
-            buffer.drain(..=idx);
-            if line.ends_with('\r') {
-                line.pop();
+        buffer.extend_from_slice(chunk.as_ref());
+        let mut consumed = 0usize;
+        while let Some(relative) = buffer[consumed..].iter().position(|byte| *byte == b'\n') {
+            if relative > MAX_SSE_LINE_BYTES {
+                return Err(StreamFail::Other(
+                    "Model SSE line exceeded the safety limit.".into(),
+                ));
             }
+            let end = consumed + relative;
+            let mut line = &buffer[consumed..end];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            let line = String::from_utf8_lossy(line);
             apply_openai_sse_line(&line, content, reasoning, native_tools, forwarding, tx).await?;
+            consumed = end + 1;
+        }
+        if consumed != 0 {
+            buffer = buffer.split_off(consumed);
+        }
+        if buffer.len() > MAX_SSE_LINE_BYTES {
+            return Err(StreamFail::Other(
+                "Model SSE line exceeded the safety limit.".into(),
+            ));
         }
     }
     Ok(())
@@ -1717,17 +1760,24 @@ where
     S: StreamExt<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
 {
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut translator = AnthropicSseTranslator::default();
     while let Some(next) = stream.next().await {
         let chunk = next.map_err(|error| StreamFail::Other(error.to_string()))?;
-        buffer.push_str(&String::from_utf8_lossy(chunk.as_ref()));
-        while let Some(idx) = buffer.find('\n') {
-            let mut line = buffer[..idx].to_string();
-            buffer.drain(..=idx);
-            if line.ends_with('\r') {
-                line.pop();
+        buffer.extend_from_slice(chunk.as_ref());
+        let mut consumed = 0usize;
+        while let Some(relative) = buffer[consumed..].iter().position(|byte| *byte == b'\n') {
+            if relative > MAX_SSE_LINE_BYTES {
+                return Err(StreamFail::Other(
+                    "Model SSE line exceeded the safety limit.".into(),
+                ));
             }
+            let end = consumed + relative;
+            let mut line = &buffer[consumed..end];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            let line = String::from_utf8_lossy(line);
             for frame in translator.push_line(&line).map_err(StreamFail::Other)? {
                 apply_openai_sse_frame(&frame, content, reasoning, native_tools, forwarding, tx)
                     .await?;
@@ -1735,6 +1785,15 @@ where
             if translator.is_finished() {
                 return Ok(());
             }
+            consumed = end + 1;
+        }
+        if consumed != 0 {
+            buffer = buffer.split_off(consumed);
+        }
+        if buffer.len() > MAX_SSE_LINE_BYTES {
+            return Err(StreamFail::Other(
+                "Model SSE line exceeded the safety limit.".into(),
+            ));
         }
     }
     Ok(())
@@ -1799,6 +1858,16 @@ async fn apply_openai_sse_line(
     if let Some(chunk) =
         delta_string(delta, "reasoning_content").or_else(|| delta_string(delta, "reasoning"))
     {
+        if content
+            .len()
+            .saturating_add(reasoning.len())
+            .saturating_add(chunk.len())
+            > MAX_AGENT_TEXT_BYTES
+        {
+            return Err(StreamFail::Other(
+                "Model output exceeded the safety limit.".into(),
+            ));
+        }
         reasoning.push_str(chunk);
         if *forwarding {
             let frame = json!({
@@ -1813,6 +1882,16 @@ async fn apply_openai_sse_line(
     if let Some(chunk) = delta_string(delta, "content")
         && !chunk.is_empty()
     {
+        if content
+            .len()
+            .saturating_add(reasoning.len())
+            .saturating_add(chunk.len())
+            > MAX_AGENT_TEXT_BYTES
+        {
+            return Err(StreamFail::Other(
+                "Model output exceeded the safety limit.".into(),
+            ));
+        }
         let before_len = content.len();
         content.push_str(chunk);
 
@@ -1840,7 +1919,7 @@ async fn apply_openai_sse_line(
 
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
         for tc in tool_calls {
-            merge_tool_call_delta(native_tools, tc);
+            merge_tool_call_delta(native_tools, tc).map_err(StreamFail::Other)?;
         }
         if *forwarding && native_tools.iter().flatten().any(|c| !c.name.is_empty()) {
             *forwarding = false;
@@ -1859,13 +1938,28 @@ fn delta_string<'a>(delta: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-fn append_tool_arguments(slot: &mut AccumToolCall, args: &Value) {
+fn append_tool_arguments(slot: &mut AccumToolCall, args: &Value) -> Result<(), String> {
     match args {
-        Value::String(text) => slot.arguments.push_str(text),
+        Value::String(text) => {
+            if slot
+                .arguments
+                .len()
+                .checked_add(text.len())
+                .is_none_or(|len| len > MAX_TOOL_ARGUMENT_BYTES)
+            {
+                return Err("Model tool arguments exceeded the safety limit.".into());
+            }
+            slot.arguments.push_str(text);
+        }
         other => {
-            slot.arguments = other.to_string();
+            let encoded = other.to_string();
+            if encoded.len() > MAX_TOOL_ARGUMENT_BYTES {
+                return Err("Model tool arguments exceeded the safety limit.".into());
+            }
+            slot.arguments = encoded;
         }
     }
+    Ok(())
 }
 
 async fn announce_preparing_tools(
@@ -1965,8 +2059,15 @@ fn json_string_field(raw: &str, key: &str) -> Option<String> {
     Some(out)
 }
 
-fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) {
-    let index = delta.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+fn merge_tool_call_delta(
+    slots: &mut Vec<Option<AccumToolCall>>,
+    delta: &Value,
+) -> Result<(), String> {
+    let index = delta.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+    let index = usize::try_from(index)
+        .ok()
+        .filter(|index| *index < MAX_TOOL_CALLS)
+        .ok_or_else(|| format!("Model returned more than {MAX_TOOL_CALLS} tool calls."))?;
     while slots.len() <= index {
         slots.push(None);
     }
@@ -1974,6 +2075,9 @@ fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) 
 
     if let Some(id) = delta.get("id").and_then(|v| v.as_str()) {
         let id = id.trim();
+        if id.len() > MAX_TOOL_METADATA_BYTES {
+            return Err("Model tool-call ID exceeded the safety limit.".into());
+        }
         if !id.is_empty() && (!slot.announced || slot.id.trim().is_empty()) {
             slot.id = id.to_string();
         }
@@ -1982,25 +2086,32 @@ fn merge_tool_call_delta(slots: &mut Vec<Option<AccumToolCall>>, delta: &Value) 
     if let Some(func) = delta.get("function") {
         if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
             let name = name.trim();
+            if name.len() > MAX_TOOL_METADATA_BYTES {
+                return Err("Model tool name exceeded the safety limit.".into());
+            }
             if !name.is_empty() {
                 slot.name = name.to_string();
             }
         }
         if let Some(args) = func.get("arguments") {
-            append_tool_arguments(slot, args);
+            append_tool_arguments(slot, args)?;
         }
     }
 
     // llama.cpp may flatten name + arguments on the delta.
     if let Some(name) = delta.get("name").and_then(|v| v.as_str()) {
         let name = name.trim();
+        if name.len() > MAX_TOOL_METADATA_BYTES {
+            return Err("Model tool name exceeded the safety limit.".into());
+        }
         if !name.is_empty() {
             slot.name = name.to_string();
         }
     }
     if let Some(args) = delta.get("arguments") {
-        append_tool_arguments(slot, args);
+        append_tool_arguments(slot, args)?;
     }
+    Ok(())
 }
 
 fn openai_tools_payload(
@@ -3658,7 +3769,8 @@ mod tests {
                 "type": "function",
                 "function": { "name": "web_search", "arguments": "{\"query\":\"x\"}" }
             }),
-        );
+        )
+        .unwrap();
         let turn = resolve_streamed_turn("", "Checking sources first.", &slots);
         assert_eq!(turn.tools.len(), 1);
         assert_eq!(turn.content, "Checking sources first.");
@@ -3674,11 +3786,39 @@ mod tests {
                 "name": "web_search",
                 "arguments": "{\"query\":\"elon musk\"}"
             }),
-        );
+        )
+        .unwrap();
         let turn = resolve_streamed_turn("", "", &slots);
         let call = &turn.tools[0];
         assert_eq!(call.name, "web_search");
         assert_eq!(call.arguments["query"], "elon musk");
+    }
+
+    #[test]
+    fn rejects_oversized_native_tool_deltas() {
+        let mut slots = Vec::new();
+        let index_error = merge_tool_call_delta(
+            &mut slots,
+            &json!({
+                "index": MAX_TOOL_CALLS,
+                "name": "web_search",
+                "arguments": "{}"
+            }),
+        )
+        .unwrap_err();
+        assert!(index_error.contains("tool calls"));
+        assert!(slots.is_empty());
+
+        let argument_error = merge_tool_call_delta(
+            &mut slots,
+            &json!({
+                "index": 0,
+                "name": "write_file",
+                "arguments": "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1)
+            }),
+        )
+        .unwrap_err();
+        assert!(argument_error.contains("arguments"));
     }
 
     #[test]
@@ -3716,6 +3856,83 @@ mod tests {
     }
 
     #[test]
+    fn steer_queue_rejects_oversized_and_excess_messages() {
+        let id = new_steer_id();
+        let (sender, mut receiver) = mpsc::channel(STEER_QUEUE_CAPACITY);
+        steer_sessions().lock().unwrap().insert(id.clone(), sender);
+
+        let oversized = "x".repeat(MAX_STEER_BYTES + 1);
+        assert!(
+            submit_steer(&id, &oversized, None)
+                .unwrap_err()
+                .contains("too long")
+        );
+        for index in 0..STEER_QUEUE_CAPACITY {
+            submit_steer(&id, &format!("note {index}"), None).unwrap();
+        }
+        assert!(
+            submit_steer(&id, "one too many", None)
+                .unwrap_err()
+                .contains("already queued")
+        );
+
+        steer_sessions().lock().unwrap().remove(&id);
+        assert_eq!(drain_steers(&mut receiver).len(), STEER_QUEUE_CAPACITY);
+    }
+
+    #[tokio::test]
+    async fn agent_sse_preserves_split_utf8_and_rejects_oversized_lines() {
+        let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n\n";
+        let char_start = frame.find('你').unwrap();
+        let bytes = frame.as_bytes();
+        let chunks = [
+            bytes[..char_start + 1].to_vec(),
+            bytes[char_start + 1..].to_vec(),
+        ];
+        let mut stream = stream::iter(
+            chunks
+                .iter()
+                .map(|chunk| Ok::<&[u8], reqwest::Error>(chunk.as_slice())),
+        );
+        let (tx, _rx) = mpsc::channel(4);
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        let mut tools = Vec::new();
+        let mut forwarding = true;
+        consume_openai_sse_agent(
+            &mut stream,
+            &mut content,
+            &mut reasoning,
+            &mut tools,
+            &mut forwarding,
+            &tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(content, "你");
+
+        let chunks = [vec![b'x'; MAX_SSE_LINE_BYTES + 1]];
+        let mut stream = stream::iter(
+            chunks
+                .iter()
+                .map(|chunk| Ok::<&[u8], reqwest::Error>(chunk.as_slice())),
+        );
+        let result = consume_openai_sse_agent(
+            &mut stream,
+            &mut String::new(),
+            &mut String::new(),
+            &mut Vec::new(),
+            &mut true,
+            &tx,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(StreamFail::Other(message)) if message.contains("SSE line")
+        ));
+    }
+
+    #[test]
     fn finalize_prefers_native_over_inline_xml() {
         let mut slots = Vec::new();
         merge_tool_call_delta(
@@ -3727,7 +3944,8 @@ mod tests {
                     "arguments": "{\"query\":\"from-native\"}"
                 }
             }),
-        );
+        )
+        .unwrap();
         let inline = "<tool_call>\n{\"name\":\"web_search\",\"arguments\":{\"query\":\"from-xml\"}}\n</tool_call>";
         let turn = resolve_streamed_turn("", inline, &slots);
         assert_eq!(turn.tools.len(), 1);
@@ -3775,7 +3993,8 @@ mod tests {
                 "id": "call_a",
                 "function": { "name": "web_search", "arguments": "{\"query\":\"one\"}" }
             }),
-        );
+        )
+        .unwrap();
         merge_tool_call_delta(
             &mut slots,
             &json!({
@@ -3783,7 +4002,7 @@ mod tests {
                 "id": "call_b",
                 "function": { "name": "fetch_url", "arguments": "{\"url\":\"https://example.com\"}" }
             }),
-        );
+        ).unwrap();
         let turn = resolve_streamed_turn("", "", &slots);
         assert_eq!(turn.tools.len(), 2);
         assert_eq!(turn.tools[0].id, "call_a");

@@ -21,6 +21,7 @@ const TINYFISH_TIMEOUT: Duration = Duration::from_secs(20);
 const TINYFISH_SEARCH_URL: &str = "https://api.search.tinyfish.ai/";
 const DDG_LITE: &str = "https://lite.duckduckgo.com/lite/";
 const DDG_HTML: &str = "https://html.duckduckgo.com/html/";
+const MAX_SEARCH_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 pub(super) async fn search_web(
     query: &str,
@@ -305,10 +306,7 @@ async fn parallel_mcp_hits(query: &str, limit: usize) -> Result<Vec<SearchHit>, 
         .map_err(|_| "Parallel MCP search timed out".to_string())?
         .map_err(|error| format!("Parallel MCP search failed: {error}"))?;
     let status = response.status().as_u16();
-    let text = response
-        .text()
-        .await
-        .map_err(|error| format!("Parallel MCP response was not text: {error}"))?;
+    let body = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES).await;
 
     let _ = client
         .delete(PARALLEL_MCP_URL)
@@ -316,6 +314,9 @@ async fn parallel_mcp_hits(query: &str, limit: usize) -> Result<Vec<SearchHit>, 
         .send()
         .await;
 
+    let body = body
+        .map_err(|error| format!("Parallel MCP response was too large or unreadable: {error}"))?;
+    let text = String::from_utf8_lossy(&body);
     if status != 200 {
         return Err(format!(
             "Parallel MCP HTTP {status}: {}",
@@ -369,10 +370,12 @@ async fn parallel_mcp_initialize(client: &reqwest::Client) -> Result<String, Str
         .map(str::to_string)
         .ok_or_else(|| "Parallel MCP did not return Mcp-Session-Id".to_string())?;
     let status = response.status().as_u16();
-    let text = response
-        .text()
+    let bytes = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES)
         .await
-        .map_err(|error| format!("Parallel MCP initialize body: {error}"))?;
+        .map_err(|error| {
+            format!("Parallel MCP initialize body was too large or unreadable: {error}")
+        })?;
+    let text = String::from_utf8_lossy(&bytes);
     if status != 200 {
         return Err(format!(
             "Parallel MCP initialize HTTP {status}: {}",
@@ -430,10 +433,10 @@ async fn send_parallel_json(
         .map_err(|_| "Parallel search timed out".to_string())?
         .map_err(|error| format!("Parallel search failed: {error}"))?;
     let status = response.status().as_u16();
-    let body = response
-        .text()
+    let bytes = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES)
         .await
-        .map_err(|error| format!("Parallel response was not text: {error}"))?;
+        .map_err(|error| format!("Parallel response was too large or unreadable: {error}"))?;
+    let body = String::from_utf8_lossy(&bytes);
     if status != 200 {
         let detail = parallel_error_detail(&body).unwrap_or_else(|| {
             let trimmed = collapse_ws(&body);
@@ -445,7 +448,7 @@ async fn send_parallel_json(
         });
         return Err(detail);
     }
-    serde_json::from_str(&body).map_err(|error| format!("Invalid Parallel JSON: {error}"))
+    serde_json::from_slice(&bytes).map_err(|error| format!("Invalid Parallel JSON: {error}"))
 }
 
 fn parallel_error_detail(body: &str) -> Option<String> {
@@ -598,10 +601,10 @@ async fn send_tinyfish_json(
         .map_err(|_| "TinyFish search timed out".to_string())?
         .map_err(|error| format!("TinyFish search failed: {error}"))?;
     let status = response.status().as_u16();
-    let body = response
-        .text()
+    let bytes = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES)
         .await
-        .map_err(|error| format!("TinyFish response was not text: {error}"))?;
+        .map_err(|error| format!("TinyFish response was too large or unreadable: {error}"))?;
+    let body = String::from_utf8_lossy(&bytes);
     if status != 200 {
         let detail = tinyfish_error_detail(&body).unwrap_or_else(|| {
             let trimmed = collapse_ws(&body);
@@ -613,7 +616,7 @@ async fn send_tinyfish_json(
         });
         return Err(detail);
     }
-    serde_json::from_str(&body).map_err(|error| format!("Invalid TinyFish JSON: {error}"))
+    serde_json::from_slice(&bytes).map_err(|error| format!("Invalid TinyFish JSON: {error}"))
 }
 
 fn tinyfish_error_detail(body: &str) -> Option<String> {
@@ -1142,12 +1145,16 @@ fn parse_searxng_scraper(html: &str) -> Vec<SearchHit> {
 }
 
 fn query_is_mostly_latin(query: &str) -> bool {
-    let letters: Vec<char> = query.chars().filter(|ch| ch.is_alphabetic()).collect();
-    if letters.is_empty() {
+    let mut letters = 0usize;
+    let mut latin = 0usize;
+    for ch in query.chars().filter(|ch| ch.is_alphabetic()) {
+        letters += 1;
+        latin += usize::from(ch.is_ascii_alphabetic());
+    }
+    if letters == 0 {
         return true;
     }
-    let latin = letters.iter().filter(|ch| ch.is_ascii_alphabetic()).count();
-    latin * 100 / letters.len() >= 60
+    latin * 100 / letters >= 60
 }
 
 async fn send_html(
@@ -1163,10 +1170,10 @@ async fn send_html(
     if status != 200 && status != 202 {
         return Err(format!("Search HTTP {status}"));
     }
-    let html = response
-        .text()
+    let bytes = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES)
         .await
-        .map_err(|error| format!("Search response was not text: {error}"))?;
+        .map_err(|error| format!("Search response was too large or unreadable: {error}"))?;
+    let html = String::from_utf8_lossy(&bytes).into_owned();
     if ddg_captcha && is_ddg_challenge(&html) {
         return Err("DuckDuckGo challenged the search (captcha)".into());
     }
@@ -1191,10 +1198,10 @@ async fn send_json(request: reqwest::RequestBuilder, wait: Duration) -> Result<V
     if status != 200 {
         return Err(format!("Search HTTP {status}"));
     }
-    response
-        .json()
+    let bytes = http::response_bytes_limited(response, MAX_SEARCH_RESPONSE_BYTES)
         .await
-        .map_err(|error| format!("Invalid JSON: {error}"))
+        .map_err(|error| format!("Search response was too large or unreadable: {error}"))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("Invalid JSON: {error}"))
 }
 
 fn parse_ddg_html(html: &str) -> Vec<SearchHit> {
