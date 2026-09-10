@@ -151,7 +151,6 @@ const composerDock = document.getElementById('composerDock');
 const composerCard = document.getElementById('composerCard');
 const composerShell = document.getElementById('composerShell');
 const composerInput = document.getElementById('composerInput');
-const composerGhostNotice = document.getElementById('composerGhostNotice');
 const composerHint = document.getElementById('composerHint');
 const composerMentions = document.getElementById('composerMentions');
 const composerReply = document.getElementById('composerReply');
@@ -230,7 +229,6 @@ const traceMembersPicker = document.getElementById('traceMembersPicker');
 const btnTraceMemberAdd = document.getElementById('btnTraceMemberAdd');
 const btnTraceActivityFold = document.getElementById('btnTraceActivityFold');
 const btnTraceMembersFold = document.getElementById('btnTraceMembersFold');
-const btnToggleTrace = document.getElementById('btnToggleTrace');
 const btnExpandTrace = document.getElementById('btnExpandTrace');
 
 /** Selected assistant message index for the activity sidebar (desktop). */
@@ -1950,9 +1948,9 @@ function refreshEncryptionIndicator() {
   sidebarEncryptionBadge?.classList.toggle('is-hidden', !enabled);
   encryptionIndicator.classList.remove('is-locked', 'is-recovery', 'is-browser');
   sidebarEncryptionBadge?.classList.remove('is-locked', 'is-recovery', 'is-browser');
-  const expandSidebar = document.getElementById('btnExpandSidebar');
+  const sidebarToggle = document.getElementById('btnToggleSidebar');
   if (!enabled) {
-    if (expandSidebar) delete expandSidebar.dataset.encryptionDetail;
+    if (sidebarToggle) delete sidebarToggle.dataset.encryptionDetail;
     if (typeof syncSidebarToggleUi === 'function') syncSidebarToggleUi();
     return;
   }
@@ -1978,7 +1976,7 @@ function refreshEncryptionIndicator() {
   encryptionIndicator.setAttribute('aria-label', detail + '. Open encryption settings');
   encryptionIndicator.title = detail + '. Open encryption settings';
   if (sidebarEncryptionBadge) sidebarEncryptionBadge.title = detail;
-  if (expandSidebar) expandSidebar.dataset.encryptionDetail = detail;
+  if (sidebarToggle) sidebarToggle.dataset.encryptionDetail = detail;
   if (typeof syncSidebarToggleUi === 'function') syncSidebarToggleUi();
 }
 

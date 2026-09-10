@@ -35,13 +35,30 @@ function context(overrides = {}) {
 
 test('background completions become unread until the task is opened', () => {
   let saves = 0;
-  const state = context({ saveConversations: () => { saves += 1; } });
+  let refreshes = 0;
+  const state = context({
+    saveConversations: () => { saves += 1; },
+    refreshNotificationsUi: () => { refreshes += 1; },
+  });
   const convo = { id: 'task-1' };
   state.recordConversationNotification(convo, { at: 200 });
   assert.equal(state.notificationIsUnread(convo), true);
   assert.equal(state.markConversationNotificationRead(convo), true);
   assert.equal(convo.notificationReadAt, 200);
   assert.equal(saves, 1);
+  assert.equal(refreshes, 2);
+});
+
+test('notification state refreshes the badge immediately when a task completes', () => {
+  let refreshes = 0;
+  const convo = { id: 'task-2' };
+  const state = context({
+    activeId: 'another-task',
+    refreshNotificationsUi: () => { refreshes += 1; },
+  });
+  state.recordConversationNotification(convo, { at: 500 });
+  assert.equal(refreshes, 1);
+  assert.equal(state.notificationIsUnread(convo), true);
 });
 
 test('a visible open task records its completion as already read', () => {
@@ -87,4 +104,41 @@ test('notification excerpts render sanitized inline markdown', () => {
   assert.match(html, /<strong>Critique<\/strong>/);
   assert.deepEqual(Array.from(options.ALLOWED_TAGS), ['strong', 'em', 'code', 'del', 'br']);
   assert.equal(options.ALLOWED_ATTR.length, 0);
+});
+
+test('the notification bell toggles a popover without replacing the current page', () => {
+  const classes = new Set();
+  const attributes = new Map();
+  const state = vm.createContext({
+    mainView: 'projects',
+    notificationsView: {
+      classList: {
+        contains: (name) => classes.has(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+      },
+      setAttribute: (name, value) => attributes.set('popover:' + name, value),
+    },
+    btnNotificationsNav: {
+      classList: { toggle() {} },
+      setAttribute: (name, value) => attributes.set(name, value),
+      focus() {},
+    },
+    closeConvoMenu() {},
+    refreshNotificationsUi() {},
+  });
+  for (const name of ['notificationsPopoverIsOpen', 'setNotificationsOpen', 'showNotificationsView']) {
+    vm.runInContext(declaration(name), state);
+  }
+
+  state.showNotificationsView();
+  assert.equal(classes.has('is-open'), true);
+  assert.equal(attributes.get('aria-expanded'), 'true');
+  assert.equal(attributes.get('popover:aria-hidden'), 'false');
+  assert.equal(state.mainView, 'projects');
+
+  state.showNotificationsView();
+  assert.equal(classes.has('is-open'), false);
+  assert.equal(attributes.get('aria-expanded'), 'false');
+  assert.equal(attributes.get('popover:aria-hidden'), 'true');
+  assert.equal(state.mainView, 'projects');
 });

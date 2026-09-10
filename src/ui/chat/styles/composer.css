@@ -61,39 +61,6 @@ body > .composer-shell {
     box-shadow var(--dur-enter) var(--ease-settle),
     transform var(--dur-enter) var(--ease-settle);
 }
-.composer-ghost-notice {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin: -0.25rem -0.25rem 0;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--accent-edge);
-  border-radius: var(--radius-lg);
-  background: color-mix(in oklch, var(--color-accent) 11%, var(--color-paper-2));
-  color: var(--color-ink);
-}
-.composer-ghost-notice.is-hidden { display: none; }
-.composer-ghost-notice > svg {
-  flex: 0 0 auto;
-  width: 1.15rem;
-  height: 1.15rem;
-  color: var(--color-accent);
-}
-.composer-ghost-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.08rem;
-  line-height: 1.25;
-}
-.composer-ghost-copy strong {
-  font-size: var(--text-sm);
-  font-weight: 650;
-}
-.composer-ghost-copy small {
-  color: var(--color-muted);
-  font-size: 0.68rem;
-}
 .chat-shell.is-incognito .composer-card {
   background:
     linear-gradient(
@@ -182,16 +149,14 @@ body > .composer-shell {
   box-shadow: none;
 }
 .composer-tab-capabilities {
-  display: grid;
-  grid-template-columns: repeat(3, max-content);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: start;
   gap: 0.35rem;
   min-width: 0;
   padding-top: 0.04rem;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.composer-tab-capabilities::-webkit-scrollbar { display: none; }
 .composer-tab-capabilities .composer-modes,
 .composer-tab-capabilities .composer-mentions {
   display: contents;
@@ -494,6 +459,8 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.2rem 0.35rem 0.2rem 0.55rem;
   border-radius: var(--radius-pill);
   border: 1px solid var(--accent-edge);
@@ -501,6 +468,12 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   color: var(--color-ink);
   font-size: var(--text-xs);
   font-weight: 600;
+}
+.composer-mode-chip > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer-mode-chip button {
   appearance: none;
@@ -516,6 +489,7 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   font-size: 0.95rem;
   line-height: 1;
   border-radius: var(--radius-pill);
+  flex: 0 0 auto;
 }
 .composer-mode-chip button:hover { color: var(--color-ink); }
 /* Circular send/stop: an unmistakable single target at the corner. */

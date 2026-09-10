@@ -3484,19 +3484,15 @@ document.getElementById('btnNewProject').addEventListener('click', createProject
 projectsSearch.addEventListener('input', renderProjectsPage);
 projectsSort.addEventListener('change', renderProjectsPage);
 const btnToggleSidebar = document.getElementById('btnToggleSidebar');
-const btnExpandSidebar = document.getElementById('btnExpandSidebar');
 const btnPrivacyMode = document.getElementById('btnPrivacyMode');
 const sidebarMobileMq = window.matchMedia('(max-width: 820px)');
 
 initTraceSidebarPreferred();
-btnToggleTrace?.addEventListener('click', () => {
-  const open = chatShell.classList.contains('trace-collapsed');
-  setTraceSidebarOpen(open, { fromUser: true });
-});
 btnExpandTrace?.addEventListener('click', () => {
-  stickTraceSidebar = true;
-  setTraceSidebarOpen(true, { fromUser: true });
-  scrollTraceSidebarToBottom({ force: true });
+  const open = chatShell.classList.contains('trace-collapsed');
+  stickTraceSidebar = open;
+  setTraceSidebarOpen(open, { fromUser: true });
+  if (open) scrollTraceSidebarToBottom({ force: true });
 });
 if (traceSidebarBody) {
   let lastTraceScrollTop = 0;
@@ -3538,16 +3534,14 @@ function sidebarIsOpen() {
 function syncSidebarToggleUi() {
   const open = sidebarIsOpen();
   if (btnToggleSidebar) {
+    const encryptionDetail = btnToggleSidebar.dataset.encryptionDetail;
+    const action = open ? 'Hide sidebar' : 'Show sidebar';
+    const label = action + (encryptionDetail ? ' · ' + encryptionDetail : '');
+    btnToggleSidebar.classList.toggle('is-sidebar-open', open);
     btnToggleSidebar.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btnToggleSidebar.setAttribute('aria-label', open ? 'Hide sidebar' : 'Show sidebar');
-    btnToggleSidebar.title = open ? 'Hide sidebar' : 'Show sidebar';
-  }
-  if (btnExpandSidebar) {
-    btnExpandSidebar.setAttribute('aria-expanded', open ? 'true' : 'false');
-    const encryptionDetail = btnExpandSidebar.dataset.encryptionDetail;
-    const label = 'Show sidebar' + (encryptionDetail ? ' · ' + encryptionDetail : '');
-    btnExpandSidebar.setAttribute('aria-label', label);
-    btnExpandSidebar.title = label;
+    btnToggleSidebar.setAttribute('aria-pressed', open ? 'true' : 'false');
+    btnToggleSidebar.setAttribute('aria-label', label);
+    btnToggleSidebar.title = label;
   }
 }
 
@@ -3625,8 +3619,7 @@ function applyStoredSidebarCollapsed() {
   syncSidebarToggleUi();
 }
 
-btnToggleSidebar?.addEventListener('click', () => setSidebarOpen(false));
-btnExpandSidebar?.addEventListener('click', () => setSidebarOpen(true));
+btnToggleSidebar?.addEventListener('click', () => setSidebarOpen(!sidebarIsOpen()));
 btnPrivacyMode?.addEventListener('click', () => {
   setPrivacyMode(!chatShell.classList.contains('privacy-mode'));
 });
@@ -3794,11 +3787,15 @@ searchModalInput?.addEventListener('keydown', (event) => {
 searchModal?.addEventListener('click', (event) => {
   if (event.target === searchModal) closeSearchModal();
 });
-document.getElementById('btnSettings').addEventListener('click', () => openSettings());
+document.getElementById('btnSettings').addEventListener('click', () => {
+  setNotificationsOpen(false);
+  openSettings();
+});
 btnProfileMenu?.addEventListener('click', (event) => {
   event.stopPropagation();
   if (profileMenuIsOpen()) setProfileMenuOpen(false, { restoreFocus: true });
   else {
+    setNotificationsOpen(false);
     syncAccountProfileUi();
     setProfileMenuOpen(true);
   }
@@ -4206,6 +4203,11 @@ projectModal.addEventListener('click', (event) => {
   if (event.target === projectModal) closeProjectSettings();
 });
 document.addEventListener('click', (event) => {
+  if (notificationsPopoverIsOpen()
+      && !notificationsView.contains(event.target)
+      && !btnNotificationsNav.contains(event.target)) {
+    setNotificationsOpen(false);
+  }
   if (profileMenuIsOpen() && !sidebarProfileMenu.contains(event.target) && !btnProfileMenu.contains(event.target)) {
     setProfileMenuOpen(false);
   }
@@ -4259,6 +4261,10 @@ document.addEventListener('keydown', (event) => {
     }
   }
   if (event.key === 'Escape') {
+    if (notificationsPopoverIsOpen()) {
+      setNotificationsOpen(false, { restoreFocus: true });
+      return;
+    }
     if (profileMenuIsOpen()) {
       setProfileMenuOpen(false, { restoreFocus: true });
       return;

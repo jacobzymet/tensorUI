@@ -70,9 +70,7 @@
   border: 1px solid color-mix(in oklch, var(--color-accent) 38%, var(--color-rule));
   border-radius: 50%;
   color: var(--color-ink);
-  background:
-    radial-gradient(circle at 32% 24%, color-mix(in oklch, var(--color-accent) 28%, transparent), transparent 55%),
-    var(--color-paper-3);
+  background: color-mix(in oklch, var(--color-accent) 14%, var(--color-paper-3));
   font-family: var(--font-display);
   font-size: 0.67rem;
   font-weight: 700;
@@ -144,28 +142,29 @@
   border-radius: var(--radius-md);
 }
 
-.sidebar-account-icon svg {
+.sidebar-account-icon > svg {
   width: 1.08rem;
   height: 1.08rem;
 }
 
 .sidebar-notification-badge {
   position: absolute;
-  top: 0.14rem;
-  right: 0.1rem;
+  top: 0.06rem;
+  right: 0.02rem;
   display: inline-grid;
   place-items: center;
-  min-width: 0.9rem;
-  height: 0.9rem;
+  min-width: 1rem;
+  height: 1rem;
   padding: 0 0.18rem;
   border: 2px solid var(--color-graphite);
   border-radius: var(--radius-pill);
   color: white;
-  background: var(--color-accent);
+  background: var(--color-danger);
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.52rem;
   font-weight: 700;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .sidebar-notification-badge[hidden] { display: none; }
@@ -192,6 +191,132 @@
   opacity: 1;
   pointer-events: auto;
   transform: none;
+}
+
+/* Account controls live in the global top bar; the legacy class names remain so
+   profile, notification, privacy, and encryption behavior stays wired in one place. */
+.topbar-account-cluster {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.topbar-account-cluster .sidebar-account-trigger {
+  width: max-content;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0.15rem 0.42rem 0.15rem 0;
+  border-radius: var(--radius-md);
+}
+
+.topbar-account-cluster .sidebar-account-copy {
+  flex: 0 0 auto;
+  flex-direction: row;
+  max-width: none;
+  overflow: visible;
+  line-height: 1;
+}
+
+.topbar-account-cluster .sidebar-account-name-row {
+  gap: 0.45rem;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.topbar-account-cluster .sidebar-account-copy strong,
+.topbar-account-cluster .sidebar-account-copy span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.topbar-account-cluster .sidebar-active-profile-name {
+  padding-left: 0.45rem;
+  border-left: 1px solid color-mix(in oklch, var(--color-rule-2) 72%, transparent);
+  font-size: 0.67rem;
+}
+
+.topbar-account-cluster .sidebar-account-caret {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.topbar-account-cluster .sidebar-account-avatar {
+  width: 1.7rem;
+  height: 1.7rem;
+  font-size: 0.58rem;
+}
+
+.topbar-icon-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.08rem;
+  margin-left: 0.18rem;
+}
+
+.topbar-icon-actions .sidebar-account-icon {
+  width: 2.05rem;
+  height: 2.05rem;
+  border-radius: 50%;
+}
+
+.topbar-sidebar-toggle {
+  flex: 0 0 auto;
+  width: 2.05rem;
+  height: 2.05rem;
+  border-radius: 50%;
+}
+
+.topbar-sidebar-arrow-collapse { display: none; }
+.topbar-sidebar-arrow-expand { display: block; }
+.topbar-sidebar-toggle.is-sidebar-open .topbar-sidebar-arrow-collapse { display: block; }
+.topbar-sidebar-toggle.is-sidebar-open .topbar-sidebar-arrow-expand { display: none; }
+
+.topbar-account-cluster .sidebar-profile-menu {
+  left: 0;
+  right: auto;
+  top: calc(100% + 0.55rem);
+  bottom: auto;
+  width: min(17rem, calc(100vw - 1rem));
+  transform: translateY(-0.35rem) scale(0.985);
+  transform-origin: top left;
+}
+
+.chat-topbar-leading > .sidebar-encryption-indicator {
+  grid-template-columns: 0.95rem auto;
+  gap: 0.4rem;
+  width: auto;
+  min-height: 2.15rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  background: transparent;
+}
+
+.chat-topbar-leading > .sidebar-encryption-indicator .sidebar-utility-detail,
+.chat-topbar-leading > .sidebar-encryption-indicator .sidebar-utility-chevron {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .chat-topbar-leading > .sidebar-encryption-indicator {
+    grid-template-columns: 1rem;
+    width: 2rem;
+    padding-inline: 0;
+    place-content: center;
+  }
+
+  .chat-topbar-leading > .sidebar-encryption-indicator .sidebar-utility-copy {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .topbar-account-cluster .sidebar-account-trigger {
+    width: 2.05rem;
+    padding: 0.17rem;
+  }
+
+  .topbar-account-cluster .sidebar-account-copy {
+    display: none;
+  }
 }
 
 .sidebar-profile-menu-head {
@@ -434,7 +559,7 @@
 .profile-dialog-body .settings-pane-lede { margin-bottom: 0; }
 
 .privacy-mode .sidebar-account-copy strong.privacy-mask,
-.privacy-mode #sidebarActiveProfileName.privacy-mask,
+.privacy-mode .sidebar-active-profile-name.privacy-mask,
 .privacy-mode .sidebar-profile-option-copy strong.privacy-mask,
 .privacy-mode .profile-settings-copy strong.privacy-mask {
   color: transparent;

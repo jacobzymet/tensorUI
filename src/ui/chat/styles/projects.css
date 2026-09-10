@@ -211,16 +211,15 @@
   font-size: var(--text-xl);
   margin-bottom: 0.35rem;
 }
-.chat-shell.is-projects .chat-composer-dock,
-.chat-shell.is-projects .chat-topbar { display: none; }
+.chat-shell.is-projects .chat-composer-dock { display: none; }
+.chat-shell.is-projects .topbar-trace-toggle { display: none; }
 .chat-shell.is-projects .chat-viewport,
 .chat-shell.is-projects .chat-workspace,
 .chat-shell.is-projects .chat-column { display: none; }
 
 @media (max-width: 820px) {
   .trace-sidebar,
-  .trace-expand-fab,
-  .chat-shell.trace-collapsed .trace-expand-fab {
+  .topbar-trace-toggle {
     display: none !important;
   }
   .chat-workspace { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
@@ -238,23 +237,22 @@
   .chat-shell.sidebar-collapsed .chat-sidebar {
     flex-basis: var(--sidebar-w);
     width: var(--sidebar-w);
-    padding: var(--space-md) var(--space-xs) var(--space-sm);
+    padding: var(--space-md) 0.45rem var(--space-sm);
     border-right-color: var(--color-rule);
     opacity: 1;
     pointer-events: auto;
   }
-  .chat-shell.sidebar-collapsed .sidebar-expand-fab { display: none; }
-  .sidebar-expand-fab { display: inline-flex; }
-  .chat-shell.sidebar-open .sidebar-expand-fab { display: none; }
-  .chat-topbar { padding-inline: 3.5rem; }
+  .chat-topbar,
   .chat-shell.sidebar-open .chat-topbar { padding-inline: var(--space-md); }
   .chat-sidebar {
     position: fixed;
-    inset: 0 auto 0 0;
+    inset: var(--chat-topbar-h) auto 0 0;
+    height: auto;
     z-index: 40;
     transform: translateX(-100%);
     transition: transform var(--dur-short) var(--ease-out);
   }
+  .sidebar-backdrop { top: var(--chat-topbar-h); }
   .chat-shell.sidebar-open .chat-sidebar {
     transform: translateX(0);
     opacity: 1;
@@ -264,8 +262,6 @@
   .msg-role-user .msg-bubble { max-width: 92%; }
 }
 @media (max-width: 520px) {
-  /* The picker itself leaves enough room for the floating sidebar button;
-     reclaim symmetric topbar padding so it remains centered on phones. */
   .chat-topbar,
   .chat-shell.sidebar-collapsed .chat-topbar,
   .chat-shell.sidebar-open .chat-topbar { padding-inline: 0.5rem; }

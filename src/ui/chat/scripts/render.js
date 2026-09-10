@@ -709,13 +709,12 @@ function setTraceSidebarOpen(open, { fromUser = false } = {}) {
       if (traceSidebarBody) kickLiveToolMotion(traceSidebarBody);
     });
   }
-  if (btnToggleTrace) {
-    btnToggleTrace.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btnToggleTrace.setAttribute('aria-label', open ? 'Hide activity sidebar' : 'Show activity sidebar');
-    btnToggleTrace.title = open ? 'Hide activity' : 'Show activity';
-  }
   if (btnExpandTrace) {
+    btnExpandTrace.classList.toggle('is-active', open);
+    btnExpandTrace.setAttribute('aria-pressed', open ? 'true' : 'false');
     btnExpandTrace.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btnExpandTrace.setAttribute('aria-label', open ? 'Hide activity sidebar' : 'Show activity sidebar');
+    btnExpandTrace.title = open ? 'Hide activity' : 'Show activity';
   }
   if (open && stickTraceSidebar) {
     requestAnimationFrame(() => scrollTraceSidebarToBottom({ force: true }));
@@ -1970,7 +1969,6 @@ function syncProjectChrome() {
   const incognito = isIncognitoContext();
   chatShell.classList.toggle('is-in-project', !!project);
   chatShell.classList.toggle('is-incognito', incognito);
-  composerGhostNotice?.classList.toggle('is-hidden', !incognito);
   if (topbarIncognito) {
     topbarIncognito.classList.toggle('is-hidden', !incognito);
   }
@@ -2159,12 +2157,61 @@ function updateComposerHint() {
 }
 
 function bySidebarOrder(list = conversations) {
-  return [...list].sort((a, b) => {
-    const ao = typeof a.sortOrder === 'number' ? a.sortOrder : Number.POSITIVE_INFINITY;
-    const bo = typeof b.sortOrder === 'number' ? b.sortOrder : Number.POSITIVE_INFINITY;
-    if (ao !== bo) return ao - bo;
-    return b.updatedAt - a.updatedAt;
-  });
+  return [...list].sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+}
+
+function startOfLocalDay(timestamp) {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function conversationDateBucket(timestamp, now = Date.now()) {
+  const today = startOfLocalDay(now);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const week = new Date(today);
+  week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
+  const lastWeek = new Date(week);
+  lastWeek.setDate(lastWeek.getDate() - 7);
+  const value = Number(timestamp) || 0;
+  if (value >= today) return { key: 'today', label: 'Today' };
+  if (value >= yesterday.getTime()) return { key: 'yesterday', label: 'Yesterday' };
+  if (value >= week.getTime()) return { key: 'this-week', label: 'Earlier this week' };
+  if (value >= lastWeek.getTime()) return { key: 'last-week', label: 'Last week' };
+  const date = new Date(value);
+  const month = date.toLocaleString('en-US', { month: 'long' });
+  const label = date.getFullYear() === new Date(now).getFullYear()
+    ? month
+    : month + ' ' + date.getFullYear();
+  return { key: date.getFullYear() + '-' + date.getMonth(), label };
+}
+
+function conversationDateGroups(list, now = Date.now()) {
+  const groups = [];
+  for (const convo of bySidebarOrder(list)) {
+    const bucket = conversationDateBucket(convo.updatedAt, now);
+    let group = groups[groups.length - 1];
+    if (!group || group.key !== bucket.key) {
+      group = { ...bucket, conversations: [] };
+      groups.push(group);
+    }
+    group.conversations.push(convo);
+  }
+  return groups;
+}
+
+function appendConversationDateGroups(list, conversations) {
+  for (const group of conversationDateGroups(conversations)) {
+    const heading = document.createElement('div');
+    heading.className = 'convo-date-heading';
+    heading.setAttribute('role', 'heading');
+    heading.setAttribute('aria-level', '3');
+    const label = document.createElement('span');
+    label.textContent = group.label;
+    heading.appendChild(label);
+    list.appendChild(heading);
+    for (const convo of group.conversations) list.appendChild(createConvoItem(convo));
+  }
 }
 
 function uncategorizedConversations() {
@@ -2526,6 +2573,18 @@ function createConvoItem(convo, { nested = false } = {}) {
     item.appendChild(pinnedMark);
   }
   item.appendChild(title);
+  const updatedAt = Number(convo.updatedAt) || 0;
+  if (updatedAt) {
+    const age = document.createElement('time');
+    age.className = 'convo-age';
+    age.dateTime = new Date(updatedAt).toISOString();
+    age.title = new Date(updatedAt).toLocaleString();
+    const minutes = Math.floor(Math.max(0, Date.now() - updatedAt) / 60000);
+    age.textContent = minutes < 60
+      ? Math.max(1, minutes) + 'm'
+      : (minutes < 1440 ? Math.floor(minutes / 60) + 'h' : Math.floor(minutes / 1440) + 'd');
+    item.appendChild(age);
+  }
   if (!conversationSelectionMode) item.appendChild(more);
   item.addEventListener('click', () => {
     if (convoDragMoved) {
@@ -2766,6 +2825,7 @@ function markConversationNotificationRead(convo, { persist = true } = {}) {
   if (!convo || !notificationIsUnread(convo)) return false;
   convo.notificationReadAt = convo.notificationAt;
   if (persist && !convo.incognito) saveConversations({ immediate: true });
+  if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
   return true;
 }
 
@@ -2776,6 +2836,7 @@ function recordConversationNotification(convo, { kind = 'complete', at = Date.no
   if (activeId === convo.id && mainView === 'chat' && document.visibilityState === 'visible') {
     convo.notificationReadAt = at;
   }
+  if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
 }
 
 function pendingAttentionNotifications() {
@@ -2934,7 +2995,7 @@ function refreshNotificationsUi() {
         ? (unreadCompleted + ' unread response' + (unreadCompleted === 1 ? '' : 's') + '.')
         : 'Completed work and tasks that need you.');
   }
-  if (!notificationsFeed || mainView !== 'notifications') return;
+  if (!notificationsFeed || !notificationsPopoverIsOpen()) return;
   notificationsFeed.innerHTML = '';
   appendNotificationGroup('Needs attention', approvals);
   appendNotificationGroup('Recent', completed);
@@ -2946,20 +3007,28 @@ function refreshNotificationsUi() {
   }
 }
 
+function notificationsPopoverIsOpen() {
+  return !!notificationsView && notificationsView.classList.contains('is-open');
+}
+
+function setNotificationsOpen(open, { restoreFocus = false } = {}) {
+  if (!notificationsView || !btnNotificationsNav) return;
+  notificationsView.classList.toggle('is-open', open);
+  notificationsView.setAttribute('aria-hidden', open ? 'false' : 'true');
+  btnNotificationsNav.classList.toggle('is-active', open);
+  btnNotificationsNav.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    refreshNotificationsUi();
+  } else if (restoreFocus) {
+    btnNotificationsNav.focus();
+  }
+}
+
 function showNotificationsView() {
-  mainView = 'notifications';
-  cancelMessageEdit();
+  const open = !notificationsPopoverIsOpen();
   closeConvoMenu();
-  chatShell.classList.add('is-notifications');
-  chatShell.classList.remove('is-projects', 'is-in-project');
-  projectsView.classList.add('is-hidden');
-  notificationsView.classList.remove('is-hidden');
-  btnProjectsNav.classList.remove('is-active');
-  btnNotificationsNav.classList.add('is-active');
-  refreshNotificationsUi();
-  renderSidebar();
-  syncUrlFromState();
-  closeMobileSidebar();
+  if (open && typeof setProfileMenuOpen === 'function') setProfileMenuOpen(false);
+  setNotificationsOpen(open, { restoreFocus: !open });
 }
 
 function projectCardBlurb(project) {
@@ -2978,7 +3047,7 @@ function showProjectsView() {
   chatShell.classList.remove('is-notifications');
   chatShell.classList.remove('is-in-project');
   projectsView.classList.remove('is-hidden');
-  notificationsView.classList.add('is-hidden');
+  setNotificationsOpen(false);
   btnProjectsNav.classList.add('is-active');
   btnNotificationsNav.classList.remove('is-active');
   renderProjectsPage();
@@ -2991,7 +3060,7 @@ function showChatView() {
   mainView = 'chat';
   chatShell.classList.remove('is-projects', 'is-notifications');
   projectsView.classList.add('is-hidden');
-  notificationsView.classList.add('is-hidden');
+  setNotificationsOpen(false);
   btnProjectsNav.classList.remove('is-active');
   btnNotificationsNav.classList.remove('is-active');
   syncProjectChrome();
@@ -4268,7 +4337,7 @@ function renderSidebar() {
   sidebarProjectContext.innerHTML = '';
   sidebarProjectContext.classList.add('is-hidden');
   btnProjectsNav.classList.toggle('is-active', mainView === 'projects');
-  btnNotificationsNav.classList.toggle('is-active', mainView === 'notifications');
+  btnNotificationsNav.classList.toggle('is-active', notificationsPopoverIsOpen());
   refreshNotificationsUi();
 
   const pinned = pinnedConversations();
@@ -4316,10 +4385,7 @@ function renderSidebar() {
       hint.textContent = 'No chats yet — send a message to start.';
       list.appendChild(hint);
     } else {
-      for (const convo of projectConvos) {
-        list.appendChild(createConvoItem(convo));
-      }
-      bindConvoListReorder(list);
+      appendConversationDateGroups(list, projectConvos);
     }
     return;
   }
@@ -4334,10 +4400,7 @@ function renderSidebar() {
       : (projects.length ? 'No general chats yet.' : 'No conversations yet.');
     list.appendChild(hint);
   } else {
-    for (const convo of recent) {
-      list.appendChild(createConvoItem(convo));
-    }
-    bindConvoListReorder(list);
+    appendConversationDateGroups(list, recent);
   }
 }
 

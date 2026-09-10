@@ -461,6 +461,8 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.2rem 0.35rem 0.2rem 0.65rem;
   border-radius: var(--radius-pill);
   border: 1px solid var(--accent-edge);
@@ -470,6 +472,12 @@
   font-weight: 600;
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
+}
+.composer-mention-chip > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer-mention-chip button {
   appearance: none;
@@ -485,6 +493,7 @@
   font-size: 0.95rem;
   line-height: 1;
   border-radius: var(--radius-pill);
+  flex: 0 0 auto;
 }
 .composer-mention-chip button:hover { color: var(--color-ink); }
 .composer-mention-chip.is-forced {
@@ -492,6 +501,7 @@
   background: color-mix(in oklch, var(--color-accent) 28%, transparent);
 }
 .composer-mention-chip .chip-badge {
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 0.58rem;
   font-weight: 700;

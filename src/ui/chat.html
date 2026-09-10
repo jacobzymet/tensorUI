@@ -14,13 +14,7 @@
 <body>
   <div class="chat-shell trace-collapsed" id="chatShell">
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-    <button type="button" class="btn btn-ghost btn-icon sidebar-expand-fab" id="btnExpandSidebar" aria-label="Show sidebar" title="Show sidebar">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
-      <span class="sidebar-encryption-badge is-hidden" id="sidebarEncryptionBadge" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="9" x="6" y="11" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-      </span>
-    </button>
-    <aside class="chat-sidebar">
+    <aside class="chat-sidebar" id="chatSidebar">
       <div class="sidebar-head">
         <div class="wordmark">
           <a class="wordmark-brand" href="/" aria-label="Tensor">Tensor</a>
@@ -48,14 +42,6 @@
               </div>
             </div>
           </div>
-        </div>
-        <div class="sidebar-head-actions">
-          <button type="button" class="btn btn-ghost btn-icon btn-privacy-mode" id="btnPrivacyMode" aria-label="Turn on privacy mode" aria-pressed="false" title="Turn on privacy mode">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c5.5 0 9.5 5.2 10 8-.2 1.1-1 2.7-2.3 4.1"/><path d="M6.2 6.2C4.2 7.7 2.6 10.1 2 12c.5 2.8 4.5 8 10 8 1.5 0 2.9-.4 4.1-1.1"/></svg>
-          </button>
-          <button type="button" class="btn btn-ghost btn-icon btn-toggle-sidebar" id="btnToggleSidebar" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
-          </button>
         </div>
       </div>
       <div class="sidebar-actions">
@@ -106,52 +92,6 @@
         </div>
         <nav class="convo-list" id="convoList" aria-label="Conversations"></nav>
       </div>
-      <div class="sidebar-footer">
-        <div class="sidebar-profile-menu is-hidden" id="sidebarProfileMenu" role="menu" aria-label="Switch profile">
-          <div class="sidebar-profile-menu-head">
-            <span>Profiles</span>
-          </div>
-          <div class="sidebar-profile-list" id="sidebarProfileList"></div>
-          <div class="sidebar-profile-menu-rule"></div>
-          <button type="button" class="sidebar-profile-menu-action" id="btnProfileCreate" role="menuitem">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-            <span>New profile</span>
-          </button>
-          <button type="button" class="sidebar-profile-menu-action" id="btnProfileManage" role="menuitem">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
-            <span>Manage profiles</span>
-          </button>
-        </div>
-        <div class="sidebar-utility-panel">
-          <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-encryption-indicator is-hidden" id="encryptionIndicator" aria-label="Open encryption settings" aria-live="polite" title="Open encryption settings">
-            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><rect width="8" height="6" x="8" y="10" rx="1"/><path d="M10 10V8a2 2 0 0 1 4 0v2"/></svg>
-            <span class="sidebar-utility-copy">
-              <span class="sidebar-utility-label" id="encryptionIndicatorLabel">Encrypted</span>
-              <span class="sidebar-utility-detail" id="encryptionIndicatorDetail">At rest</span>
-            </span>
-            <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
-          <div class="sidebar-account-bar">
-            <button type="button" class="sidebar-account-trigger" id="btnProfileMenu" aria-haspopup="menu" aria-expanded="false" aria-controls="sidebarProfileMenu">
-              <span class="sidebar-account-avatar" id="sidebarAccountAvatar" aria-hidden="true">Y</span>
-              <span class="sidebar-account-copy">
-                <span class="sidebar-account-name-row">
-                  <strong id="sidebarAccountName">You</strong>
-                  <svg class="sidebar-account-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg>
-                </span>
-                <span id="sidebarActiveProfileName">Personal</span>
-              </span>
-            </button>
-            <button type="button" class="sidebar-account-icon" id="btnNotificationsNav" aria-label="Notifications" title="Notifications">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
-              <span class="sidebar-notification-badge" id="sidebarNotificationBadge" aria-label="0 unread" hidden>0</span>
-            </button>
-            <button type="button" class="sidebar-account-icon" id="btnSettings" aria-label="Open settings" title="Settings">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.5c.14.38.37.72.68 1 .3.25.68.39 1.07.4h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.75 1.1Z"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
     </aside>
 
     <main class="chat-main">
@@ -162,6 +102,85 @@
       <div class="chat-starfield" aria-hidden="true">
         <canvas id="starfieldCanvas"></canvas>
       </div>
+      <header class="chat-topbar" id="chatTopbar">
+        <div class="chat-topbar-leading">
+          <button type="button" class="sidebar-account-icon topbar-sidebar-toggle is-sidebar-open" id="btnToggleSidebar" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded="true" aria-pressed="true" aria-controls="chatSidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path class="topbar-sidebar-arrow-collapse" d="m16 15-3-3 3-3"/><path class="topbar-sidebar-arrow-expand" d="m13 9 3 3-3 3"/></svg>
+            <span class="sidebar-encryption-badge is-hidden" id="sidebarEncryptionBadge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="9" x="6" y="11" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            </span>
+          </button>
+          <div class="topbar-account-cluster">
+            <div class="sidebar-profile-menu is-hidden" id="sidebarProfileMenu" role="menu" aria-label="Switch profile">
+              <div class="sidebar-profile-menu-head"><span>Profiles</span></div>
+              <div class="sidebar-profile-list" id="sidebarProfileList"></div>
+              <div class="sidebar-profile-menu-rule"></div>
+              <button type="button" class="sidebar-profile-menu-action" id="btnProfileCreate" role="menuitem">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                <span>New profile</span>
+              </button>
+              <button type="button" class="sidebar-profile-menu-action" id="btnProfileManage" role="menuitem">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+                <span>Manage profiles</span>
+              </button>
+            </div>
+            <button type="button" class="sidebar-account-trigger" id="btnProfileMenu" aria-haspopup="menu" aria-expanded="false" aria-controls="sidebarProfileMenu">
+              <span class="sidebar-account-avatar" id="sidebarAccountAvatar" aria-hidden="true">Y</span>
+              <span class="sidebar-account-copy"><span class="sidebar-account-name-row"><strong id="sidebarAccountName">You</strong><span class="sidebar-active-profile-name" id="sidebarActiveProfileName">Personal</span><svg class="sidebar-account-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg></span></span>
+            </button>
+          </div>
+          <button type="button" class="btn btn-ghost sidebar-utility-row sidebar-encryption-indicator is-hidden" id="encryptionIndicator" aria-label="Open encryption settings" aria-live="polite" title="Open encryption settings">
+            <svg class="sidebar-utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><rect width="8" height="6" x="8" y="10" rx="1"/><path d="M10 10V8a2 2 0 0 1 4 0v2"/></svg>
+            <span class="sidebar-utility-copy"><span class="sidebar-utility-label" id="encryptionIndicatorLabel">Encrypted</span><span class="sidebar-utility-detail" id="encryptionIndicatorDetail">At rest</span></span>
+            <svg class="sidebar-utility-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
+        </div>
+        <div class="chat-topbar-center">
+          <div class="chat-topbar-title" id="convoTitle" hidden></div>
+          <div class="topbar-bot-roster is-hidden" id="topbarBotRoster" aria-label="Room members"></div>
+        </div>
+        <div class="chat-topbar-trailing">
+          <div class="topbar-thread-tools">
+            <button type="button" class="topbar-loop-phase is-hidden" id="topbarLoopPhase" aria-label="Show loop progress" title="Show loop progress"></button>
+            <span class="topbar-hold-pill is-hidden" id="topbarBotsHold" title="Other agents will wait until this room is resumed">Held</span>
+            <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
+              Temporary Session
+            </span>
+            <button type="button" class="btn btn-ghost btn-icon topbar-group-edit is-hidden" id="btnTopbarGroupEdit" aria-label="Edit group members" title="Edit members">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </button>
+          </div>
+          <div class="topbar-icon-actions">
+            <button type="button" class="sidebar-account-icon btn-privacy-mode" id="btnPrivacyMode" aria-label="Turn on privacy mode" aria-pressed="false" title="Turn on privacy mode">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c5.5 0 9.5 5.2 10 8-.2 1.1-1 2.7-2.3 4.1"/><path d="M6.2 6.2C4.2 7.7 2.6 10.1 2 12c.5 2.8 4.5 8 10 8 1.5 0 2.9-.4 4.1-1.1"/></svg>
+            </button>
+            <button type="button" class="sidebar-account-icon" id="btnNotificationsNav" aria-label="Notifications" title="Notifications" aria-haspopup="dialog" aria-expanded="false" aria-controls="notificationsView">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg><span class="sidebar-notification-badge" id="sidebarNotificationBadge" aria-label="0 unread" hidden>0</span>
+            </button>
+            <button type="button" class="sidebar-account-icon" id="btnSettings" aria-label="Open settings" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.5c.14.38.37.72.68 1 .3.25.68.39 1.07.4h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.75 1.1Z"/></svg>
+            </button>
+            <button type="button" class="sidebar-account-icon topbar-trace-toggle" id="btnExpandTrace" aria-label="Show activity sidebar" title="Show activity" aria-pressed="false" aria-expanded="false" aria-controls="traceSidebar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+      <section class="notifications-view" id="notificationsView" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="notificationsTitle">
+        <div class="notifications-inner">
+          <header class="notifications-top">
+            <div>
+              <p class="notifications-kicker">Task inbox</p>
+              <h2 class="notifications-title" id="notificationsTitle">Notifications</h2>
+              <p class="notifications-lede" id="notificationsLede">Completed work and tasks that need you.</p>
+            </div>
+            <button type="button" class="btn btn-ghost" id="btnNotificationsMarkRead">Mark all read</button>
+          </header>
+          <div class="notifications-feed" id="notificationsFeed" aria-live="polite"></div>
+        </div>
+      </section>
       <div class="projects-view is-hidden" id="projectsView">
         <div class="projects-inner">
           <div class="projects-top">
@@ -182,45 +201,8 @@
         </div>
       </div>
 
-      <section class="notifications-view is-hidden" id="notificationsView" aria-labelledby="notificationsTitle">
-        <div class="notifications-inner">
-          <header class="notifications-top">
-            <div>
-              <p class="notifications-kicker">Task inbox</p>
-              <h1 class="notifications-title" id="notificationsTitle">Notifications</h1>
-              <p class="notifications-lede" id="notificationsLede">Completed work and tasks that need you.</p>
-            </div>
-            <button type="button" class="btn btn-outline" id="btnNotificationsMarkRead">Mark all read</button>
-          </header>
-          <div class="notifications-feed" id="notificationsFeed" aria-live="polite"></div>
-        </div>
-      </section>
-
       <div class="chat-workspace" id="chatWorkspace">
-        <button type="button" class="btn btn-ghost btn-icon trace-expand-fab" id="btnExpandTrace" aria-label="Show activity sidebar" title="Show activity">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/></svg>
-        </button>
         <div class="chat-column" id="chatColumn">
-          <header class="chat-topbar" id="chatTopbar">
-            <div class="chat-topbar-leading">
-              <div class="chat-topbar-context is-hidden" id="topbarProject"></div>
-            </div>
-            <div class="chat-topbar-center">
-              <div class="chat-topbar-title" id="convoTitle"></div>
-              <div class="topbar-bot-roster is-hidden" id="topbarBotRoster" aria-label="Room members"></div>
-            </div>
-            <div class="chat-topbar-trailing">
-              <button type="button" class="topbar-loop-phase is-hidden" id="topbarLoopPhase" aria-label="Show loop progress" title="Show loop progress"></button>
-              <span class="topbar-hold-pill is-hidden" id="topbarBotsHold" title="Other agents will wait until this room is resumed">Held</span>
-              <span class="topbar-incognito-pill is-hidden" id="topbarIncognito" title="This chat is not saved to disk">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
-                Temporary Session
-              </span>
-              <button type="button" class="btn btn-ghost btn-icon topbar-group-edit is-hidden" id="btnTopbarGroupEdit" aria-label="Edit group members" title="Edit members">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              </button>
-            </div>
-          </header>
           <div class="chat-thread-stage" id="chatThreadStage">
             <div class="chat-viewport" id="chatViewport" tabindex="0">
             <div class="empty-state" id="emptyState">
@@ -231,13 +213,6 @@
                 <p class="empty-sub" id="modelHint">—</p>
                 <div class="composer-shell" id="composerShell">
                   <div class="composer-card" id="composerCard">
-                    <div class="composer-ghost-notice is-hidden" id="composerGhostNotice" role="status">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
-                      <span class="composer-ghost-copy">
-                        <strong>Ghost chat</strong>
-                        <small>Temporary session · not saved to disk</small>
-                      </span>
-                    </div>
                     <div class="mention-menu is-hidden" id="mentionMenu" role="listbox" aria-label="Mentions"></div>
                     <div class="composer-reply is-hidden" id="composerReply" aria-live="polite"></div>
                     <div class="composer-attachments is-hidden" id="composerAttachments" aria-live="polite"></div>
@@ -375,9 +350,6 @@
             <div class="trace-sidebar-head-actions">
               <button type="button" class="btn btn-ghost btn-icon trace-pane-fold" id="btnTraceActivityFold" aria-label="Collapse live activity" title="Collapse live activity" aria-expanded="true" aria-controls="traceSidebarBody" hidden>
                 <svg class="think-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-toggle-trace" id="btnToggleTrace" aria-label="Hide activity sidebar" title="Hide activity" aria-expanded="false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>
               </button>
             </div>
           </div>
