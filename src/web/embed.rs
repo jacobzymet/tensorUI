@@ -103,6 +103,17 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_account_avatar_has_a_solid_background() {
+        let avatar = CHAT_CSS
+            .split(".sidebar-account-avatar {")
+            .nth(1)
+            .and_then(|css| css.split('}').next())
+            .expect("sidebar account avatar styles should be embedded");
+        assert!(avatar.contains("background: color-mix("));
+        assert!(!avatar.contains("gradient("));
+    }
+
+    #[test]
     fn live_loading_animation_survives_thread_navigation() {
         assert!(CHAT_JS.contains("const priorMounts = Number(stream.domMountCount) || 0;"));
         assert!(CHAT_JS.contains("thinkingLabel.style.animationDelay"));
@@ -188,6 +199,28 @@ mod tests {
             .expect("custom background composer styles should be embedded");
 
         assert!(custom_background_scrim.contains("display: none;"));
+    }
+
+    #[test]
+    fn transparent_content_uses_the_custom_background_tone() {
+        for selector in [
+            ".notifications-title",
+            ".notifications-lede",
+            ".notification-group-heading",
+            ".notifications-empty",
+            ".notifications-top > .btn-outline",
+            ".empty-eyebrow",
+            ".msg-speaker",
+            ".msg-footer .msg-action",
+            ".think-block > summary",
+        ] {
+            assert!(
+                CHAT_CSS.contains(selector),
+                "missing adaptive foreground selector: {selector}"
+            );
+        }
+        assert!(CHAT_CSS.contains("color: var(--chat-background-ink);"));
+        assert!(CHAT_CSS.contains("color: var(--chat-background-muted);"));
     }
 
     #[test]

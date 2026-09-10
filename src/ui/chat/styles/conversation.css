@@ -53,12 +53,29 @@
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble :is(h1, h2, h3, h4, h5, h6) {
   color: var(--chat-background-ink);
 }
+.chat-main[data-background-tone] .empty-eyebrow {
+  color: var(--chat-background-ink);
+  background: color-mix(in oklch, var(--chat-background-ink) 12%, transparent);
+}
 .chat-main[data-background-tone] .empty-sub,
 .chat-main[data-background-tone] .projects-empty,
+.chat-main[data-background-tone] .msg-speaker,
+.chat-main[data-background-tone] .msg-footer .msg-action,
+.chat-main[data-background-tone] .msg-queued-label,
+.chat-main[data-background-tone] .msg-queued-action,
 .chat-main[data-background-tone] .msg-role-assistant .msg-bubble blockquote,
 .chat-main[data-background-tone] .msg-role-assistant .msg-meta,
 .chat-main[data-background-tone] .msg-role-assistant .msg-meta-model {
   color: var(--chat-background-muted);
+}
+.chat-main[data-background-tone] .msg-role-assistant:not(.is-bot-chat) .think-block > summary,
+.chat-main[data-background-tone] .msg-role-assistant:not(.is-bot-chat) .think-chevron,
+.chat-main[data-background-tone] .msg-role-assistant:not(.is-bot-chat) .think-stream,
+.chat-main[data-background-tone] .msg-role-assistant:not(.is-bot-chat) .think-body {
+  color: var(--chat-background-muted);
+}
+.chat-main[data-background-tone] .msg-role-assistant:not(.is-bot-chat) :is(.think-stream, .think-body) strong {
+  color: var(--chat-background-ink);
 }
 /* Bot capsules keep a paper fill — don't inherit background-tone muted (too light on dark scenes). */
 .chat-main[data-background-tone] .msg.is-bot-chat.msg-role-assistant .msg-bubble blockquote {

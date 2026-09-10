@@ -6,6 +6,34 @@
     radial-gradient(ellipse 68% 42% at 88% -10%, color-mix(in oklch, var(--color-accent) 11%, transparent), transparent 62%);
 }
 .chat-main[data-background-tone] .notifications-view { background: transparent; }
+.chat-main[data-background-tone] :is(
+  .notifications-kicker,
+  .notifications-title,
+  .notifications-empty strong
+) {
+  color: var(--chat-background-ink);
+}
+.chat-main[data-background-tone] :is(
+  .notifications-lede,
+  .notification-group-heading,
+  .notification-group-heading span,
+  .notifications-empty
+) {
+  color: var(--chat-background-muted);
+}
+.chat-main[data-background-tone] .notification-group-heading span {
+  background: color-mix(in oklch, var(--chat-background-ink) 9%, transparent);
+}
+.chat-main[data-background-tone] .notifications-top > .btn-outline {
+  border-color: color-mix(in oklch, var(--chat-background-ink) 28%, transparent);
+  background: color-mix(in oklch, var(--chat-background-ink) 8%, transparent);
+  color: var(--chat-background-ink);
+}
+.chat-main[data-background-tone] .notifications-top > .btn-outline:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--chat-background-ink) 42%, transparent);
+  background: color-mix(in oklch, var(--chat-background-ink) 14%, transparent);
+  color: var(--chat-background-ink);
+}
 .notifications-view.is-hidden { display: none !important; }
 .notifications-inner {
   width: min(100%, 52rem);

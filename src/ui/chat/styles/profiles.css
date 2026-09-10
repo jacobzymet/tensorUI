@@ -82,6 +82,7 @@
 .sidebar-account-avatar {
   width: 2rem;
   height: 2rem;
+  background: color-mix(in oklch, var(--color-accent) 18%, var(--color-paper-3));
   box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--color-graphite) 76%, transparent);
 }
 
