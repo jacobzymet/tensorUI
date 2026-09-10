@@ -245,25 +245,25 @@ function modelMenuHasLocal() {
   return modelMenuOptions.some(modelLooksLocal);
 }
 
-function modelMenuHasCloud() {
+function modelMenuHasNetwork() {
   return modelMenuOptions.some((option) => !modelLooksLocal(option));
 }
 
 function fallbackModelMenuTab() {
   if (pinnedModelIds.length) return 'pins';
   if (recentModelIds.length) return 'recents';
-  if (modelMenuHasCloud()) return 'cloud';
+  if (modelMenuHasNetwork()) return 'network';
   if (modelMenuHasLocal()) return 'local';
   return 'recents';
 }
 
 function normalizeModelMenuTab(tab) {
-  if (tab === 'recents' || tab === 'pins' || tab === 'local' || tab === 'cloud') return tab;
+  if (tab === 'recents' || tab === 'pins' || tab === 'local' || tab === 'network') return tab;
   return fallbackModelMenuTab();
 }
 
 function modelMenuUsesProviderGroups() {
-  return modelMenuTab === 'local' || modelMenuTab === 'cloud';
+  return modelMenuTab === 'local' || modelMenuTab === 'network';
 }
 
 function groupModelOptions(options) {
@@ -323,7 +323,7 @@ function modelFilterTerms() {
 
 function modelMenuSourceOptions() {
   if (modelMenuTab === 'local') return modelMenuOptions.filter(modelLooksLocal);
-  if (modelMenuTab === 'cloud') return modelMenuOptions.filter((option) => !modelLooksLocal(option));
+  if (modelMenuTab === 'network') return modelMenuOptions.filter((option) => !modelLooksLocal(option));
   const byValue = new Map(modelMenuOptions.map((option) => [option.value, option]));
   const order = modelMenuTab === 'pins' ? pinnedModelIds : recentModelIds;
   return order
@@ -335,11 +335,11 @@ function syncModelMenuTabs() {
   const tabs = chatModelMenu?.querySelectorAll('[data-model-tab]');
   if (!tabs) return;
   const hasLocal = modelMenuHasLocal();
-  const hasCloud = modelMenuHasCloud();
+  const hasNetwork = modelMenuHasNetwork();
   tabs.forEach((tab) => {
     const name = tab.getAttribute('data-model-tab');
     if (name === 'local') tab.classList.toggle('is-hidden', !hasLocal);
-    if (name === 'cloud') tab.classList.toggle('is-hidden', !hasCloud);
+    if (name === 'network') tab.classList.toggle('is-hidden', !hasNetwork);
     const active = name === modelMenuTab;
     tab.classList.toggle('is-active', active);
     tab.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -349,7 +349,7 @@ function syncModelMenuTabs() {
       ? 'Recent models'
       : (modelMenuTab === 'pins'
         ? 'Pinned models'
-        : (modelMenuTab === 'local' ? 'Local models' : 'Cloud models'));
+        : (modelMenuTab === 'local' ? 'Local models' : 'Network models'));
     chatModelList.setAttribute('aria-label', label);
   }
 }
@@ -516,13 +516,13 @@ function renderModelMenuList() {
   chatModelList.classList.toggle('is-hidden', empty);
   if (empty) {
     if (modelMenuTab === 'recents' && !terms.length) {
-      chatModelEmpty.textContent = 'Pick a model from Local or Cloud to set your default.';
+      chatModelEmpty.textContent = 'Pick a model from Local or Network to set your default.';
     } else if (modelMenuTab === 'pins' && !terms.length) {
-      chatModelEmpty.textContent = 'Pin models from Recents, Local, or Cloud to keep them here.';
+      chatModelEmpty.textContent = 'Pin models from Recents, Local, or Network to keep them here.';
     } else if (modelMenuTab === 'local' && !terms.length) {
       chatModelEmpty.textContent = 'No local models.';
-    } else if (modelMenuTab === 'cloud' && !terms.length) {
-      chatModelEmpty.textContent = 'No cloud models.';
+    } else if (modelMenuTab === 'network' && !terms.length) {
+      chatModelEmpty.textContent = 'No network models.';
     } else if (terms.length) {
       chatModelEmpty.textContent = 'No models match “' + modelMenuFilter.trim() + '”';
     } else {
@@ -700,7 +700,7 @@ function openModelMenu(opts) {
     modelMenuTab = recentModelIds.length ? 'recents' : fallbackModelMenuTab();
   } else if (modelMenuTab === 'local' && !modelMenuHasLocal()) {
     modelMenuTab = fallbackModelMenuTab();
-  } else if (modelMenuTab === 'cloud' && !modelMenuHasCloud()) {
+  } else if (modelMenuTab === 'network' && !modelMenuHasNetwork()) {
     modelMenuTab = fallbackModelMenuTab();
   }
   syncModelMenuTabs();

@@ -48,6 +48,19 @@ mod tests {
     }
 
     #[test]
+    fn model_selector_uses_deployment_neutral_network_label() {
+        let model_menu = CHAT_HTML
+            .split("id=\"chatModelMenu\"")
+            .nth(1)
+            .and_then(|html| html.split("id=\"chatModelList\"").next())
+            .expect("model menu markup should be embedded");
+        assert!(model_menu.contains("data-model-tab=\"network\">Network"));
+        assert!(!model_menu.contains("Cloud"));
+        assert!(CHAT_JS.contains("function modelMenuHasNetwork("));
+        assert!(!CHAT_JS.contains("modelMenuHasCloud"));
+    }
+
+    #[test]
     fn startup_never_sends_through_a_transient_fallback_model() {
         assert!(CHAT_JS.contains("function selectedModelIsReady("));
         assert!(CHAT_JS.contains("&& modelReady"));

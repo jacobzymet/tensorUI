@@ -697,7 +697,7 @@ let modelMenuActiveIndex = -1;
 function preferredModelMenuTab() {
   if (pinnedModelIds.length) return 'pins';
   if (recentModelIds.length) return 'recents';
-  return 'cloud';
+  return 'network';
 }
 let modelMenuTab = preferredModelMenuTab();
 let latestState = null;
