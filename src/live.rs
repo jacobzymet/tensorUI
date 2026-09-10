@@ -832,8 +832,13 @@ mod tests {
             .start(info("c6"), source(vec![b"data: done\n\n"]))
             .expect("start");
         let _ = collect(subscriber).await;
-        tokio::time::sleep(LINGER + Duration::from_millis(20)).await;
-        assert!(hub.info("c6").is_none());
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while hub.info("c6").is_some() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("finished turn should be removed after the replay linger");
     }
 
     #[test]
