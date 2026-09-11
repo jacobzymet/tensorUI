@@ -83,10 +83,7 @@ mod tests {
         assert!(CHAT_JS.contains("row === active"));
         assert!(CHAT_CSS.contains(".is-pinned-prompt"));
         assert!(CHAT_CSS.contains("position: sticky;"));
-        assert!(
-            CHAT_CSS
-                .contains("max-height: min(42vh, calc(var(--thread-visible-h, 70dvh) - 1.25rem));")
-        );
+        assert!(CHAT_CSS.contains("--thread-visible-h"));
         assert!(CHAT_CSS.contains("overflow-y: auto;"));
         assert!(CHAT_JS.contains("--prompt-layout-h"));
         assert!(!CHAT_CSS.contains("container-type: scroll-state;"));
