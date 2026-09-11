@@ -1338,7 +1338,7 @@ fn needs_approval(name: &str, mode: ApprovalMode) -> bool {
     }
     match mode {
         ApprovalMode::Manual => true,
-        ApprovalMode::AutoSafe => matches!(tool_risk(name), "write" | "terminal" | "browser"),
+        ApprovalMode::AutoSafe => matches!(tool_risk(name), "write" | "terminal"),
     }
 }
 
@@ -3570,9 +3570,88 @@ fn scrapeable_url(url: &str) -> bool {
     const SKIP_EXT: &[&str] = &[
         ".pdf", ".zip", ".gz", ".tgz", ".rar", ".7z", ".exe", ".dmg", ".apk", ".mp3", ".mp4",
         ".mov", ".avi", ".mkv", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css",
-        ".js", ".mjs", ".json", ".xml", ".rss", ".atom", ".woff", ".woff2", ".ttf",
+        ".js", ".mjs", ".woff", ".woff2", ".ttf",
     ];
     !SKIP_EXT.iter().any(|ext| path.ends_with(ext))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FetchedBodyKind {
+    Html,
+    Json,
+    Text,
+}
+
+fn url_path_lower(url: &str) -> String {
+    url.split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase()
+}
+
+fn fetched_body_kind_from_url(url: &str) -> Option<FetchedBodyKind> {
+    let path = url_path_lower(url);
+    if path.ends_with(".json") || path.ends_with(".jsonl") {
+        return Some(FetchedBodyKind::Json);
+    }
+    if path.ends_with(".md")
+        || path.ends_with(".markdown")
+        || path.ends_with(".mdown")
+        || path.ends_with(".txt")
+    {
+        return Some(FetchedBodyKind::Text);
+    }
+    None
+}
+
+fn fetched_body_kind(content_type: &str, url: &str) -> Option<FetchedBodyKind> {
+    let ct = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if ct.is_empty() || ct == "application/octet-stream" {
+        return fetched_body_kind_from_url(url).or(Some(FetchedBodyKind::Html));
+    }
+    if ct.contains("json") {
+        return Some(FetchedBodyKind::Json);
+    }
+    if ct.contains("markdown") {
+        return Some(FetchedBodyKind::Text);
+    }
+    if ct.contains("text/html") || ct.contains("application/xhtml") {
+        return Some(FetchedBodyKind::Html);
+    }
+    if ct.starts_with("text/") || ct.contains("xml") {
+        return Some(FetchedBodyKind::Text);
+    }
+    fetched_body_kind_from_url(url)
+}
+
+fn json_to_fetched_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    serde_json::from_str::<serde_json::Value>(trimmed)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+fn decode_fetched_body(bytes: &[u8], content_type: &str, url: &str) -> Result<String, String> {
+    let kind = fetched_body_kind(content_type, url).ok_or_else(|| {
+        let shown = if content_type.trim().is_empty() {
+            "unknown".to_string()
+        } else {
+            content_type.to_string()
+        };
+        format!("unsupported content-type ({shown}) fetching {url}")
+    })?;
+    let body = String::from_utf8_lossy(bytes);
+    Ok(match kind {
+        FetchedBodyKind::Html => html_to_full_text(&body, Some(url)),
+        FetchedBodyKind::Json => json_to_fetched_text(&body),
+        FetchedBodyKind::Text => body.into_owned(),
+    })
 }
 
 async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
@@ -3595,13 +3674,7 @@ async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if !content_type.is_empty()
-        && !(content_type.contains("text/html")
-            || content_type.contains("application/xhtml")
-            || content_type.contains("text/plain")
-            || content_type.contains("text/xml")
-            || content_type.contains("application/xml"))
-    {
+    if fetched_body_kind(&content_type, url).is_none() {
         return Err(format!(
             "unsupported content-type ({content_type}) fetching {url}"
         ));
@@ -3621,8 +3694,7 @@ async fn fetch_raw_page_text(url: &str) -> Result<String, String> {
             break;
         }
     }
-    let html = String::from_utf8_lossy(&bytes);
-    Ok(html_to_full_text(&html, Some(url)))
+    decode_fetched_body(&bytes, &content_type, url)
 }
 
 async fn fetch_page_text(url: &str, max_chars: usize) -> Result<String, String> {
@@ -4402,7 +4474,8 @@ mod tests {
         assert!(capability_allowed("browser_navigate", &on, &[]));
         assert!(capability_allowed("browser_snapshot", &on, &[]));
         assert!(on.any_enabled());
-        assert!(needs_approval("browser_navigate", ApprovalMode::AutoSafe));
+        assert!(!needs_approval("browser_navigate", ApprovalMode::AutoSafe));
+        assert!(needs_approval("browser_navigate", ApprovalMode::Manual));
         assert_eq!(tool_risk("browser_click"), "browser");
         let tools = openai_tools_payload(&on, &[], false);
         let names: Vec<&str> = tools
@@ -4445,6 +4518,41 @@ mod tests {
         assert!(!scrapeable_url("ftp://example.com/a"));
         assert!(!scrapeable_url("https://example.com/doc.pdf"));
         assert!(scrapeable_url("https://example.com/article"));
+        assert!(scrapeable_url("https://openrouter.ai/api/v1/models"));
+        assert!(scrapeable_url("https://example.com/models.json"));
+        assert!(scrapeable_url("https://example.com/README.md"));
+    }
+
+    #[test]
+    fn fetch_decodes_json_and_markdown() {
+        let json = decode_fetched_body(
+            br#"{"name":"tensor","ok":true}"#,
+            "application/json; charset=utf-8",
+            "https://example.com/api/v1/models",
+        )
+        .unwrap();
+        assert!(json.contains("\"name\": \"tensor\""));
+        assert!(json.contains("\"ok\": true"));
+
+        let markdown = decode_fetched_body(
+            b"# Title\n\nA paragraph with **bold** text.\n",
+            "text/markdown",
+            "https://example.com/README.md",
+        )
+        .unwrap();
+        assert_eq!(markdown, "# Title\n\nA paragraph with **bold** text.\n");
+
+        assert_eq!(
+            fetched_body_kind("application/json", "https://example.com/x"),
+            Some(FetchedBodyKind::Json)
+        );
+        assert_eq!(
+            fetched_body_kind("text/markdown; charset=utf-8", "https://example.com/x"),
+            Some(FetchedBodyKind::Text)
+        );
+        assert!(
+            decode_fetched_body(b"MZ", "application/pdf", "https://example.com/doc.pdf").is_err()
+        );
     }
 
     #[test]
