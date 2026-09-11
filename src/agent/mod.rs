@@ -238,6 +238,35 @@ fn append_steer_messages(messages: &mut Vec<Value>, steers: &[SteerPayload]) {
         }));
     }
 }
+
+async fn emit_steer_events(
+    tx: &mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    steers: &[SteerPayload],
+) -> Result<(), StreamFail> {
+    for payload in steers {
+        let mut event = json!({
+            "phase": "steer",
+            "content": payload.text,
+        });
+        if let Some(client_id) = &payload.client_id {
+            event["client_id"] = json!(client_id);
+        }
+        send_sse(tx, sse_agent(event)).await?;
+    }
+    send_sse(
+        tx,
+        sse_agent(json!({
+            "phase": "status",
+            "message": if steers.len() == 1 {
+                "Steering…".to_string()
+            } else {
+                format!("Steering ({} notes)…", steers.len())
+            },
+        })),
+    )
+    .await?;
+    Ok(())
+}
 const DEFAULT_SEARCH_RESULTS: usize = 6;
 const MAX_SEARCH_RESULTS: usize = 20;
 const MAX_PAGE_BYTES: u64 = 1_500_000;
@@ -865,28 +894,9 @@ async fn run_agent_loop(
         let steers = drain_steers(&mut steer_rx);
         if !steers.is_empty() {
             append_steer_messages(&mut request.messages, &steers);
-            for payload in &steers {
-                let mut event = json!({
-                    "phase": "steer",
-                    "content": payload.text,
-                });
-                if let Some(client_id) = &payload.client_id {
-                    event["client_id"] = json!(client_id);
-                }
-                send_sse(tx, sse_agent(event)).await?;
-            }
-            send_sse(
-                tx,
-                sse_agent(json!({
-                    "phase": "status",
-                    "message": if steers.len() == 1 {
-                        "Steering…".to_string()
-                    } else {
-                        format!("Steering ({} notes)…", steers.len())
-                    },
-                })),
-            )
-            .await?;
+            emit_steer_events(tx, &steers).await?;
+            empty_retries = 0;
+            force_retries = 0;
         }
         let force_final = request.deep_research
             && !await_clarify
@@ -1249,6 +1259,21 @@ async fn run_agent_loop(
                     crate::prompts::trim_prompt(crate::prompts::agent::NUDGE_EMPTY).to_string()
                 },
             }));
+            continue;
+        }
+
+        // Steers that arrived while this visible answer was streaming must
+        // revise the turn. Ending here dropped them on the floor.
+        let late_steers = drain_steers(&mut steer_rx);
+        if !late_steers.is_empty() {
+            request.messages.push(json!({
+                "role": "assistant",
+                "content": turn.assistant_text(),
+            }));
+            append_steer_messages(&mut request.messages, &late_steers);
+            emit_steer_events(tx, &late_steers).await?;
+            empty_retries = 0;
+            force_retries = 0;
             continue;
         }
 
@@ -3879,6 +3904,35 @@ mod tests {
 
         steer_sessions().lock().unwrap().remove(&id);
         assert_eq!(drain_steers(&mut receiver).len(), STEER_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn append_steer_messages_follow_the_draft_answer() {
+        let mut messages = vec![json!({ "role": "assistant", "content": "draft" })];
+        append_steer_messages(
+            &mut messages,
+            &[
+                SteerPayload {
+                    text: "prefer cheaper models".into(),
+                    client_id: Some("q1".into()),
+                },
+                SteerPayload {
+                    text: "v4.1 is more expensive".into(),
+                    client_id: None,
+                },
+            ],
+        );
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], "user");
+        let first = messages[1]["content"].as_str().unwrap();
+        assert!(first.contains("[USER STEER]"));
+        assert!(first.contains("prefer cheaper models"));
+        assert!(
+            messages[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains("v4.1 is more expensive")
+        );
     }
 
     #[tokio::test]

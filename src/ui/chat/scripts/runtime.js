@@ -1421,9 +1421,10 @@ function ensureStreamDom(convo, stream) {
     syncMessageSpeaker(assistantRow, { role: 'assistant' });
   }
   attachMessageActions(assistantRow);
-  const followUp = chatThread.querySelector('.msg-queued');
+  const followUp = chatThread.querySelector(':scope > .msg-queued:not(.msg-steering)');
   if (followUp) chatThread.insertBefore(assistantRow, followUp);
   else chatThread.appendChild(assistantRow);
+  if (typeof placeLiveAssistantRow === 'function') placeLiveAssistantRow(stream);
   if (priorMounts === 0) {
     queueMicrotask(() => motionEnter(assistantRow, { y: 14 }));
   }
@@ -2035,7 +2036,7 @@ async function runAssistantTurn(convo, {
     // request starts. Both continue concurrently, but title generation can no
     // longer take a single-request provider's only slot first.
     if (needsGeneratedTitle(convo)) {
-      generateConversationTitle(convo, firstUserText(convo));
+      maybeEnsureConversationTitle(convo);
     }
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -2081,6 +2082,8 @@ function finishLiveStream(convoId, stream) {
   reclaimUnappliedSteers(convoId, stream);
   renderSidebar();
   syncComposerStreamUi();
+  const convo = conversations.find((item) => item.id === convoId);
+  if (convo) maybeEnsureConversationTitle(convo);
   return true;
 }
 
@@ -2108,13 +2111,20 @@ function liveTurnSlices(convo) {
     if (messages[i]?.role === 'assistant') lastAsst = i;
   }
   const rest = messages.slice(lastAsst + 1);
+  const prompt = rest[0] || null;
+  const afterPrompt = rest.slice(1);
+  let steerCount = 0;
+  while (steerCount < afterPrompt.length && afterPrompt[steerCount]?.steered) {
+    steerCount += 1;
+  }
   return {
     lastAsst,
     head: messages.slice(0, lastAsst + 1),
-    prompt: rest[0] || null,
+    prompt,
     promptIndex: lastAsst + 1,
-    followUps: rest.slice(1),
-    followUpStart: lastAsst + 2,
+    steers: afterPrompt.slice(0, steerCount),
+    followUps: afterPrompt.slice(steerCount),
+    followUpStart: lastAsst + 2 + steerCount,
   };
 }
 
@@ -2616,6 +2626,12 @@ async function driveAssistantSse(convo, stream, response) {
       void flushPendingSteers(stream);
       if (activeId === convo.id) renderOutboundQueue(convo);
     } else if (payload.phase === 'steer' && payload.content != null) {
+      if (typeof sealSteerThinkAndDiscardDraft === 'function') {
+        sealSteerThinkAndDiscardDraft(stream, typer);
+      } else {
+        typer.clear();
+        stream.partial = '';
+      }
       const text = String(payload.content).trim();
       const clientId = payload.client_id != null ? String(payload.client_id) : '';
       const pending = stream.pendingSteers || [];
@@ -2635,6 +2651,7 @@ async function driveAssistantSse(convo, stream, response) {
       if (entry) entry.applied = true;
       applySteeredEntry(convo, stream, text, entry);
       setStreamThinkingLabel(stream, 'Steering…');
+      if (stream.dom) stream.dom.row.dataset.raw = '';
     } else if (payload.phase === 'status' && payload.message) {
       const msg = String(payload.message);
       const waiting = /waiting for (your )?approval/i.test(msg);
@@ -3235,9 +3252,9 @@ btnMic?.addEventListener('click', () => {
   toggleVoiceInput();
 });
 attachFileInput.addEventListener('change', async (event) => {
-  const files = event.target.files;
+  const files = Array.from(event.target.files || []);
   event.target.value = '';
-  if (files && files.length) await addFilesToPending(files);
+  if (files.length) await addFilesToPending(files);
 });
 composerAttachmentsEl.addEventListener('click', (event) => {
   const btn = event.target.closest('[data-attach-remove]');
@@ -3257,7 +3274,7 @@ composerAttachmentsEl.addEventListener('click', (event) => {
     if (type === 'dragleave' && composerCard.contains(event.relatedTarget)) return;
     composerCard.classList.remove('is-dragover');
     if (type === 'drop' && event.dataTransfer?.files?.length) {
-      void addFilesToPending(event.dataTransfer.files);
+      void addFilesToPending(Array.from(event.dataTransfer.files));
     }
   });
 });
@@ -4564,12 +4581,21 @@ const updateToastBody = document.getElementById('updateToastBody');
 const btnUpdateView = document.getElementById('btnUpdateView');
 const btnUpdateLater = document.getElementById('btnUpdateLater');
 const btnUpdateDismiss = document.getElementById('btnUpdateDismiss');
+const btnUpdateInstall = document.getElementById('btnUpdateInstall');
+const appUpdateCurrent = document.getElementById('appUpdateCurrent');
+const appUpdateStatus = document.getElementById('appUpdateStatus');
+const btnAppUpdateCheck = document.getElementById('btnAppUpdateCheck');
+const btnAppUpdateInstall = document.getElementById('btnAppUpdateInstall');
+const btnAppUpdateNotes = document.getElementById('btnAppUpdateNotes');
+let updateInstallInFlight = false;
+let lastAppUpdateStatus = null;
 
 function dismissedUpdateVersion() {
   return String(settings.updateDismissed || '');
 }
 
 function dismissUpdateNotice(version) {
+  if (updateInstallInFlight) return;
   const tag = String(version || '').trim();
   if (tag && settings.updateDismissed !== tag) {
     saveSettings({ ...settings, updateDismissed: tag });
@@ -4579,7 +4605,8 @@ function dismissUpdateNotice(version) {
 
 function hideUpdateToast() {
   if (!updateToast) return;
-  updateToast.classList.remove('is-visible');
+  updateToast.classList.remove('is-visible', 'is-busy');
+  updateToast.removeAttribute('aria-busy');
   window.setTimeout(() => {
     if (!updateToast.classList.contains('is-visible')) {
       updateToast.classList.add('is-hidden');
@@ -4588,39 +4615,175 @@ function hideUpdateToast() {
   }, prefersReducedMotion() ? 0 : 220);
 }
 
+function versionLabel(value) {
+  const text = String(value || '').replace(/^v/i, '');
+  return text ? ('v' + text) : 'a newer release';
+}
+
+function setUpdateInstallButtons(disabled, label) {
+  [btnUpdateInstall, btnAppUpdateInstall].forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = disabled;
+    if (label) btn.textContent = label;
+  });
+  if (btnAppUpdateCheck) btnAppUpdateCheck.disabled = disabled;
+  if (btnUpdateLater) btnUpdateLater.disabled = disabled;
+  if (btnUpdateDismiss) btnUpdateDismiss.disabled = disabled;
+}
+
+function renderAppUpdatePane(status) {
+  const currentRaw = String(status?.current || latestState?.version || '').replace(/^v/i, '');
+  const currentLabel = currentRaw ? ('v' + currentRaw) : 'this build';
+  if (appUpdateCurrent) {
+    appUpdateCurrent.textContent = currentRaw ? ('Tensor ' + currentLabel) : 'Tensor';
+  }
+  if (btnAppUpdateNotes) {
+    btnAppUpdateNotes.href = status?.release_url || 'https://github.com/jacobzymet/tensorUI/releases';
+  }
+  const canInstall = Boolean(status?.can_install && status?.update_available);
+  if (btnAppUpdateInstall) {
+    btnAppUpdateInstall.hidden = !canInstall;
+    if (!updateInstallInFlight) {
+      btnAppUpdateInstall.disabled = false;
+      btnAppUpdateInstall.textContent = 'Install and restart';
+    }
+  }
+  if (!appUpdateStatus) return;
+  if (updateInstallInFlight) return;
+  if (!status) {
+    appUpdateStatus.textContent = 'Could not reach GitHub Releases.';
+    return;
+  }
+  if (status.error) {
+    appUpdateStatus.textContent = String(status.error);
+    return;
+  }
+  const latestLabel = versionLabel(status.latest);
+  if (status.update_available) {
+    if (canInstall) {
+      appUpdateStatus.textContent = 'You’re on ' + currentLabel + '. Install ' + latestLabel + ' from GitHub and Tensor will restart.';
+    } else if (status.install_blocked) {
+      appUpdateStatus.textContent = 'You’re on ' + currentLabel + '. ' + latestLabel + ' is available. ' + String(status.install_blocked);
+    } else {
+      appUpdateStatus.textContent = 'You’re on ' + currentLabel + '. ' + latestLabel + ' is available on GitHub.';
+    }
+    return;
+  }
+  if (status.development_ahead && status.latest) {
+    appUpdateStatus.textContent = 'This build is newer than the latest GitHub Release (' + latestLabel + ').';
+    return;
+  }
+  if (status.latest) {
+    appUpdateStatus.textContent = 'You’re on the latest GitHub Release (' + latestLabel + ').';
+    return;
+  }
+  appUpdateStatus.textContent = 'No GitHub Release was found.';
+}
+
 function showUpdateToast(status) {
   if (!updateToast || !status || !status.update_available || !status.latest) return;
+  if (updateInstallInFlight) return;
   if (dismissedUpdateVersion() === String(status.latest)) return;
-  const latestLabel = 'v' + String(status.latest).replace(/^v/i, '');
-  const currentLabel = 'v' + String(status.current || '').replace(/^v/i, '');
+  const latestLabel = versionLabel(status.latest);
+  const currentLabel = versionLabel(status.current);
+  const canInstall = Boolean(status.can_install);
   if (updateToastTitle) {
     updateToastTitle.textContent = status.release_name
       ? String(status.release_name)
       : ('Tensor ' + latestLabel);
   }
   if (updateToastBody) {
-    updateToastBody.textContent =
-      'You’re on ' + currentLabel + '. ' + latestLabel + ' is available on GitHub.';
+    if (canInstall) {
+      updateToastBody.textContent =
+        'You’re on ' + currentLabel + '. Install ' + latestLabel + ' and Tensor will restart.';
+    } else if (status.install_blocked) {
+      updateToastBody.textContent =
+        'You’re on ' + currentLabel + '. ' + latestLabel + ' is available. ' + String(status.install_blocked);
+    } else {
+      updateToastBody.textContent =
+        'You’re on ' + currentLabel + '. ' + latestLabel + ' is available on GitHub.';
+    }
   }
   if (btnUpdateView && status.release_url) {
     btnUpdateView.href = status.release_url;
+    btnUpdateView.textContent = canInstall ? 'Release notes' : 'View release';
+    btnUpdateView.className = canInstall ? 'btn btn-ghost' : 'btn btn-primary';
+    btnUpdateView.hidden = false;
   }
+  if (btnUpdateInstall) {
+    btnUpdateInstall.hidden = !canInstall;
+    btnUpdateInstall.disabled = false;
+    btnUpdateInstall.textContent = 'Install and restart';
+  }
+  if (btnUpdateLater) btnUpdateLater.disabled = false;
+  if (btnUpdateDismiss) btnUpdateDismiss.disabled = false;
   updateToast.dataset.latest = String(status.latest);
   updateToast.hidden = false;
-  updateToast.classList.remove('is-hidden');
+  updateToast.classList.remove('is-hidden', 'is-busy');
+  updateToast.removeAttribute('aria-busy');
   void updateToast.offsetWidth;
   afterNextPaint(() => updateToast.classList.add('is-visible'));
 }
 
 async function checkForAppUpdate({ force = false } = {}) {
+  if (updateInstallInFlight) return lastAppUpdateStatus;
   try {
     const response = await fetch('/api/updates/check' + (force ? '?force=1' : ''));
-    if (!response.ok) return null;
+    if (!response.ok) {
+      renderAppUpdatePane(null);
+      return null;
+    }
     const status = await response.json();
+    lastAppUpdateStatus = status;
+    renderAppUpdatePane(status);
     if (status && status.update_available) showUpdateToast(status);
     return status;
   } catch {
+    renderAppUpdatePane(null);
     return null;
+  }
+}
+
+function refreshAppUpdatePane() {
+  if (lastAppUpdateStatus) renderAppUpdatePane(lastAppUpdateStatus);
+  checkForAppUpdate();
+}
+
+async function installAppUpdate() {
+  if (updateInstallInFlight) return;
+  const canInstall = Boolean(
+    (btnUpdateInstall && !btnUpdateInstall.hidden)
+    || (btnAppUpdateInstall && !btnAppUpdateInstall.hidden)
+  );
+  if (!canInstall) return;
+  updateInstallInFlight = true;
+  if (updateToast) {
+    updateToast.classList.add('is-busy');
+    updateToast.setAttribute('aria-busy', 'true');
+  }
+  const installingLabel = 'Downloading and installing ' + versionLabel(updateToast?.dataset?.latest || lastAppUpdateStatus?.latest) + '. Tensor will restart when it is done.';
+  if (updateToastBody) updateToastBody.textContent = installingLabel;
+  if (appUpdateStatus) appUpdateStatus.textContent = installingLabel;
+  setUpdateInstallButtons(true, 'Installing…');
+  try {
+    const response = await fetch('/api/updates/apply', { method: 'POST' });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error || 'Could not install the update');
+    }
+    if (updateToastBody) updateToastBody.textContent = 'Restarting Tensor…';
+    if (appUpdateStatus) appUpdateStatus.textContent = 'Restarting Tensor…';
+    setUpdateInstallButtons(true, 'Restarting…');
+  } catch (error) {
+    updateInstallInFlight = false;
+    if (updateToast) {
+      updateToast.classList.remove('is-busy');
+      updateToast.removeAttribute('aria-busy');
+    }
+    const message = error?.message || 'Could not install the update.';
+    if (updateToastBody) updateToastBody.textContent = message;
+    if (appUpdateStatus) appUpdateStatus.textContent = message;
+    setUpdateInstallButtons(false, 'Install and restart');
   }
 }
 
@@ -4629,6 +4792,17 @@ btnUpdateLater?.addEventListener('click', () => {
 });
 btnUpdateDismiss?.addEventListener('click', () => {
   dismissUpdateNotice(updateToast?.dataset?.latest);
+});
+btnUpdateInstall?.addEventListener('click', () => {
+  installAppUpdate();
+});
+btnAppUpdateInstall?.addEventListener('click', () => {
+  installAppUpdate();
+});
+btnAppUpdateCheck?.addEventListener('click', () => {
+  if (updateInstallInFlight) return;
+  if (appUpdateStatus) appUpdateStatus.textContent = 'Checking GitHub Releases…';
+  checkForAppUpdate({ force: true });
 });
 
 (async () => {

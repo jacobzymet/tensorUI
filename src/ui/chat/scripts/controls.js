@@ -16,6 +16,8 @@ function showSettingsPane(pane) {
     refreshSettingsDataSummary();
   } else if (pane === 'profiles') {
     renderProfilesSettingsList();
+  } else if (pane === 'app' && typeof refreshAppUpdatePane === 'function') {
+    refreshAppUpdatePane();
   }
 }
 
@@ -426,6 +428,29 @@ function insertAfterLiveReply(row) {
   else chatThread.appendChild(row);
 }
 
+function insertBeforeLiveReply(row) {
+  if (!chatThread || !row) return;
+  const streamRow = liveStreamRow();
+  if (streamRow) {
+    streamRow.before(row);
+    return;
+  }
+  insertAfterLiveReply(row);
+}
+
+function placeLiveAssistantRow(stream) {
+  const row = stream?.dom?.row;
+  if (!row || !chatThread || !row.isConnected) return;
+  const queued = chatThread.querySelector(':scope > .msg-queued:not(.msg-steering)');
+  if (queued) {
+    if (queued !== row && row.nextElementSibling !== queued) {
+      chatThread.insertBefore(row, queued);
+    }
+    return;
+  }
+  if (row !== chatThread.lastElementChild) chatThread.appendChild(row);
+}
+
 function appendQueuedBubble(row) {
   if (!chatThread || !row) return;
   const queued = chatThread.querySelectorAll(':scope > .msg-queued:not(.msg-steering)');
@@ -585,7 +610,7 @@ function renderPendingSteerBubble(convoId, entry) {
       '" aria-label="Cancel steer">Cancel</button>';
   row.appendChild(bubble);
   row.appendChild(meta);
-  insertAfterLiveReply(row);
+  insertBeforeLiveReply(row);
   queueMicrotask(() => motionEnter(row, { y: 8 }));
   scrollToBottom({ force: true });
 }
@@ -699,7 +724,8 @@ function applySteeredEntry(convo, stream, text, entry) {
     const idx = convo.messages.length - 1;
     const row = buildBubble('user', userMessage.content, idx, userMessage, { animate: true });
     if (pendingRow) pendingRow.replaceWith(row);
-    else insertAfterLiveReply(row);
+    else insertBeforeLiveReply(row);
+    placeLiveAssistantRow(stream);
   }
 }
 

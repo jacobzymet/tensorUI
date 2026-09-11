@@ -146,18 +146,28 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           merge-multiple: true
 
+      - name: Add installer scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp install-linux.sh install-macos.sh install.ps1 artifacts/
+          sed -i 's/\r$//' artifacts/install-linux.sh artifacts/install-macos.sh artifacts/install.ps1
+
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
           set -euo pipefail
           cd artifacts
-          sha256sum tensor-* > SHA256SUMS
+          sha256sum tensor-* install-linux.sh install-macos.sh install.ps1 > SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

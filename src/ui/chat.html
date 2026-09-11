@@ -410,7 +410,8 @@
     <p class="update-toast-body" id="updateToastBody">A newer release is on GitHub.</p>
     <div class="update-toast-actions">
       <button type="button" class="btn btn-ghost" id="btnUpdateLater">Later</button>
-      <a class="btn btn-primary" id="btnUpdateView" href="https://github.com/jacobzymet/tensorUI/releases" target="_blank" rel="noopener noreferrer">View release</a>
+      <a class="btn btn-ghost" id="btnUpdateView" href="https://github.com/jacobzymet/tensorUI/releases" target="_blank" rel="noopener noreferrer">Release notes</a>
+      <button type="button" class="btn btn-primary" id="btnUpdateInstall" hidden>Install and restart</button>
     </div>
   </div>
 
@@ -462,6 +463,10 @@
         <button type="button" class="settings-nav-btn" data-settings-pane="data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
           <span>Local data</span>
+        </button>
+        <button type="button" class="settings-nav-btn" data-settings-pane="app">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          <span>App</span>
         </button>
       </aside>
       <div class="settings-main">
@@ -1116,6 +1121,22 @@
                   <strong>Clear chats, loops, and projects</strong>
                   <p>Deletes all chats, loops, and projects from the active profile. It does not change other profiles.</p>
                   <button type="button" class="btn btn-danger-ghost" id="btnClearAllData">Clear everything</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="settings-pane" data-settings-pane="app">
+            <h2 class="settings-pane-title">App</h2>
+            <p class="settings-pane-lede">Tensor installs updates from the latest GitHub Release archive, not from the development branch.</p>
+            <div class="settings-section">
+              <h3 class="settings-section-title">Version</h3>
+              <div class="settings-data-card">
+                <strong id="appUpdateCurrent">Tensor</strong>
+                <p id="appUpdateStatus">Checking GitHub Releases…</p>
+                <div class="settings-update-actions">
+                  <button type="button" class="btn btn-outline" id="btnAppUpdateCheck">Check for updates</button>
+                  <button type="button" class="btn btn-primary" id="btnAppUpdateInstall" hidden>Install and restart</button>
+                  <a class="btn btn-ghost" id="btnAppUpdateNotes" href="https://github.com/jacobzymet/tensorUI/releases" target="_blank" rel="noopener noreferrer">Release notes</a>
                 </div>
               </div>
             </div>

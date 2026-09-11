@@ -221,7 +221,7 @@ mod tests {
             ".notifications-lede",
             ".notification-group-heading",
             ".notifications-empty",
-            ".notifications-top > .btn-outline",
+            ".notifications-top > .btn",
             ".empty-eyebrow",
             ".msg-speaker",
             ".msg-footer .msg-action",
@@ -234,6 +234,25 @@ mod tests {
         }
         assert!(CHAT_CSS.contains("color: var(--chat-background-ink);"));
         assert!(CHAT_CSS.contains("color: var(--chat-background-muted);"));
+    }
+
+    #[test]
+    fn steered_replies_print_after_user_notes() {
+        assert!(CHAT_JS.contains("function insertBeforeLiveReply("));
+        assert!(CHAT_JS.contains("function placeLiveAssistantRow("));
+        assert!(CHAT_JS.contains("function sealSteerThinkAndDiscardDraft("));
+        assert!(CHAT_JS.contains("followUpStart: lastAsst + 2 + steerCount"));
+    }
+
+    #[test]
+    fn update_toast_can_install_in_place() {
+        assert!(CHAT_HTML.contains("id=\"btnUpdateInstall\""));
+        assert!(CHAT_HTML.contains("data-settings-pane=\"app\""));
+        assert!(CHAT_HTML.contains("id=\"btnAppUpdateInstall\""));
+        assert!(CHAT_JS.contains("function installAppUpdate("));
+        assert!(CHAT_JS.contains("/api/updates/apply"));
+        assert!(CHAT_JS.contains("status.can_install"));
+        assert!(CHAT_JS.contains("function refreshAppUpdatePane("));
     }
 
     #[test]

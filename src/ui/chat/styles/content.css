@@ -746,6 +746,16 @@ html[data-theme="light"] .msg-bubble .hljs-params { color: oklch(40% 0.1 210); }
   justify-self: start;
   margin-top: 0.15rem;
 }
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+.settings-update-actions .btn {
+  margin-top: 0;
+}
 .settings-data-path {
   display: grid;
   gap: 0.55rem;

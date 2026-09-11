@@ -422,6 +422,7 @@ pub async fn serve(app: SharedApp, listener: TcpListener) -> anyhow::Result<()> 
             post(extract_attachment).layer(DefaultBodyLimit::max(ATTACHMENT_REQUEST_LIMIT)),
         )
         .route("/api/updates/check", get(check_updates))
+        .route("/api/updates/apply", post(apply_update))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&app),
             require_unlocked_api,
@@ -715,7 +716,7 @@ async fn chat_title(
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .map(str::to_string);
-    let (api_base, token, api_style, allow_insecure_tls) = {
+    let (api_base, token, api_style, allow_insecure_tls, thinking_model) = {
         let app = app.lock().map_err(|_| ApiError::lock())?;
         let providers = &app.config.providers;
         if let Some(requested) = body.remote_base.as_deref() {
@@ -726,11 +727,18 @@ async fn chat_title(
             };
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
+            let thinking_model = model.as_ref().and_then(|model_id| {
+                app.remote_model_catalog_cached().into_iter().find(|option| {
+                    option.model == *model_id
+                        && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
+                })
+            });
             (
                 api_base,
                 linked.token.clone(),
                 linked.api_style,
                 linked.allow_insecure_tls,
+                thinking_model,
             )
         } else {
             let Some(active) = providers.active() else {
@@ -740,11 +748,18 @@ async fn chat_title(
             };
             let api_base = normalize_openai_base(&active.base)
                 .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
+            let thinking_model = model.as_ref().and_then(|model_id| {
+                app.remote_model_catalog_cached().into_iter().find(|option| {
+                    option.model == *model_id
+                        && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
+                })
+            });
             (
                 api_base,
                 active.token.clone(),
                 active.api_style,
                 active.allow_insecure_tls,
+                thinking_model,
             )
         }
     };
@@ -756,6 +771,7 @@ async fn chat_title(
         model.as_deref(),
         message,
         allow_insecure_tls,
+        thinking_model.as_ref(),
     )
     .await
     .map_err(ApiError::bad_request)?;
@@ -1810,6 +1826,14 @@ async fn check_updates(
     Ok(Json(crate::updates::check(force).await))
 }
 
+async fn apply_update() -> Result<Json<crate::updates::ApplyResult>, ApiError> {
+    let result = crate::updates::apply()
+        .await
+        .map_err(ApiError::bad_request)?;
+    crate::updates::schedule_restart_after_response();
+    Ok(Json(result))
+}
+
 fn with_app(
     app: SharedApp,
     action: impl FnOnce(&mut App) -> Result<(), String>,
@@ -2102,6 +2126,7 @@ mod tests {
             (Method::POST, "/api/data/encryption/lock"),
             (Method::POST, "/api/ui/appearance"),
             (Method::GET, "/api/updates/check"),
+            (Method::POST, "/api/updates/apply"),
         ] {
             assert!(
                 !locked_api_request_allowed(&method, path),

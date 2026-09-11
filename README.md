@@ -13,7 +13,44 @@ Tensor does not bundle an inference engine. Connect Ollama, OpenAI, Gemini, Anth
 
 ## Install and run
 
-Download a platform archive from [GitHub Releases](https://github.com/jacobzymet/tensorUI/releases). Releases include a standalone `tensor` executable for Windows x64, Linux x64/ARM64, and macOS Apple Silicon/Intel.
+Install the latest GitHub Release with a platform script. The one-liners fetch the installer and the `tensor` archive from that release, not from the development branch. Archives cover Windows x64, Linux x64/ARM64, and macOS Apple Silicon/Intel.
+
+### Windows
+
+```powershell
+irm https://github.com/jacobzymet/tensorUI/releases/latest/download/install.ps1 | iex
+```
+
+The script installs `tensor.exe` to `%LOCALAPPDATA%\tensor\bin` and adds that directory to your user PATH.
+
+### macOS
+
+```sh
+curl -fsSL https://github.com/jacobzymet/tensorUI/releases/latest/download/install-macos.sh | sh
+```
+
+### Linux
+
+```sh
+curl -fsSL https://github.com/jacobzymet/tensorUI/releases/latest/download/install-linux.sh | sh
+```
+
+The Linux desktop window needs WebKitGTK 4.1 at runtime. The script prints the package to install if it is missing.
+
+Unix scripts install to `~/.local/bin` by default. Inspect a script before piping it to a shell if you prefer.
+
+Pin a version or install directory with `TENSOR_VERSION` and `TENSOR_INSTALL_DIR`, or pass `--version` and `--dir`:
+
+```sh
+curl -fsSL https://github.com/jacobzymet/tensorUI/releases/latest/download/install-linux.sh | sh -s -- --version 0.3.0
+```
+
+```powershell
+$env:TENSOR_VERSION = "0.3.0"
+irm https://github.com/jacobzymet/tensorUI/releases/latest/download/install.ps1 | iex
+```
+
+You can also download a platform archive from [GitHub Releases](https://github.com/jacobzymet/tensorUI/releases) and run the bundled executable.
 
 To run from source:
 
@@ -21,7 +58,7 @@ To run from source:
 cargo run
 ```
 
-This starts a loopback-only control plane and, by default, opens Tensor in a native desktop window.
+This starts a loopback-only control plane and, by default, opens Tensor in a native desktop window. When a newer GitHub Release exists, Tensor downloads that release archive, verifies its checksum, installs the `tensor` binary, and restarts. Source copies install into the user install folder used by the platform scripts. **Settings → App** shows the installed version, the latest GitHub Release, and an Install and restart button when an update can be applied.
 
 | Option | Behavior |
 | --- | --- |

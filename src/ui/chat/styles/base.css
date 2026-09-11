@@ -1625,8 +1625,15 @@ button.sidebar-utility-row:hover .sidebar-utility-chevron {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.45rem;
   margin-top: 0.15rem;
+}
+.update-toast.is-busy {
+  pointer-events: auto;
+}
+.update-toast.is-busy .update-toast-actions .btn:not(#btnUpdateInstall) {
+  pointer-events: none;
 }
 .update-toast-close {
   position: absolute;

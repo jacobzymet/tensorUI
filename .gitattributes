@@ -1,2 +1,7 @@
 # Bundled runtime assets retain the exact bytes recorded in their manifest.
 src/ui/vendor/ocr/* -text
+
+# Keep installers POSIX/PowerShell-safe across Windows checkouts.
+install-linux.sh text eol=lf
+install-macos.sh text eol=lf
+install.ps1 text eol=lf

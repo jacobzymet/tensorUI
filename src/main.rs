@@ -2,6 +2,7 @@ use std::{
     io::ErrorKind,
     net::SocketAddr,
     sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 
@@ -40,6 +41,10 @@ struct Cli {
     /// Deprecated alias for `--browser`.
     #[arg(long, hide = true)]
     open: bool,
+
+    /// Internal: retry the loopback bind after a self-update restart.
+    #[arg(long, hide = true)]
+    update_restart: bool,
 }
 
 fn main() -> Result<()> {
@@ -50,6 +55,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let open_browser = cli.browser || cli.open;
+    tensor::updates::cleanup_previous_install();
     let config_path = cli.config.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path)?;
 
@@ -61,12 +67,28 @@ fn main() -> Result<()> {
         .build()
         .context("could not start the async runtime")?;
 
-    let listener = match runtime.block_on(TcpListener::bind(bind)) {
-        Ok(listener) => listener,
-        Err(error) if error.kind() == ErrorKind::AddrInUse => {
-            return greet_running_instance(bind);
+    let (bind_attempts, bind_delay) = tensor::updates::bind_retry_budget(cli.update_restart);
+    let mut listener = None;
+    for attempt in 0..bind_attempts {
+        match runtime.block_on(TcpListener::bind(bind)) {
+            Ok(bound) => {
+                listener = Some(bound);
+                break;
+            }
+            Err(error) if error.kind() == ErrorKind::AddrInUse && cli.update_restart => {
+                if attempt + 1 < bind_attempts {
+                    thread::sleep(bind_delay);
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::AddrInUse => {
+                return greet_running_instance(bind);
+            }
+            Err(error) => return Err(error).with_context(|| format!("could not bind {bind}")),
         }
-        Err(error) => return Err(error).with_context(|| format!("could not bind {bind}")),
+    }
+    let listener = match listener {
+        Some(listener) => listener,
+        None => return greet_running_instance(bind),
     };
 
     let mut app = App::new(config, config_path).map_err(anyhow::Error::msg)?;
@@ -93,6 +115,10 @@ fn main() -> Result<()> {
                     server.abort();
                     result.map_err(Into::into)
                 }
+                _ = tensor::updates::wait_for_restart_request() => {
+                    server.abort();
+                    Ok(())
+                }
             }
         })
     } else {
@@ -110,6 +136,7 @@ fn main() -> Result<()> {
     if let Ok(mut app) = shared.lock() {
         app.shutdown();
     }
+    tensor::updates::spawn_restart_if_pending();
     result
 }
 

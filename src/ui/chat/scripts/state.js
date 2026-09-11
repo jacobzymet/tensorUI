@@ -1556,11 +1556,15 @@ async function requestGeneratedTitle(userText) {
 function firstUserText(convo) {
   const msg = (convo?.messages || []).find((item) => item.role === 'user');
   if (!msg) return '';
-  return parseCapabilityMentions(String(msg.content || '')).text.trim();
+  const fromContent = typeof msg.content === 'string'
+    ? parseCapabilityMentions(msg.content).text.trim()
+    : '';
+  if (fromContent && fromContent !== '(attachment)') return fromContent;
+  return parseCapabilityMentions(String(msg.displayText || '')).text.trim();
 }
 
 function needsGeneratedTitle(convo) {
-  if (!convo || convo.incognito) return false;
+  if (!convo || convo.incognito || convo._titleSettled) return false;
   if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) return false;
   if (convo.titleEdited) return false;
   const userText = firstUserText(convo);
@@ -1647,27 +1651,47 @@ function revealGeneratedTitle(convo, title) {
   if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
 }
 
+function maybeEnsureConversationTitle(convo) {
+  if (!needsGeneratedTitle(convo)) return;
+  generateConversationTitle(convo, firstUserText(convo));
+}
+
 function generateConversationTitle(convo, userText) {
   if (convo?.incognito) return;
   const text = String(userText || firstUserText(convo) || '').trim();
   if (!convo || !text) return;
-  if (convo._titleBusy) return;
+  if (convo._titleSettled) return;
+  if (convo._titleBusy) {
+    convo._titleRetry = true;
+    return;
+  }
   const requestId = (convo._titleReq = (convo._titleReq || 0) + 1);
   convo._titleBusy = true;
+  convo._titleRetry = false;
+  convo._titleAttempts = (convo._titleAttempts || 0) + 1;
   void (async () => {
     try {
       const title = await requestGeneratedTitle(text);
       if (convo._titleReq !== requestId) return;
       if (!conversations.some((item) => item.id === convo.id)) return;
-      // Ignore useless echo of the user message.
-      if (title.toLowerCase() === text.toLowerCase()) return;
+      // Ignore useless echo of the user message, but stop retrying it.
+      if (title.toLowerCase() === text.toLowerCase()) {
+        convo._titleSettled = true;
+        return;
+      }
       convo.title = title;
+      convo._titleSettled = true;
       saveConversations();
       revealGeneratedTitle(convo, title);
     } catch (error) {
       console.warn('Chat title generation failed:', error?.message || error);
+      if ((convo._titleAttempts || 0) >= 3) convo._titleSettled = true;
     } finally {
       if (convo._titleReq === requestId) convo._titleBusy = false;
+      if (convo._titleRetry) {
+        convo._titleRetry = false;
+        if (needsGeneratedTitle(convo)) generateConversationTitle(convo, text);
+      }
     }
   })();
 }

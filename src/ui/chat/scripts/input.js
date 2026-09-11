@@ -85,8 +85,9 @@ function formatUserMessageHtml(message) {
   return quoteHtml + (textHtml ? media + textHtml : media);
 }
 
-/** @type {Array<{id:string,name:string,mime:string,kind:'image'|'file',size:number,dataUrl:string,previewUrl:string}>} */
+/** @type {Array<{id:string,name:string,mime:string,kind:'image'|'file',size:number,dataUrl:string,previewUrl:string,status:string,progress:number,error:string,file?:File|null}>} */
 let pendingAttachments = [];
+const ATTACH_FILE_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
 /** Selected assistant snippet the next send will reply to. */
 let pendingReplyQuote = null;
 /** @type {{speakerId:string,speakerHandle:string}|null} */
@@ -151,7 +152,6 @@ function syncAttachButton() {
   const meta = selectedModelMeta();
   attachmentsSupported = meta.attachmentsSupported;
   modelContextLength = meta.contextLength;
-  renderPendingAttachments();
   updateSendEnabled();
   syncMicButton();
   renderPlusMenu();
@@ -371,6 +371,116 @@ function toggleVoiceInput() {
   else startVoiceInput();
 }
 
+function formatAttachSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return 'Ready';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) {
+    const kb = n / 1024;
+    return (kb < 10 ? kb.toFixed(1) : String(Math.round(kb))) + ' KB';
+  }
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function attachmentIsBusy(att) {
+  return att?.status === 'reading' || att?.status === 'extracting';
+}
+
+function attachChipClasses(att) {
+  const classes = ['composer-attach-chip'];
+  if (att.kind === 'image') classes.push('is-image');
+  if (att.status === 'error') classes.push('is-error');
+  else if (att.status === 'ready') classes.push('is-ready');
+  if (attachmentIsBusy(att)) {
+    classes.push('is-loading');
+    const pct = Number(att.progress) || 0;
+    if (!(pct > 0 && pct < 1)) classes.push('is-indeterminate');
+  }
+  return classes.join(' ');
+}
+
+function attachStatusLabel(att) {
+  if (att.status === 'error') return att.error || 'Could not read file';
+  if (att.status === 'reading') {
+    const pct = Number(att.progress) || 0;
+    if (pct > 0 && pct < 1) return 'Reading ' + Math.round(pct * 100) + '%';
+    return 'Reading…';
+  }
+  if (att.status === 'extracting') {
+    const pct = Number(att.progress) || 0;
+    if (pct > 0 && pct < 1) return 'Extracting ' + Math.round(pct * 100) + '%';
+    return 'Extracting…';
+  }
+  return formatAttachSize(att.size);
+}
+
+function pendingAttachmentChipHtml(att) {
+  const pct = Math.max(0, Math.min(1, Number(att.progress) || 0));
+  const thumb = att.kind === 'image' && att.previewUrl
+    ? '<img class="attach-thumb" src="' + escapeHtml(att.previewUrl) + '" alt="">'
+    : '<span class="attach-thumb attach-file-glyph" aria-hidden="true">' + ATTACH_FILE_GLYPH + '</span>';
+  const busy = attachmentIsBusy(att);
+  return '<div class="' + attachChipClasses(att) + '" data-attach-id="' + escapeHtml(att.id)
+    + '" style="--attach-progress:' + pct + '" aria-busy="' + (busy ? 'true' : 'false') + '">'
+    + thumb
+    + '<span class="attach-copy">'
+    + '<span class="attach-name" title="' + escapeHtml(att.name) + '">' + escapeHtml(att.name) + '</span>'
+    + '<span class="attach-status">' + escapeHtml(attachStatusLabel(att)) + '</span>'
+    + '</span>'
+    + '<button type="button" class="attach-remove" data-attach-remove="' + escapeHtml(att.id)
+    + '" aria-label="Remove ' + escapeHtml(att.name || 'attachment') + '">×</button>'
+    + '</div>';
+}
+
+function findAttachChip(id) {
+  if (!composerAttachmentsEl) return null;
+  const safe = String(id || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return composerAttachmentsEl.querySelector('[data-attach-id="' + safe + '"]');
+}
+
+function paintPendingAttachment(att) {
+  if (!att || !composerAttachmentsEl) return;
+  const el = findAttachChip(att.id);
+  if (!el) {
+    renderPendingAttachments();
+    return;
+  }
+  const pct = Math.max(0, Math.min(1, Number(att.progress) || 0));
+  el.className = attachChipClasses(att);
+  el.style.setProperty('--attach-progress', String(pct));
+  el.setAttribute('aria-busy', attachmentIsBusy(att) ? 'true' : 'false');
+  const status = el.querySelector('.attach-status');
+  if (status) status.textContent = attachStatusLabel(att);
+  if (att.kind === 'image' && att.previewUrl) {
+    let img = el.querySelector('img.attach-thumb');
+    if (!img) {
+      const glyph = el.querySelector('.attach-file-glyph');
+      img = document.createElement('img');
+      img.className = 'attach-thumb';
+      img.alt = '';
+      if (glyph) glyph.replaceWith(img);
+      else el.insertBefore(img, el.firstChild);
+    }
+    if (img.getAttribute('src') !== att.previewUrl) img.setAttribute('src', att.previewUrl);
+  }
+}
+
+function scheduleAttachmentPaint(att) {
+  if (!att || att._paintQueued) return;
+  att._paintQueued = true;
+  requestAnimationFrame(() => {
+    att._paintQueued = false;
+    if (pendingAttachments.includes(att)) paintPendingAttachment(att);
+  });
+}
+
+function setAttachmentPhase(att, status, progress) {
+  if (!att) return;
+  att.status = status;
+  if (progress != null) att.progress = progress;
+  scheduleAttachmentPaint(att);
+}
+
 function renderPendingAttachments() {
   if (!composerAttachmentsEl) return;
   if (!pendingAttachments.length) {
@@ -379,37 +489,118 @@ function renderPendingAttachments() {
     return;
   }
   composerAttachmentsEl.classList.remove('is-hidden');
-  composerAttachmentsEl.innerHTML = pendingAttachments.map((att) => {
-    const thumb = att.kind === 'image' && att.previewUrl
-      ? '<img src="' + escapeHtml(att.previewUrl) + '" alt="">'
-      : '';
-    return '<div class="composer-attach-chip" data-attach-id="' + escapeHtml(att.id) + '">'
-      + thumb
-      + '<span class="attach-name" title="' + escapeHtml(att.name) + '">' + escapeHtml(att.name) + '</span>'
-      + '<button type="button" class="attach-remove" data-attach-remove="' + escapeHtml(att.id) + '" aria-label="Remove attachment">×</button>'
-      + '</div>';
-  }).join('');
+  composerAttachmentsEl.innerHTML = pendingAttachments.map(pendingAttachmentChipHtml).join('');
+}
+
+function revokeAttachPreview(att) {
+  const url = att?.previewUrl;
+  if (url && String(url).startsWith('blob:')) {
+    try { URL.revokeObjectURL(url); } catch (_) { /* already revoked */ }
+    att.previewUrl = '';
+  }
+}
+
+function disposePendingAttachment(att) {
+  if (!att) return;
+  if (att.abort instanceof AbortController) {
+    try { att.abort.abort(); } catch (_) { /* already aborted */ }
+  }
+  revokeAttachPreview(att);
 }
 
 function clearPendingAttachments() {
+  pendingAttachments.forEach(disposePendingAttachment);
   pendingAttachments = [];
   renderPendingAttachments();
   updateSendEnabled();
 }
 
 function removePendingAttachment(id) {
+  pendingAttachments.filter((att) => att.id === id).forEach(disposePendingAttachment);
   pendingAttachments = pendingAttachments.filter((att) => att.id !== id);
   renderPendingAttachments();
   updateSendEnabled();
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
+function readAttachmentFile(att) {
+  if (!att) return Promise.reject(new Error('Missing attachment'));
+  if (att.status === 'ready' && att.dataUrl) return Promise.resolve(att);
+  if (att.readyPromise) return att.readyPromise;
+  att.readyPromise = new Promise((resolve, reject) => {
+    const file = att.file;
+    if (!file) {
+      att.status = 'error';
+      att.error = 'File is no longer available';
+      scheduleAttachmentPaint(att);
+      reject(new Error(att.error));
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Failed to read ' + (file.name || 'file')));
-    reader.readAsDataURL(file);
+    att.reader = reader;
+    const controller = att.abort instanceof AbortController ? att.abort : new AbortController();
+    att.abort = controller;
+    let settled = false;
+    const finishOk = () => {
+      if (settled) return;
+      settled = true;
+      att.dataUrl = String(reader.result || '');
+      att.progress = 1;
+      att.status = 'ready';
+      att.reader = null;
+      scheduleAttachmentPaint(att);
+      resolve(att);
+    };
+    const finishErr = (message) => {
+      if (settled) return;
+      settled = true;
+      att.reader = null;
+      if (controller.signal.aborted) {
+        reject(new Error('Cancelled'));
+        return;
+      }
+      att.status = 'error';
+      att.error = message;
+      scheduleAttachmentPaint(att);
+      reject(new Error(message));
+    };
+    if (controller.signal.aborted) {
+      finishErr('Cancelled');
+      return;
+    }
+    controller.signal.addEventListener('abort', () => {
+      try { reader.abort(); } catch (_) { /* already finished */ }
+      finishErr('Cancelled');
+    }, { once: true });
+    reader.onprogress = (event) => {
+      if (settled || controller.signal.aborted) return;
+      if (event.lengthComputable && event.total > 0) {
+        att.progress = Math.min(1, event.loaded / event.total);
+        att.status = 'reading';
+        scheduleAttachmentPaint(att);
+      }
+    };
+    reader.onload = () => finishOk();
+    reader.onerror = () => finishErr('Failed to read ' + (att.name || 'file'));
+    reader.onabort = () => finishErr('Cancelled');
+    try {
+      reader.readAsDataURL(file);
+    } catch (error) {
+      finishErr(error?.message || ('Failed to read ' + (att.name || 'file')));
+    }
   });
+  return att.readyPromise;
+}
+
+async function ensureAttachmentLoaded(att) {
+  if (att?.status === 'ready' && att.dataUrl) return att;
+  if (att?.status === 'error' && att.error && att.error !== 'Cancelled') {
+    throw new Error(att.error);
+  }
+  await readAttachmentFile(att);
+  if (att.status === 'error' || !att.dataUrl) {
+    throw new Error(att.error || ('Failed to read ' + (att.name || 'file')));
+  }
+  return att;
 }
 
 function isImageFile(file) {
@@ -441,8 +632,9 @@ async function addFilesToPending(fileList) {
     showAttachHint(attachDisabledReason() || 'Attachments are disabled.');
     return;
   }
-  const files = [...(fileList || [])].filter(Boolean);
-  let added = 0;
+  // Snapshot immediately — input.value = '' empties a live FileList.
+  const files = Array.from(fileList || []).filter(Boolean);
+  const queued = [];
   for (const file of files) {
     if (pendingAttachments.length >= ATTACHMENT_MAX_FILES) {
       showAttachHint('Attachment limit is ' + ATTACHMENT_MAX_FILES + ' files.');
@@ -458,29 +650,41 @@ async function addFilesToPending(fileList) {
     }
     // Queue anything the paperclip allows. Capability checks (vision / OCR /
     // text extraction) run at send time so the chip always appears.
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      const image = isImageFile(file);
-      pendingAttachments.push({
-        id: newId('a'),
-        name: file.name || (image ? 'image' : 'attachment'),
-        mime: file.type || (image ? 'image/png' : 'application/octet-stream'),
-        kind: image ? 'image' : 'file',
-        size: file.size || 0,
-        dataUrl,
-        previewUrl: image ? dataUrl : '',
-      });
-      added += 1;
-    } catch (error) {
-      showAttachHint(error?.message || 'Failed to read file');
+    const image = isImageFile(file);
+    let previewUrl = '';
+    if (image) {
+      try { previewUrl = URL.createObjectURL(file); } catch (_) { previewUrl = ''; }
     }
+    const att = {
+      id: newId('a'),
+      name: file.name || (image ? 'image' : 'attachment'),
+      mime: file.type || (image ? 'image/png' : 'application/octet-stream'),
+      kind: image ? 'image' : 'file',
+      size: file.size || 0,
+      file,
+      dataUrl: '',
+      previewUrl,
+      status: 'reading',
+      progress: 0,
+      error: '',
+      abort: new AbortController(),
+    };
+    pendingAttachments.push(att);
+    queued.push(att);
   }
   renderPendingAttachments();
   updateSendEnabled();
-  if (added && serverReady) {
+  if (queued.length && serverReady) {
     attachHintUntil = 0;
     updateComposerHint();
   }
+  queued.forEach((att) => {
+    void readAttachmentFile(att).catch((error) => {
+      if (String(error?.message || '') === 'Cancelled') return;
+      if (!pendingAttachments.includes(att)) return;
+      showAttachHint(error?.message || 'Failed to read file');
+    });
+  });
 }
 
 function truncateAttachmentText(text, maxChars) {
@@ -543,7 +747,12 @@ async function ocrAttachmentImage(att) {
     langPath: new URL('/ocr', location.origin).href,
     workerBlobURL: false,
     cacheMethod: 'none',
-    logger: () => {},
+    logger: (message) => {
+      if (epoch !== ocrEpoch || !pendingAttachments.includes(att)) return;
+      if (message?.status === 'recognizing text' && Number.isFinite(message.progress)) {
+        setAttachmentPhase(att, 'extracting', message.progress);
+      }
+    },
   });
   ocrWorkers.add(worker);
   let onAbort;
@@ -563,11 +772,26 @@ async function ocrAttachmentImage(att) {
   }
 }
 
+async function withAttachmentExtract(att, work) {
+  setAttachmentPhase(att, 'extracting', 0);
+  try {
+    const result = await work();
+    setAttachmentPhase(att, 'ready', 1);
+    return result;
+  } catch (error) {
+    att.status = 'error';
+    att.error = error?.message || 'Extract failed';
+    scheduleAttachmentPaint(att);
+    throw error;
+  }
+}
+
 async function prepareAttachmentsForSend(attachments) {
   const list = Array.isArray(attachments) ? attachments : [];
   const prepared = [];
   const maxChars = settings.attachmentMaxChars || DEFAULT_SETTINGS.attachmentMaxChars;
   for (const att of list) {
+    await ensureAttachmentLoaded(att);
     if (att.kind === 'image' && attachmentsSupported) {
       prepared.push({
         ...att,
@@ -583,8 +807,16 @@ async function prepareAttachmentsForSend(attachments) {
       if (!(settings.attachmentTextFallback && settings.attachmentOcr && textFallbackContextOk())) {
         throw new Error('Image attachments need a vision model, or OCR enabled in Settings → Attachments.');
       }
-      const text = truncateAttachmentText(await ocrAttachmentImage(att), maxChars);
-      if (!text) throw new Error('OCR found no text in ' + (att.name || 'image'));
+      const text = truncateAttachmentText(
+        await withAttachmentExtract(att, () => ocrAttachmentImage(att)),
+        maxChars
+      );
+      if (!text) {
+        att.status = 'error';
+        att.error = 'OCR found no text';
+        scheduleAttachmentPaint(att);
+        throw new Error('OCR found no text in ' + (att.name || 'image'));
+      }
       prepared.push({
         ...att,
         sendMode: 'text',
@@ -600,8 +832,16 @@ async function prepareAttachmentsForSend(attachments) {
       }
       throw new Error('This model cannot take that file. Enable text extraction in Settings → Attachments.');
     }
-    const text = truncateAttachmentText(await extractAttachmentText(att), maxChars);
-    if (!text) throw new Error('No extractable text in ' + (att.name || 'file'));
+    const text = truncateAttachmentText(
+      await withAttachmentExtract(att, () => extractAttachmentText(att)),
+      maxChars
+    );
+    if (!text) {
+      att.status = 'error';
+      att.error = 'No extractable text';
+      scheduleAttachmentPaint(att);
+      throw new Error('No extractable text in ' + (att.name || 'file'));
+    }
     prepared.push({
       ...att,
       sendMode: 'text',
@@ -619,7 +859,7 @@ function storedAttachmentsFromPrepared(prepared) {
     mime: att.mime,
     kind: att.kind,
     size: att.size,
-    previewUrl: att.kind === 'image' ? (att.previewUrl || att.dataUrl) : '',
+    previewUrl: att.kind === 'image' ? (att.dataUrl || '') : '',
     dataUrl: att.dataUrl,
     extractedText: att.extractedText || '',
     sendMode: att.sendMode || 'native',

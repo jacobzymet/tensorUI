@@ -694,31 +694,100 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
   color: var(--color-accent);
 }
 .composer-attach-chip {
+  --attach-progress: 0;
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  max-width: 100%;
-  padding: 0.3rem 0.5rem 0.3rem 0.35rem;
+  gap: 0.5rem;
+  max-width: min(18rem, 100%);
+  padding: 0.32rem 0.45rem 0.32rem 0.32rem;
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-pill);
   background: var(--color-paper);
   font-size: var(--text-xs);
   color: var(--color-ink-2);
+  isolation: isolate;
 }
-.composer-attach-chip img {
-  width: 1.5rem;
-  height: 1.5rem;
+.composer-attach-chip::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--attach-progress) * 100%);
+  background: color-mix(in oklch, var(--color-accent) 18%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  transition: width 120ms linear, opacity var(--dur-short) var(--ease-out);
+}
+.composer-attach-chip.is-loading::before {
+  opacity: 1;
+}
+.composer-attach-chip.is-indeterminate::before {
+  width: 42%;
+  animation: attach-indet 1.05s var(--ease-in-out) infinite;
+}
+.composer-attach-chip.is-error {
+  border-color: color-mix(in oklch, var(--color-danger) 48%, var(--color-rule));
+  background: color-mix(in oklch, var(--color-danger) 8%, var(--color-paper));
+}
+.composer-attach-chip.is-error::before {
+  opacity: 0;
+}
+.composer-attach-chip .attach-thumb,
+.composer-attach-chip .attach-copy {
+  position: relative;
+  z-index: 1;
+}
+.composer-attach-chip .attach-thumb {
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1.7rem;
   object-fit: cover;
   border-radius: var(--radius-pill);
-  background: var(--color-paper);
+  background: color-mix(in oklch, var(--color-ink) 7%, var(--color-paper));
+  color: var(--color-muted);
+}
+.composer-attach-chip.is-loading .attach-thumb {
+  opacity: 0.78;
+}
+.composer-attach-chip .attach-file-glyph {
+  display: inline-grid;
+  place-items: center;
+}
+.composer-attach-chip .attach-file-glyph svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+.composer-attach-chip .attach-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.02rem;
+  line-height: 1.2;
 }
 .composer-attach-chip .attach-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 12rem;
+  color: var(--color-ink);
+}
+.composer-attach-chip .attach-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.01em;
+  color: var(--color-muted);
+}
+.composer-attach-chip.is-error .attach-status {
+  color: var(--color-danger);
 }
 .composer-attach-chip .attach-remove {
+  position: relative;
+  z-index: 2;
   border: none;
   background: transparent;
   color: var(--color-muted);
@@ -735,6 +804,17 @@ html[data-theme="light"] .plus-menu-icon.is-agent { color: oklch(48% 0.16 305); 
 .composer-attach-chip .attach-remove:hover {
   color: var(--color-danger);
   background: color-mix(in oklch, var(--color-danger) 12%, transparent);
+}
+@keyframes attach-indet {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(280%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-attach-chip.is-indeterminate::before {
+    animation: none;
+    width: 100%;
+    opacity: 0.55;
+  }
 }
 .btn-mic {
   display: inline-flex;

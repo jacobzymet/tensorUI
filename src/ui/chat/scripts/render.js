@@ -271,6 +271,21 @@ function commitStreamBuffer(stream, typer) {
   return true;
 }
 
+/** Keep reasoning/tools; drop the superseded draft so the steered reply can print. */
+function sealSteerThinkAndDiscardDraft(stream, typer) {
+  let text = typer?.target || stream?.partial || '';
+  if (isThinkingOpen(text)) text += '</think>';
+  const { cleaned } = applyMemoryUpdateProtocol(text, { streaming: false });
+  for (const segment of parseThinkSegments(cleaned || text)) {
+    const content = String(segment.content || '');
+    if (!content.trim() || segment.type !== 'think') continue;
+    if (!stream.timeline) stream.timeline = [];
+    stream.timeline.push({ type: 'think', content });
+  }
+  if (typer && typeof typer.clear === 'function') typer.clear();
+  if (stream) stream.partial = '';
+}
+
 function isDesktopTraceLayout() {
   return TRACE_DESKTOP_MQ.matches;
 }
@@ -4288,6 +4303,11 @@ function renderThread(convo, { drainQueue = true } = {}) {
         buildBubble(slices.prompt.role, slices.prompt.content, slices.promptIndex, slices.prompt)
       );
     }
+    (slices.steers || []).forEach((message, offset) => {
+      chatThread.appendChild(
+        buildBubble(message.role, message.content, slices.promptIndex + 1 + offset, message)
+      );
+    });
     reattachLiveStream(convo);
     slices.followUps.forEach((message, offset) => {
       chatThread.appendChild(
@@ -4441,6 +4461,7 @@ function selectConversation(id) {
   if (typeof bindTerminalToSession === 'function') bindTerminalToSession();
   if (typeof renderComposerModes === 'function') renderComposerModes();
   if (typeof renderPlusMenu === 'function') renderPlusMenu();
+  if (typeof maybeEnsureConversationTitle === 'function') maybeEnsureConversationTitle(convo);
 }
 
 /** Return to the draft state — no conversation object until a message is sent. */
