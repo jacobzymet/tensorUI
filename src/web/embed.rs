@@ -83,9 +83,11 @@ mod tests {
         assert!(CHAT_JS.contains("row === active"));
         assert!(CHAT_CSS.contains(".is-pinned-prompt"));
         assert!(CHAT_CSS.contains("position: sticky;"));
-        assert!(CHAT_CSS.contains("container-type: scroll-state;"));
-        assert!(CHAT_CSS.contains("@container scroll-state(stuck: top)"));
-        assert!(CHAT_CSS.contains("-webkit-line-clamp: 2"));
+        assert!(CHAT_CSS.contains("max-height: min(42vh, calc(var(--thread-visible-h, 70dvh) - 1.25rem));"));
+        assert!(CHAT_CSS.contains("overflow-y: auto;"));
+        assert!(CHAT_JS.contains("--prompt-layout-h"));
+        assert!(!CHAT_CSS.contains("container-type: scroll-state;"));
+        assert!(!CHAT_CSS.contains("@container scroll-state(stuck: top)"));
         assert!(CHAT_CSS.contains(".msg.msg-role-user:not(.is-pinned-prompt):not(.msg-queued)"));
         assert!(CHAT_CSS.contains(":not([data-surface=\"bots\"]) #chatThread"));
         assert!(!CHAT_CSS.contains(".msg.msg-role-user.is-stuck"));
