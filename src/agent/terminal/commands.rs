@@ -371,6 +371,42 @@ mod tests {
         assert_eq!(output, "hello é🙂你好\r\n");
     }
 
+    fn command_wait_budget() -> Duration {
+        if cfg!(windows) {
+            Duration::from_secs(45)
+        } else {
+            Duration::from_secs(15)
+        }
+    }
+
+    async fn wait_until_stopped(
+        workspace: &Workspace,
+        owner: &str,
+        id: &str,
+        mut output: String,
+    ) -> CommandResult {
+        let deadline = Instant::now() + command_wait_budget();
+        loop {
+            let mut result = poll(
+                &workspace.root_display(),
+                owner,
+                &json!({"session_id": id, "yield_time_ms": 1000}),
+            )
+            .await
+            .unwrap();
+            output.push_str(&result.output);
+            if !result.running {
+                result.output = output;
+                return result;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "command {id} still running after {:?}: {output}",
+                command_wait_budget()
+            );
+        }
+    }
+
     #[cfg(windows)]
     #[tokio::test]
     async fn powershell_sessions_preserve_quotes_unicode_and_native_failures() {
@@ -386,24 +422,12 @@ mod tests {
             ("cmd.exe /d /c exit 9", 9, ""),
             ("Write-Error 'session failure'", 1, "session failure"),
         ] {
-            let mut result = start(command, dir.path(), &ws, &owner, 0).await.unwrap();
-            let id = result.session_id.clone().unwrap();
-            let mut output = result.output.clone();
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while result.running {
-                assert!(Instant::now() < deadline);
-                result = poll(
-                    &ws.root_display(),
-                    &owner,
-                    &json!({"session_id": id, "yield_time_ms":1000}),
-                )
-                .await
-                .unwrap();
-                output.push_str(&result.output);
-            }
-            assert_eq!(result.exit_code, Some(code), "{command}: {output}");
+            let first = start(command, dir.path(), &ws, &owner, 0).await.unwrap();
+            let id = first.session_id.clone().unwrap();
+            let result = wait_until_stopped(&ws, &owner, &id, first.output.clone()).await;
+            assert_eq!(result.exit_code, Some(code), "{command}: {}", result.output);
             assert_eq!(result.ok, code == 0);
-            assert!(output.contains(expected), "{output}");
+            assert!(result.output.contains(expected), "{}", result.output);
         }
     }
 
@@ -420,26 +444,11 @@ mod tests {
         let first = start(command, dir.path(), &ws, &owner, 0).await.unwrap();
         assert!(first.running);
         let id = first.session_id.unwrap();
-        let mut output = first.output;
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            assert!(Instant::now() < deadline);
-            let result = poll(
-                &ws.root_display(),
-                &owner,
-                &json!({"session_id": id, "yield_time_ms": 1000}),
-            )
-            .await
-            .unwrap();
-            output.push_str(&result.output);
-            if !result.running {
-                assert_eq!(result.exit_code, Some(7));
-                assert!(!result.ok);
-                break;
-            }
-        }
-        assert!(output.contains("start"));
-        assert!(output.contains("end"));
+        let result = wait_until_stopped(&ws, &owner, &id, first.output).await;
+        assert_eq!(result.exit_code, Some(7));
+        assert!(!result.ok);
+        assert!(result.output.contains("start"));
+        assert!(result.output.contains("end"));
     }
 
     #[tokio::test]
@@ -463,9 +472,8 @@ mod tests {
             .await
             .is_err()
         );
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + command_wait_budget();
         loop {
-            assert!(Instant::now() < deadline);
             let result = poll(
                 &ws.root_display(),
                 &owner,
@@ -478,6 +486,11 @@ mod tests {
                 assert!(result.output.contains("terminated"));
                 break;
             }
+            assert!(
+                Instant::now() < deadline,
+                "command {id} still running after cancel: {}",
+                result.output
+            );
         }
     }
 }

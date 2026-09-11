@@ -528,10 +528,20 @@ fn shell_command(command: &str) -> Command {
         use base64::Engine;
 
         // Avoid cmd.exe and a second layer of quote/$ expansion. PowerShell's
-        // encoded input is UTF-16LE, while captured output should be UTF-8.
+        // encoded input is UTF-16LE. Redirected stdout should be UTF-8.
+        // Never assign [Console]::OutputEncoding: CREATE_NO_WINDOW processes
+        // have no console, and that assignment can hang forever. -OutputFormat
+        // Text plus $ProgressPreference stop CLIXML progress records on stderr.
         let script = format!(
             "$ErrorActionPreference = 'Stop'\n\
-             $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n\
+             $ProgressPreference = 'SilentlyContinue'\n\
+             $utf8 = [System.Text.UTF8Encoding]::new($false)\n\
+             $OutputEncoding = $utf8\n\
+             try {{\n\
+               $stdout = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)\n\
+               $stdout.AutoFlush = $true\n\
+               [Console]::SetOut($stdout)\n\
+             }} catch {{}}\n\
              {command}\n\
              if (-not $?) {{ if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}; exit 1 }}"
         );
@@ -542,6 +552,8 @@ fn shell_command(command: &str) -> Command {
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
+            "-OutputFormat",
+            "Text",
             "-EncodedCommand",
             &encoded,
         ]);
