@@ -3522,6 +3522,7 @@ function syncPinnedUserPrompt() {
   if (chatShell?.dataset?.surface === 'bots') {
     rows.forEach((row) => {
       row.classList.toggle('is-pinned-prompt', false);
+      row.style.removeProperty('--prompt-layout-h');
       row.style.removeProperty('--prompt-exit-progress');
       row.style.removeProperty('--prompt-exit-opacity');
       row.style.removeProperty('--prompt-exit-shift');
@@ -3529,6 +3530,8 @@ function syncPinnedUserPrompt() {
     });
     return;
   }
+  const vis = chatViewport.clientHeight || 0;
+  if (vis) chatThread.style.setProperty('--thread-visible-h', vis + 'px');
   const pinLine = chatViewport.getBoundingClientRect().top + PROMPT_PIN_TOP_PX;
   let active = null;
   let activeIndex = -1;
@@ -3539,7 +3542,12 @@ function syncPinnedUserPrompt() {
     activeIndex = index;
   }
   rows.forEach((row) => {
-    row.classList.toggle('is-pinned-prompt', row === active);
+    const pin = row === active;
+    if (pin && !row.classList.contains('is-pinned-prompt')) {
+      row.style.setProperty('--prompt-layout-h', row.offsetHeight + 'px');
+    }
+    if (!pin) row.style.removeProperty('--prompt-layout-h');
+    row.classList.toggle('is-pinned-prompt', pin);
     row.style.removeProperty('--prompt-exit-progress');
     row.style.removeProperty('--prompt-exit-opacity');
     row.style.removeProperty('--prompt-exit-shift');
@@ -3601,11 +3609,25 @@ chatViewport.addEventListener('scroll', () => {
 
   lastViewportScrollTop = currentTop;
 }, { passive: true });
+// Keep overflowed pinned prompts scrolling locally instead of driving the thread.
+chatViewport.addEventListener('wheel', (event) => {
+  const pinBubble = event.target.closest?.('#chatThread > .msg.msg-role-user.is-pinned-prompt > .msg-bubble');
+  if (!pinBubble || pinBubble.scrollHeight <= pinBubble.clientHeight + 1) return;
+  const goingUp = event.deltaY < 0;
+  const atTop = pinBubble.scrollTop <= 0;
+  const atBottom = pinBubble.scrollTop + pinBubble.clientHeight >= pinBubble.scrollHeight - 1;
+  if ((goingUp && !atTop) || (!goingUp && !atBottom)) {
+    pinBubble.scrollTop += event.deltaY;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, { capture: true, passive: false });
 // Unpin immediately on intentional upward scroll (don't wait for layout).
 chatViewport.addEventListener('wheel', (event) => {
   if (event.deltaY < 0) unpinFromBottom();
   else if (event.deltaY > 0 && userScrollOverride) resumeBottomIntent = true;
 }, { passive: true });
+
 chatViewport.addEventListener('keydown', (event) => {
   if (event.key === 'PageUp' || event.key === 'Home' || event.key === 'ArrowUp') {
     unpinFromBottom();
