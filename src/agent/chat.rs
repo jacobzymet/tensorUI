@@ -344,10 +344,7 @@ pub async fn generate_chat_title(
         && let Some(object) = payload.as_object_mut()
     {
         object.insert("reasoning_effort".into(), serde_json::json!("none"));
-        object.insert(
-            "reasoning".into(),
-            serde_json::json!({ "effort": "none" }),
-        );
+        object.insert("reasoning".into(), serde_json::json!({ "effort": "none" }));
         object.insert(
             "chat_template_kwargs".into(),
             serde_json::json!({ "enable_thinking": false }),
@@ -405,23 +402,21 @@ async fn post_title_completion(
             || object.contains_key("chat_template_kwargs")
             || object.contains_key("thinking_effort")
     });
-    let response = if style == ApiStyle::Openai
-        && response.status().as_u16() == 400
-        && has_thinking_knobs
-    {
-        // Some strict OpenAI-compat hosts reject unknown reasoning fields —
-        // retry the same tiny request without them rather than failing the title.
-        let mut bare = payload.clone();
-        if let Some(object) = bare.as_object_mut() {
-            object.remove("reasoning_effort");
-            object.remove("chat_template_kwargs");
-            object.remove("reasoning");
-            object.remove("thinking_effort");
-        }
-        send(bare).await?
-    } else {
-        response
-    };
+    let response =
+        if style == ApiStyle::Openai && response.status().as_u16() == 400 && has_thinking_knobs {
+            // Some strict OpenAI-compat hosts reject unknown reasoning fields —
+            // retry the same tiny request without them rather than failing the title.
+            let mut bare = payload.clone();
+            if let Some(object) = bare.as_object_mut() {
+                object.remove("reasoning_effort");
+                object.remove("chat_template_kwargs");
+                object.remove("reasoning");
+                object.remove("thinking_effort");
+            }
+            send(bare).await?
+        } else {
+            response
+        };
 
     if !response.status().is_success() {
         let status = response.status();
@@ -613,30 +608,27 @@ fn sanitize_chat_title(raw: &str) -> Option<String> {
 
 fn last_short_title_fragment(text: &str) -> Option<String> {
     let compact = text.replace(['\n', '\r'], " ");
-    compact
-        .split(['.', '!', '?', ';'])
-        .rev()
-        .find_map(|part| {
-            let mut title = part
-                .trim()
-                .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#' | '“' | '”' | '‘' | '’'))
-                .trim()
-                .to_string();
-            for prefix in ["Title:", "title:", "Chat title:", "CHAT TITLE:"] {
-                if let Some(rest) = title.strip_prefix(prefix) {
-                    title = rest.trim().to_string();
-                }
+    compact.split(['.', '!', '?', ';']).rev().find_map(|part| {
+        let mut title = part
+            .trim()
+            .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#' | '“' | '”' | '‘' | '’'))
+            .trim()
+            .to_string();
+        for prefix in ["Title:", "title:", "Chat title:", "CHAT TITLE:"] {
+            if let Some(rest) = title.strip_prefix(prefix) {
+                title = rest.trim().to_string();
             }
-            title = title
-                .trim_end_matches(['.', '!', '?', ':', ';'])
-                .trim()
-                .to_string();
-            if title.is_empty() || title_looks_like_prompt_echo(&title) {
-                return None;
-            }
-            let words = title.split_whitespace().count();
-            (words > 0 && words <= 8).then_some(title)
-        })
+        }
+        title = title
+            .trim_end_matches(['.', '!', '?', ':', ';'])
+            .trim()
+            .to_string();
+        if title.is_empty() || title_looks_like_prompt_echo(&title) {
+            return None;
+        }
+        let words = title.split_whitespace().count();
+        (words > 0 && words <= 8).then_some(title)
+    })
 }
 
 fn title_looks_like_prompt_echo(title: &str) -> bool {

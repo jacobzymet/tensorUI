@@ -728,10 +728,12 @@ async fn chat_title(
             let api_base = normalize_openai_base(requested)
                 .ok_or_else(|| ApiError::bad_request("Invalid model API base."))?;
             let thinking_model = model.as_ref().and_then(|model_id| {
-                app.remote_model_catalog_cached().into_iter().find(|option| {
-                    option.model == *model_id
-                        && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
-                })
+                app.remote_model_catalog_cached()
+                    .into_iter()
+                    .find(|option| {
+                        option.model == *model_id
+                            && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
+                    })
             });
             (
                 api_base,
@@ -749,10 +751,12 @@ async fn chat_title(
             let api_base = normalize_openai_base(&active.base)
                 .ok_or_else(|| ApiError::bad_request("Active provider has an invalid base URL."))?;
             let thinking_model = model.as_ref().and_then(|model_id| {
-                app.remote_model_catalog_cached().into_iter().find(|option| {
-                    option.model == *model_id
-                        && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
-                })
+                app.remote_model_catalog_cached()
+                    .into_iter()
+                    .find(|option| {
+                        option.model == *model_id
+                            && normalize_openai_base(&option.base).as_ref() == Some(&api_base)
+                    })
             });
             (
                 api_base,
