@@ -913,6 +913,10 @@ function dispatchOutboundTurn(convo, item) {
     convo.title = provisionalTitle(
       item.displayText || (item.attachments?.[0]?.name || 'Attachment')
     );
+    if (!convo.incognito) {
+      convo.titleStatus = 'pending';
+      convo.titleAttempts = 0;
+    }
   }
   convo.updatedAt = Date.now();
   saveConversations({ immediate: true });

@@ -2745,9 +2745,14 @@ function commitConversationTitle(convo, rawTitle) {
   if (!next || next === convo.title) return false;
   convo.title = next;
   convo.titleEdited = true;
+  convo.titleStatus = 'edited';
+  convo.titleAttempts = 0;
   convo.updatedAt = Date.now();
   convo._titleReq = (convo._titleReq || 0) + 1;
   convo._titleBusy = false;
+  if (typeof clearConversationTitleTimer === 'function') {
+    clearConversationTitleTimer(convo.id);
+  }
   saveConversations();
   renderSidebar();
   if (activeId === convo.id) convoTitleEl.textContent = next;
@@ -3928,6 +3933,13 @@ async function submitEditedMessage(row, rawText) {
   convo.messages[index] = editedMessage;
   if (index === 0 && !convo.titleEdited) {
     convo.title = provisionalTitle(text || displayText);
+    convo.titleStatus = 'pending';
+    convo.titleAttempts = 0;
+    convo._titleReq = (convo._titleReq || 0) + 1;
+    convo._titleBusy = false;
+    if (typeof clearConversationTitleTimer === 'function') {
+      clearConversationTitleTimer(convo.id);
+    }
   }
   convo.updatedAt = Date.now();
   saveConversations();

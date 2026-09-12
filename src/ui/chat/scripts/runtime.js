@@ -1083,6 +1083,9 @@ function updateInferenceState(data) {
   if (typeof syncProviderSettingsFromState === 'function') {
     syncProviderSettingsFromState(data);
   }
+  if (serverReady && typeof resumePendingConversationTitles === 'function') {
+    resumePendingConversationTitles();
+  }
 }
 
 let encryptionStateSync = null;
@@ -2032,12 +2035,6 @@ async function runAssistantTurn(convo, {
       const problem = await response.json().catch(() => null);
       throw new Error((problem && problem.error) || ('Request failed with status ' + response.status));
     }
-    // The main generation has reached the provider before its small title
-    // request starts. Both continue concurrently, but title generation can no
-    // longer take a single-request provider's only slot first.
-    if (needsGeneratedTitle(convo)) {
-      maybeEnsureConversationTitle(convo);
-    }
   } catch (error) {
     if (error.name === 'AbortError') {
       if (stream.replaced) {
@@ -2083,7 +2080,9 @@ function finishLiveStream(convoId, stream) {
   renderSidebar();
   syncComposerStreamUi();
   const convo = conversations.find((item) => item.id === convoId);
-  if (convo) maybeEnsureConversationTitle(convo);
+  // Give single-slot providers time to release the completed generation
+  // before starting the small title job.
+  if (convo) maybeEnsureConversationTitle(convo, { delay: 500 });
   return true;
 }
 

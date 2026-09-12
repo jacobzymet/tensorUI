@@ -898,10 +898,18 @@ function normalizeLoopRun(raw) {
 }
 
 function normalizeConversation(convo) {
+  const normalizedTitleStatus = ['pending', 'generated', 'fallback', 'edited']
+    .includes(convo.titleStatus)
+    ? convo.titleStatus
+    : null;
   return {
     id: convo.id || newId('c'),
     title: typeof convo.title === 'string' ? convo.title : 'New chat',
     titleEdited: !!convo.titleEdited,
+    titleStatus: convo.titleEdited ? 'edited' : normalizedTitleStatus,
+    titleAttempts: typeof convo.titleAttempts === 'number' && Number.isFinite(convo.titleAttempts)
+      ? Math.max(0, Math.min(3, Math.floor(convo.titleAttempts)))
+      : 0,
     messages: Array.isArray(convo.messages) ? convo.messages : [],
     updatedAt: typeof convo.updatedAt === 'number' ? convo.updatedAt : Date.now(),
     projectId: typeof convo.projectId === 'string' ? convo.projectId : null,
@@ -1560,15 +1568,28 @@ function firstUserText(convo) {
     ? parseCapabilityMentions(msg.content).text.trim()
     : '';
   if (fromContent && fromContent !== '(attachment)') return fromContent;
-  return parseCapabilityMentions(String(msg.displayText || '')).text.trim();
+  const fromDisplay = parseCapabilityMentions(String(msg.displayText || '')).text.trim();
+  if (fromDisplay && fromDisplay !== '(attachment)') return fromDisplay;
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+  return attachments
+    .map((attachment) => {
+      const name = String(attachment?.name || '').trim();
+      const extracted = String(attachment?.extractedText || '').replace(/\s+/g, ' ').trim();
+      return [name, extracted].filter(Boolean).join(': ');
+    })
+    .filter(Boolean)
+    .join(' ')
+    .trim();
 }
 
 function needsGeneratedTitle(convo) {
-  if (!convo || convo.incognito || convo._titleSettled) return false;
+  if (!convo || convo.incognito) return false;
   if (typeof isBotsConvo === 'function' && isBotsConvo(convo)) return false;
-  if (convo.titleEdited) return false;
+  if (convo.titleEdited || convo.titleStatus === 'edited') return false;
+  if (convo.titleStatus === 'generated' || convo.titleStatus === 'fallback') return false;
   const userText = firstUserText(convo);
   if (!userText) return false;
+  if (convo.titleStatus === 'pending') return true;
   const current = String(convo.title || '').trim();
   if (!current || current === 'New chat') return true;
   // Still the provisional first-message slug — replace with a model title.
@@ -1651,47 +1672,115 @@ function revealGeneratedTitle(convo, title) {
   if (typeof refreshNotificationsUi === 'function') refreshNotificationsUi();
 }
 
-function maybeEnsureConversationTitle(convo) {
+const TITLE_RETRY_DELAYS = [500, 2000, 8000];
+/** @type {Map<string, number>} */
+const titleRetryTimers = new Map();
+
+function clearConversationTitleTimer(convoId) {
+  const timer = titleRetryTimers.get(convoId);
+  if (timer) window.clearTimeout(timer);
+  titleRetryTimers.delete(convoId);
+}
+
+function fallbackConversationTitle(convo, userText) {
+  let text = String(userText || firstUserText(convo) || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[#>*`_\-\s]+/, '')
+    .trim();
+  text = text.replace(/^please\s+/i, '');
+  text = text.replace(
+    /^(?:can you\s+|could you\s+|would you\s+|help me\s+|i (?:want|need) (?:you )?to\s+)/i,
+    ''
+  );
+  const words = text.split(/\s+/).filter(Boolean).slice(0, 6);
+  const title = words.join(' ')
+    .replace(/[.,!?;:]+$/g, '')
+    .trim();
+  const bounded = Array.from(title || 'New chat').slice(0, 60).join('').trim();
+  return bounded || 'New chat';
+}
+
+function conversationTitleProviderBusy(convo) {
+  if (!convo) return false;
+  if (typeof activeStreams !== 'undefined' && activeStreams.size > 0) return true;
+  if (typeof outboundStarting !== 'undefined' && outboundStarting.size > 0) return true;
+  if (typeof isConvoBusy === 'function' && isConvoBusy(convo.id)) return true;
+  return false;
+}
+
+function maybeEnsureConversationTitle(convo, { delay } = {}) {
   if (!needsGeneratedTitle(convo)) return;
-  generateConversationTitle(convo, firstUserText(convo));
+  if (!convo.titleStatus) {
+    convo.titleStatus = 'pending';
+    convo.titleAttempts = 0;
+    saveConversations();
+  }
+  if (convo._titleBusy || titleRetryTimers.has(convo.id)) return;
+  const attempt = Math.max(0, Math.min(2, Number(convo.titleAttempts) || 0));
+  const wait = Number.isFinite(delay) ? Math.max(0, delay) : TITLE_RETRY_DELAYS[attempt];
+  const timer = window.setTimeout(() => {
+    titleRetryTimers.delete(convo.id);
+    if (!needsGeneratedTitle(convo)) return;
+    if (conversationTitleProviderBusy(convo)) {
+      maybeEnsureConversationTitle(convo, { delay: TITLE_RETRY_DELAYS[0] });
+      return;
+    }
+    generateConversationTitle(convo, firstUserText(convo));
+  }, wait);
+  titleRetryTimers.set(convo.id, timer);
+}
+
+function resumePendingConversationTitles() {
+  if (!storageReady || !serverReady || diskEncryptionLocked()) return;
+  let offset = 0;
+  for (const convo of conversations) {
+    if (!needsGeneratedTitle(convo)) continue;
+    maybeEnsureConversationTitle(convo, { delay: TITLE_RETRY_DELAYS[0] + offset });
+    offset += 250;
+  }
 }
 
 function generateConversationTitle(convo, userText) {
   if (convo?.incognito) return;
   const text = String(userText || firstUserText(convo) || '').trim();
   if (!convo || !text) return;
-  if (convo._titleSettled) return;
   if (convo._titleBusy) {
-    convo._titleRetry = true;
     return;
   }
   const requestId = (convo._titleReq = (convo._titleReq || 0) + 1);
   convo._titleBusy = true;
-  convo._titleRetry = false;
-  convo._titleAttempts = (convo._titleAttempts || 0) + 1;
+  convo.titleStatus = 'pending';
+  convo.titleAttempts = (convo.titleAttempts || 0) + 1;
+  saveConversations();
   void (async () => {
+    let retry = false;
     try {
       const title = await requestGeneratedTitle(text);
       if (convo._titleReq !== requestId) return;
       if (!conversations.some((item) => item.id === convo.id)) return;
-      // Ignore useless echo of the user message, but stop retrying it.
       if (title.toLowerCase() === text.toLowerCase()) {
-        convo._titleSettled = true;
-        return;
+        throw new Error('model echoed the title source');
       }
       convo.title = title;
-      convo._titleSettled = true;
+      convo.titleStatus = 'generated';
       saveConversations();
       revealGeneratedTitle(convo, title);
     } catch (error) {
       console.warn('Chat title generation failed:', error?.message || error);
-      if ((convo._titleAttempts || 0) >= 3) convo._titleSettled = true;
+      if (convo._titleReq !== requestId) return;
+      if ((convo.titleAttempts || 0) >= TITLE_RETRY_DELAYS.length) {
+        const fallback = fallbackConversationTitle(convo, text);
+        convo.title = fallback;
+        convo.titleStatus = 'fallback';
+        saveConversations();
+        revealGeneratedTitle(convo, fallback);
+      } else {
+        saveConversations();
+        retry = true;
+      }
     } finally {
       if (convo._titleReq === requestId) convo._titleBusy = false;
-      if (convo._titleRetry) {
-        convo._titleRetry = false;
-        if (needsGeneratedTitle(convo)) generateConversationTitle(convo, text);
-      }
+      if (retry && convo._titleReq === requestId) maybeEnsureConversationTitle(convo);
     }
   })();
 }

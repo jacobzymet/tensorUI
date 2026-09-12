@@ -20,9 +20,19 @@ const runtime = readFileSync(
   join(__dirname, '../src/ui/chat/scripts/runtime.js'), 'utf8'
 ).replace(/\r\n/g, '\n');
 
+const chatState = readFileSync(
+  join(__dirname, '../src/ui/chat/scripts/state.js'), 'utf8'
+).replace(/\r\n/g, '\n');
+
 function runtimeDeclaration(name) {
   const match = runtime.match(new RegExp('^(?:async )?function ' + name + '\\([\\s\\S]*?^\\}$', 'm'));
   assert.ok(match, 'missing function ' + name);
+  return match[0];
+}
+
+function stateDeclaration(name) {
+  const match = chatState.match(new RegExp('^function ' + name + '\\([\\s\\S]*?^\\}$', 'm'));
+  assert.ok(match, 'missing state function ' + name);
   return match[0];
 }
 
@@ -45,11 +55,16 @@ function resumeHarness() {
     scrollToBottom() {},
     reclaimUnappliedSteers() {},
     maybeSendNextQueued() {},
+    maybeEnsureConversationTitle() {},
     commitLiveAssistant(convo, message) {
       convo.messages.push(message);
       return message;
     },
     discardLiveStreamRow(stream) { stream.discarded = true; },
+    dropLiveSubscriber(convoId, stream) {
+      stream.discarded = true;
+      state.activeStreams.delete(convoId);
+    },
     whenAborted(signal) {
       if (!signal) return new Promise(() => {});
       if (signal.aborted) return Promise.resolve();
@@ -160,12 +175,92 @@ test('a finished server turn replaces a stuck browser stream with one replay', a
   assert.equal(state.activeStreams.get('chat-1'), replay);
 });
 
-test('parallel title generation starts only after the main response is accepted', () => {
+test('title generation waits until the main response finishes', () => {
   const turn = runtimeDeclaration('runAssistantTurn');
-  const accepted = turn.indexOf('if (!response.ok)');
-  const title = turn.indexOf('generateConversationTitle(convo, firstUserText(convo))');
-  const stream = turn.indexOf('await driveAssistantSse(convo, stream, response)', title);
-  assert.ok(accepted >= 0 && title > accepted && stream > title);
+  const finish = runtimeDeclaration('finishLiveStream');
+  assert.equal(turn.includes('maybeEnsureConversationTitle(convo)'), false);
+  assert.match(finish, /maybeEnsureConversationTitle\(convo, \{ delay: 500 \}\)/);
+});
+
+test('title fallback is bounded to six useful words', () => {
+  const state = vm.createContext({
+    firstUserText: () => '',
+  });
+  vm.runInContext(stateDeclaration('fallbackConversationTitle'), state);
+  assert.equal(
+    state.fallbackConversationTitle(null, 'Please help me debug unreliable automatic title generation today'),
+    'debug unreliable automatic title generation today'
+  );
+});
+
+test('attachment-only chats provide title source text', () => {
+  const state = vm.createContext({
+    parseCapabilityMentions(value) {
+      return { text: String(value || '').trim() };
+    },
+  });
+  vm.runInContext(stateDeclaration('firstUserText'), state);
+  const convo = {
+    messages: [{
+      role: 'user',
+      content: '(attachment)',
+      attachments: [{ name: 'report.pdf', extractedText: 'Quarterly revenue analysis' }],
+    }],
+  };
+  assert.equal(state.firstUserText(convo), 'report.pdf: Quarterly revenue analysis');
+});
+
+test('failed title requests retry before applying a deterministic fallback', async () => {
+  const timers = [];
+  const convo = {
+    id: 'chat-title',
+    title: 'Original provisional title',
+    titleStatus: 'pending',
+    titleAttempts: 0,
+    messages: [{ role: 'user', content: 'Please explain automatic title generation reliability' }],
+  };
+  const state = vm.createContext({
+    conversations: [convo],
+    window: {
+      setTimeout(callback) {
+        timers.push(callback);
+        return timers.length;
+      },
+      clearTimeout() {},
+    },
+    requestGeneratedTitle: async () => { throw new Error('provider busy'); },
+    firstUserText: () => convo.messages[0].content,
+    needsGeneratedTitle: (item) => item.titleStatus === 'pending',
+    saveConversations() {},
+    revealGeneratedTitle() {},
+    console: { warn() {} },
+  });
+  vm.runInContext(
+    'const TITLE_RETRY_DELAYS = [500, 2000, 8000]; const titleRetryTimers = new Map();',
+    state
+  );
+  for (const name of [
+    'fallbackConversationTitle',
+    'conversationTitleProviderBusy',
+    'maybeEnsureConversationTitle',
+    'generateConversationTitle',
+  ]) vm.runInContext(stateDeclaration(name), state);
+
+  state.generateConversationTitle(convo, convo.messages[0].content);
+  await new Promise(setImmediate);
+  assert.equal(convo.titleAttempts, 1);
+  assert.equal(timers.length, 1);
+
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.equal(convo.titleAttempts, 2);
+  assert.equal(timers.length, 1);
+
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.equal(convo.titleAttempts, 3);
+  assert.equal(convo.titleStatus, 'fallback');
+  assert.equal(convo.title, 'explain automatic title generation reliability');
 });
 
 test('Stop invalidates a pending start without clearing a newer attempt', () => {

@@ -356,14 +356,18 @@ pub async fn generate_chat_title(
         ApiStyle::Openai => extract_openai_title_text(&value),
         ApiStyle::Anthropic => extract_anthropic_text(&value),
     };
-    sanitize_chat_title(&raw)
+    let candidate = sanitize_chat_title(&raw)
         .or_else(|| sanitize_chat_title(&extract_openai_reasoning_text(&value)))
         .ok_or_else(|| {
             format!(
                 "model returned an empty title (raw={})",
                 truncate_for_error(&raw)
             )
-        })
+        })?;
+    if normalized_title_text(&raw) == normalized_title_text(&snippet) {
+        return Err("model echoed the title source".into());
+    }
+    Ok(candidate)
 }
 
 async fn post_title_completion(
@@ -585,11 +589,12 @@ fn sanitize_chat_title(raw: &str) -> Option<String> {
         if title.is_empty() || title_looks_like_prompt_echo(&title) {
             continue;
         }
-        // Titles are ≤6 words by contract; allow a little slack, reject prose.
-        if title.split_whitespace().count() > 8 {
+        // Preserve the trailing-fragment recovery for prose followed by a
+        // title, but truncate a plain overlong title instead of discarding it.
+        if title.split_whitespace().count() > 8 && title.contains(['.', '!', '?', ';']) {
             continue;
         }
-        candidates.push(title);
+        candidates.push(truncate_title_words(&title));
     }
     if candidates.is_empty()
         && let Some(fragment) = last_short_title_fragment(&cleaned)
@@ -597,13 +602,29 @@ fn sanitize_chat_title(raw: &str) -> Option<String> {
         candidates.push(fragment);
     }
     // Prefer the last short line — models often put the title after leftover prose.
-    let title = candidates.pop()?;
+    let title = truncate_title_words(&candidates.pop()?);
     let truncated: String = title.chars().take(60).collect();
     Some(if truncated.chars().count() < title.chars().count() {
         format!("{}…", truncated.trim_end())
     } else {
         truncated
     })
+}
+
+fn truncate_title_words(title: &str) -> String {
+    title
+        .split_whitespace()
+        .take(6)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalized_title_text(text: &str) -> String {
+    strip_think_blocks(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn last_short_title_fragment(text: &str) -> Option<String> {
@@ -668,6 +689,17 @@ mod title_tests {
         assert_eq!(
             sanitize_chat_title("Title: Debugging SSE streams.").as_deref(),
             Some("Debugging SSE streams")
+        );
+    }
+
+    #[test]
+    fn truncates_overlong_title_instead_of_dropping_it() {
+        assert_eq!(
+            sanitize_chat_title(
+                "Debugging unreliable automatic conversation title generation behavior"
+            )
+            .as_deref(),
+            Some("Debugging unreliable automatic conversation title generation")
         );
     }
 
